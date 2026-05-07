@@ -1,0 +1,7 @@
+services:
+  test:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: test
+    container_name: assinafy-webforms-java-client-sdk-tests
