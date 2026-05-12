@@ -19,47 +19,113 @@ public final class AssignmentResource extends BaseResource {
         super(httpClient, baseUrl, defaultAccountId);
     }
 
+    /** {@code POST /documents/{documentId}/assignments} — create an assignment (virtual or collect). */
     public Assignment create(String documentId, CreateAssignmentPayload payload) {
         String docId = requireId(documentId, "Document ID");
         Map<String, Object> body = buildPayload(payload, false);
         return httpPost("/documents/" + docId + "/assignments", body, Assignment.class);
     }
 
+    /** {@code POST /documents/{documentId}/assignments/estimate-cost} — estimate cost without creating. */
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public Map<String, Object> estimateCost(String documentId, CreateAssignmentPayload payload) {
         String docId = requireId(documentId, "Document ID");
         Map<String, Object> body = buildPayload(payload, true);
-        return httpPost("/documents/" + docId + "/assignments/estimate-cost", body, Map.class);
+        return (Map<String, Object>) httpPost("/documents/" + docId + "/assignments/estimate-cost",
+                body, Map.class);
     }
 
+    /**
+     * {@code GET /documents/{documentId}/assignments/{assignmentId}} — signer-facing assignment lookup.
+     * The {@code signer-access-code} is passed as a query parameter.
+     */
+    public Assignment get(String documentId, String assignmentId, String signerAccessCode) {
+        String docId = requireId(documentId, "Document ID");
+        String asgId = requireId(assignmentId, "Assignment ID");
+        return httpGet("/documents/" + docId + "/assignments/" + asgId,
+                requireAccessCodeQuery(signerAccessCode), Assignment.class);
+    }
+
+    /**
+     * {@code POST /documents/{documentId}/assignments/{assignmentId}} — sign a document for the
+     * collect-method flow. {@code entries} is an array of {@code {itemId, fieldId, pageId, value}} objects.
+     * The API returns an empty envelope payload on success; failure cases are surfaced as exceptions.
+     */
+    public void sign(String documentId, String assignmentId, String signerAccessCode,
+            List<Map<String, Object>> entries) {
+        String docId = requireId(documentId, "Document ID");
+        String asgId = requireId(assignmentId, "Assignment ID");
+        if (entries == null || entries.isEmpty()) {
+            throw new ValidationException("At least one sign entry is required");
+        }
+        httpPostVoid("/documents/" + docId + "/assignments/" + asgId,
+                entries, requireAccessCodeQuery(signerAccessCode));
+    }
+
+    /**
+     * {@code PUT /documents/{documentId}/assignments/{assignmentId}/reject} — signer declines the assignment.
+     */
+    public void decline(String documentId, String assignmentId, String signerAccessCode,
+            String declineReason) {
+        String docId = requireId(documentId, "Document ID");
+        String asgId = requireId(assignmentId, "Assignment ID");
+        if (declineReason == null || declineReason.isBlank()) {
+            throw new ValidationException("Decline reason is required");
+        }
+        httpPutVoid("/documents/" + docId + "/assignments/" + asgId + "/reject",
+                Map.of("decline_reason", declineReason),
+                requireAccessCodeQuery(signerAccessCode));
+    }
+
+    /** {@code PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration} */
     public Assignment resetExpiration(String documentId, String assignmentId, String expiresAt) {
         String docId = requireId(documentId, "Document ID");
         String asgId = requireId(assignmentId, "Assignment ID");
+        if (expiresAt == null || expiresAt.isBlank()) {
+            throw new ValidationException("expires_at is required");
+        }
         return httpPut("/documents/" + docId + "/assignments/" + asgId + "/reset-expiration",
                 Map.of("expires_at", expiresAt), Assignment.class);
     }
 
+    /** {@code PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend} */
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public Map<String, Object> resendNotification(String documentId, String assignmentId, String signerId) {
         String docId = requireId(documentId, "Document ID");
         String asgId = requireId(assignmentId, "Assignment ID");
         String sid = requireId(signerId, "Signer ID");
-        return httpPut("/documents/" + docId + "/assignments/" + asgId + "/signers/" + sid + "/resend",
+        return (Map<String, Object>) httpPut(
+                "/documents/" + docId + "/assignments/" + asgId + "/signers/" + sid + "/resend",
                 null, Map.class);
     }
 
+    /**
+     * {@code POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost}
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public Map<String, Object> estimateResendCost(String documentId, String assignmentId, String signerId) {
         String docId = requireId(documentId, "Document ID");
         String asgId = requireId(assignmentId, "Assignment ID");
         String sid = requireId(signerId, "Signer ID");
-        return httpPost("/documents/" + docId + "/assignments/" + asgId + "/signers/" + sid
-                + "/estimate-resend-cost", null, Map.class);
+        return (Map<String, Object>) httpPost(
+                "/documents/" + docId + "/assignments/" + asgId + "/signers/" + sid + "/estimate-resend-cost",
+                null, Map.class);
     }
 
+    /** {@code GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications} */
     public List<WhatsappNotification> whatsappNotifications(String documentId, String assignmentId) {
         String docId = requireId(documentId, "Document ID");
         String asgId = requireId(assignmentId, "Assignment ID");
         List<WhatsappNotification> result = httpGet("/documents/" + docId + "/assignments/" + asgId
                 + "/whatsapp-notifications", new TypeReference<List<WhatsappNotification>>() {});
         return result != null ? result : List.of();
+    }
+
+    private Map<String, String> requireAccessCodeQuery(String signerAccessCode) {
+        if (signerAccessCode == null || signerAccessCode.isBlank()) {
+            throw new ValidationException("Signer access code is required");
+        }
+        return Map.of("signer-access-code", signerAccessCode);
     }
 
     private static Map<String, Object> buildPayload(CreateAssignmentPayload payload, boolean allowSignersWithoutId) {

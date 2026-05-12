@@ -101,13 +101,48 @@ public abstract class BaseResource {
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    protected <T> T httpPut(String path, Object body, Class<T> dataType, Map<String, String> queryParams) {
+        Request request = buildRequest("PUT", path, body, queryParams);
+        return execute(request, MAPPER.getTypeFactory().constructType(dataType));
+    }
+
     protected void httpDelete(String path) {
         Request request = buildRequest("DELETE", path, null);
         executeVoid(request);
     }
 
+    protected void httpPostVoid(String path, Object body) {
+        executeVoid(buildRequest("POST", path, body));
+    }
+
+    protected void httpPostVoid(String path, Object body, Map<String, String> queryParams) {
+        executeVoid(buildRequest("POST", path, body, queryParams));
+    }
+
+    protected void httpPutVoid(String path, Object body) {
+        executeVoid(buildRequest("PUT", path, body));
+    }
+
+    protected void httpPutVoid(String path, Object body, Map<String, String> queryParams) {
+        executeVoid(buildRequest("PUT", path, body, queryParams));
+    }
+
     protected byte[] httpGetBinary(String path) {
-        Request request = buildGetRequest(path, Collections.emptyMap());
+        return httpGetBinary(path, Collections.emptyMap());
+    }
+
+    protected byte[] httpGetBinary(String path, Map<String, String> queryParams) {
+        Request request = buildGetRequest(path, queryParams);
+        return executeBinary(request);
+    }
+
+    protected byte[] httpPostBinary(String path, RequestBody body) {
+        return httpPostBinary(path, Collections.emptyMap(), body);
+    }
+
+    protected byte[] httpPostBinary(String path, Map<String, String> queryParams, RequestBody body) {
+        HttpUrl url = buildUrl(path, queryParams);
+        Request request = new Request.Builder().url(url).post(body).build();
         return executeBinary(request);
     }
 
@@ -141,18 +176,22 @@ public abstract class BaseResource {
     }
 
     private Request buildGetRequest(String path, Map<String, String> queryParams) {
-        HttpUrl url = HttpUrl.get(baseUrl + path);
+        return new Request.Builder().url(buildUrl(path, queryParams)).get().build();
+    }
+
+    private HttpUrl buildUrl(String path, Map<String, String> queryParams) {
+        HttpUrl base = HttpUrl.get(baseUrl + path);
         Map<String, String> normalizedParams = normalizeQueryParams(queryParams);
-        if (!normalizedParams.isEmpty()) {
-            HttpUrl.Builder builder = url.newBuilder();
-            for (Map.Entry<String, String> entry : normalizedParams.entrySet()) {
-                if (entry.getValue() != null) {
-                    builder.addQueryParameter(entry.getKey(), entry.getValue());
-                }
-            }
-            url = builder.build();
+        if (normalizedParams.isEmpty()) {
+            return base;
         }
-        return new Request.Builder().url(url).get().build();
+        HttpUrl.Builder builder = base.newBuilder();
+        for (Map.Entry<String, String> entry : normalizedParams.entrySet()) {
+            if (entry.getValue() != null) {
+                builder.addQueryParameter(entry.getKey(), entry.getValue());
+            }
+        }
+        return builder.build();
     }
 
     private Map<String, String> normalizeQueryParams(Map<String, String> queryParams) {
@@ -194,17 +233,8 @@ public abstract class BaseResource {
         } else if ("POST".equals(method) || "PUT".equals(method)) {
             requestBody = RequestBody.create("", JSON);
         }
-        HttpUrl url = HttpUrl.get(baseUrl + path);
-        Map<String, String> normalizedParams = normalizeQueryParams(queryParams);
-        if (!normalizedParams.isEmpty()) {
-            HttpUrl.Builder builder = url.newBuilder();
-            for (Map.Entry<String, String> entry : normalizedParams.entrySet()) {
-                builder.addQueryParameter(entry.getKey(), entry.getValue());
-            }
-            url = builder.build();
-        }
         return new Request.Builder()
-                .url(url)
+                .url(buildUrl(path, queryParams))
                 .method(method, requestBody)
                 .build();
     }

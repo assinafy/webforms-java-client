@@ -238,9 +238,38 @@ public final class DocumentResource extends BaseResource {
         return estimateCostFromTemplate(templateId, signers, null);
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public Map<String, Object> verify(String hash) {
         String h = requireId(hash, "Signature hash");
-        return httpGet("/documents/" + h + "/verify", Map.class);
+        return (Map<String, Object>) httpGet("/documents/" + h + "/verify", Map.class);
+    }
+
+    /**
+     * {@code GET /public/documents/{document_id}} — unauthenticated lookup that returns minimal document
+     * info ({@code id}, {@code name}, {@code page_count}, {@code created_by}). Useful for signer landing pages.
+     */
+    public DocumentDetails getPublic(String documentId) {
+        String id = requireId(documentId, "Document ID");
+        return httpGet("/public/documents/" + id, DocumentDetails.class);
+    }
+
+    /**
+     * {@code PUT /public/documents/{document_id}/send-token} — request that a fresh signing token be sent
+     * to the given recipient. Unauthenticated endpoint used by signer landing pages.
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public Map<String, Object> sendToken(String documentId, String recipient, String channel) {
+        String id = requireId(documentId, "Document ID");
+        if (recipient == null || recipient.isBlank()) {
+            throw new ValidationException("Recipient is required");
+        }
+        if (channel == null || channel.isBlank()) {
+            throw new ValidationException("Channel is required");
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("recipient", recipient);
+        body.put("channel", channel);
+        return (Map<String, Object>) httpPut("/public/documents/" + id + "/send-token", body, Map.class);
     }
 
     public boolean isFullySigned(String documentId) {

@@ -223,6 +223,66 @@ Map<String, Object> cost = client.documents.estimateCostFromTemplate(
     List.of(new TemplateSigner(firstRole.getId(), signerId)));
 ```
 
+## Public (Unauthenticated) Document Endpoints
+
+```java
+// Minimal info for the signer landing page (no API key required)
+DocumentDetails publicInfo = client.documents.getPublic(documentId);
+
+// Re-send the verification token to the signer
+client.documents.sendToken(documentId, "signer@example.com", "email");
+```
+
+## Signer-Facing Assignment Operations
+
+These endpoints are authorised via a short-lived `signer-access-code` query parameter rather than
+the account-level API key.
+
+```java
+// Fetch the assignment as it appears to the signer
+Assignment assignment = client.assignments.get(documentId, assignmentId, signerAccessCode);
+
+// Sign (collect method) — entries is an array of {itemId, fieldId, pageId, value}
+client.assignments.sign(documentId, assignmentId, signerAccessCode, List.of(
+    Map.of(
+        "itemId", "item-1",
+        "fieldId", "field-1",
+        "pageId", "page-1",
+        "value", "John Doe"
+    )
+));
+
+// Decline
+client.assignments.decline(documentId, assignmentId, signerAccessCode, "Not happy with clause 3");
+```
+
+## Signer Self-Service
+
+```java
+// Profile, terms, verification
+Signer self = client.signerSelf.getSelf(signerAccessCode);
+client.signerSelf.acceptTerms(signerAccessCode);
+client.signerSelf.verifyEmail("123456", signerAccessCode);
+
+// Required before signing a virtual-method document
+client.signerSelf.confirmSignerData(documentId, signerAccessCode,
+    new ConfirmSignerDataPayload()
+        .setEmail("signer@example.com")
+        .setWhatsappPhoneNumber("+5548999990000")
+        .setHasAcceptedTerms(true));
+
+// Signature image upload/download (PNG vs JPEG detected from the file header)
+client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
+client.signerSelf.uploadSignature(signerAccessCode, initialBytes, "initial");
+byte[] signature = client.signerSelf.downloadSignature(signerAccessCode, "signature");
+
+// Multi-document flows
+DocumentDetails current = client.signerSelf.getCurrentDocument(signerId, signerAccessCode);
+PaginatedResult<DocumentDetails> all = client.signerSelf.listDocuments(signerId, signerAccessCode);
+client.signerSelf.signMultiple(signerAccessCode, List.of(doc1.getId(), doc2.getId()));
+client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Reason");
+```
+
 ## Error Handling
 
 ```java

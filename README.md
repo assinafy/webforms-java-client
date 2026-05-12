@@ -17,14 +17,14 @@ Covers the documented document, signer, assignment, field definition, webhook, t
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:1.2.0'
+implementation 'com.assinafy:webforms-java-client-sdk:1.3.0'
 ```
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full setup instructions.
@@ -123,6 +123,10 @@ SigningProgress progress = client.documents.getSigningProgress(doc.getId());
 
 // Delete
 client.documents.delete(doc.getId());
+
+// Public (unauthenticated) — minimal info for signer landing pages
+DocumentDetails publicInfo = client.documents.getPublic(doc.getId());
+client.documents.sendToken(doc.getId(), "signer@example.com", "email");
 ```
 
 ### Signers
@@ -155,6 +159,52 @@ client.assignments.resendNotification(doc.getId(), assignment.getId(), signer1.g
 client.assignments.resetExpiration(doc.getId(), assignment.getId(), "2025-06-30T00:00:00Z");
 client.assignments.estimateResendCost(doc.getId(), assignment.getId(), signer1.getId());
 client.assignments.whatsappNotifications(doc.getId(), assignment.getId());
+```
+
+### Assignments (signer-facing)
+
+Endpoints authorised via a short-lived `signer-access-code`. These are typically called from a
+signer landing page rather than from the account-holder's server.
+
+```java
+// Fetch the assignment the signer is being asked to complete
+Assignment a = client.assignments.get(doc.getId(), assignmentId, signerAccessCode);
+
+// Submit collect-method field values
+client.assignments.sign(doc.getId(), assignmentId, signerAccessCode, List.of(
+    Map.of(
+        "itemId", "item-1",
+        "fieldId", "field-1",
+        "pageId", "page-1",
+        "value", "John Doe"
+    )
+));
+
+// Decline the assignment
+client.assignments.decline(doc.getId(), assignmentId, signerAccessCode, "Not happy with clause 3");
+```
+
+### Signer Self-Service
+
+```java
+// Profile and terms
+Signer self = client.signerSelf.getSelf(signerAccessCode);
+client.signerSelf.acceptTerms(signerAccessCode);
+
+// Email/WhatsApp verification flow
+client.signerSelf.verifyEmail("123456", signerAccessCode);
+client.signerSelf.confirmSignerData(doc.getId(), signerAccessCode,
+    new ConfirmSignerDataPayload().setEmail("a@b.com").setHasAcceptedTerms(true));
+
+// Signature image upload (image type auto-detected as PNG or JPEG)
+client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
+byte[] saved = client.signerSelf.downloadSignature(signerAccessCode, "signature");
+
+// Multi-document signer flows
+DocumentDetails current = client.signerSelf.getCurrentDocument(signerId, signerAccessCode);
+PaginatedResult<DocumentDetails> mine = client.signerSelf.listDocuments(signerId, signerAccessCode);
+client.signerSelf.signMultiple(signerAccessCode, List.of(doc1.getId(), doc2.getId()));
+client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Not interested");
 ```
 
 ### Webhooks

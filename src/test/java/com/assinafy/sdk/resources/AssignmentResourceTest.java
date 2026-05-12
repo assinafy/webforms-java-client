@@ -171,4 +171,88 @@ class AssignmentResourceTest {
                 new CreateAssignmentPayload().setSignerStrings("s1")))
                 .isInstanceOf(ValidationException.class);
     }
+
+    @Test
+    void get_passesAccessCodeAsQueryParameter() throws Exception {
+        server.enqueue(okJson(Map.of("id", "a1")));
+
+        resource.get("doc-1", "a1", "code-xyz");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("GET");
+        assertThat(req.getPath())
+                .isEqualTo("/documents/doc-1/assignments/a1?signer-access-code=code-xyz");
+    }
+
+    @Test
+    void get_requiresAccessCode() {
+        assertThatThrownBy(() -> resource.get("doc-1", "a1", ""))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void sign_postsEntriesArray() throws Exception {
+        server.enqueue(okJson(List.of()));
+
+        resource.sign("doc-1", "a1", "code", List.of(
+                Map.of(
+                        "itemId", "item-1",
+                        "fieldId", "field-1",
+                        "pageId", "page-1",
+                        "value", "John Doe"
+                )
+        ));
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath())
+                .isEqualTo("/documents/doc-1/assignments/a1?signer-access-code=code");
+        String body = req.getBody().readUtf8();
+        assertThat(body).startsWith("[");
+        assertThat(body).contains("\"itemId\":\"item-1\"");
+        assertThat(body).contains("\"value\":\"John Doe\"");
+    }
+
+    @Test
+    void sign_rejectsEmptyEntries() {
+        assertThatThrownBy(() -> resource.sign("doc-1", "a1", "code", List.of()))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void decline_putsRejectEndpoint() throws Exception {
+        server.enqueue(okJson(List.of()));
+
+        resource.decline("doc-1", "a1", "code-xyz", "Not happy");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PUT");
+        assertThat(req.getPath())
+                .isEqualTo("/documents/doc-1/assignments/a1/reject?signer-access-code=code-xyz");
+        String body = req.getBody().readUtf8();
+        assertThat(body).contains("\"decline_reason\":\"Not happy\"");
+    }
+
+    @Test
+    void decline_requiresReason() {
+        assertThatThrownBy(() -> resource.decline("doc-1", "a1", "code", ""))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void resetExpiration_requiresExpiresAt() {
+        assertThatThrownBy(() -> resource.resetExpiration("doc-1", "a1", ""))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void whatsappNotifications_returnsList() throws Exception {
+        server.enqueue(okJson(List.of(Map.of("id", "wa-1", "phone_number", "+15555550100"))));
+
+        var notifications = resource.whatsappNotifications("doc-1", "a1");
+
+        assertThat(server.takeRequest().getPath())
+                .isEqualTo("/documents/doc-1/assignments/a1/whatsapp-notifications");
+        assertThat(notifications).hasSize(1);
+    }
 }
