@@ -23,6 +23,7 @@ public final class DocumentDetails {
     private DocumentArtifacts artifacts;
 
     private List<DocumentPage> pages;
+    private List<Tag> tags;
 
     @JsonProperty("created_at")
     private String createdAt;
@@ -76,6 +77,9 @@ public final class DocumentDetails {
 
     public List<DocumentPage> getPages() { return pages; }
     public void setPages(List<DocumentPage> pages) { this.pages = pages; }
+
+    public List<Tag> getTags() { return tags; }
+    public void setTags(List<Tag> tags) { this.tags = tags; }
 
     public String getCreatedAt() { return createdAt; }
     public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }

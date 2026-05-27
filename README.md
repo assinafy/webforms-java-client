@@ -2,11 +2,11 @@
 
 Java client SDK for the [Assinafy Webforms API](https://api.assinafy.com.br/v1/docs).
 
-Covers the documented document, signer, assignment, field definition, webhook, template, and high-level `uploadAndRequestSignatures` flows.
+Covers the documented authentication, document, signer, assignment, field definition, webhook, template, tag, and high-level `uploadAndRequestSignatures` flows.
 
 ## Requirements
 
-- Java 25+
+- Java 17+
 - Maven 3.8+ (or Gradle 7+)
 
 ## Installation
@@ -17,14 +17,14 @@ Covers the documented document, signer, assignment, field definition, webhook, t
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>1.3.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:1.3.0'
+implementation 'com.assinafy:webforms-java-client-sdk:1.4.0'
 ```
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full setup instructions.
@@ -68,6 +68,28 @@ new AssinafyClient(new AssinafyClientOptions()
 new AssinafyClient(new AssinafyClientOptions()
     .setToken("jwt_xxx")
     .setAccountId("acc_xxx"));
+
+// Unauthenticated endpoints such as login and public signer flows
+new AssinafyClient(new AssinafyClientOptions());
+```
+
+### Authentication API
+
+```java
+AuthenticationResult session = client.auth.login("user@example.com", "password");
+String accessToken = session.getAccessToken();
+
+AuthenticationResult googleSession = client.auth.socialLogin(
+    new SocialLoginPayload("google", googleToken, true));
+
+// These API-key endpoints require a token-authenticated client.
+ApiKeyResponse masked = client.auth.getApiKey();
+ApiKeyResponse created = client.auth.createApiKey("password");
+client.auth.deleteApiKey();
+
+client.auth.changePassword("user@example.com", "old-password", "new-password");
+client.auth.requestPasswordReset("user@example.com");
+client.auth.resetPassword("user@example.com", resetToken, "new-password");
 ```
 
 ## Configuration
@@ -127,6 +149,12 @@ client.documents.delete(doc.getId());
 // Public (unauthenticated) — minimal info for signer landing pages
 DocumentDetails publicInfo = client.documents.getPublic(doc.getId());
 client.documents.sendToken(doc.getId(), "signer@example.com", "email");
+
+// Document tags
+List<Tag> tags = client.documents.listTags(doc.getId());
+client.documents.appendTags(doc.getId(), List.of("Urgent"));
+client.documents.replaceTags(doc.getId(), List.of("Contracts", "2026-Q1"));
+client.documents.detachTag(doc.getId(), tagId);
 ```
 
 ### Signers
@@ -201,8 +229,11 @@ client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature")
 byte[] saved = client.signerSelf.downloadSignature(signerAccessCode, "signature");
 
 // Multi-document signer flows
+DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
 DocumentDetails current = client.signerSelf.getCurrentDocument(signerId, signerAccessCode);
-PaginatedResult<DocumentDetails> mine = client.signerSelf.listDocuments(signerId, signerAccessCode);
+PaginatedResult<DocumentDetails> mine = client.signerSelf.listDocuments(
+    signerId, signerAccessCode, Map.of("status", "pending_signature"));
+byte[] signerCopy = client.signerSelf.downloadDocument(signerId, doc.getId(), "original", signerAccessCode);
 client.signerSelf.signMultiple(signerAccessCode, List.of(doc1.getId(), doc2.getId()));
 client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Not interested");
 ```
@@ -220,6 +251,16 @@ client.webhooks.inactivate();
 client.webhooks.listEventTypes();
 client.webhooks.listDispatches();
 client.webhooks.retryDispatch(dispatchId);
+```
+
+### Tags
+
+```java
+PaginatedResult<Tag> tags = client.tags.list(Map.of("search", "contract"));
+Tag created = client.tags.create(new CreateTagPayload("Contracts").setColor("ff8800"));
+Tag updated = client.tags.update(created.getId(),
+    new UpdateTagPayload().setName("Sales Contracts").clearColor());
+client.tags.delete(updated.getId(), true);
 ```
 
 ### Field Definitions
@@ -246,7 +287,10 @@ DocumentDetails doc = client.documents.createFromTemplate(
     templateId,
     List.of(new TemplateSigner(template.getRoles().get(0).getId(), signerId)
         .setVerificationMethod("Email")
-        .setNotificationMethods(List.of("Email")))
+        .setNotificationMethods(List.of("Email"))
+        .setStep(1)),
+    new CreateDocumentFromTemplateOptions()
+        .setTags(List.of("Generated"))
 );
 ```
 

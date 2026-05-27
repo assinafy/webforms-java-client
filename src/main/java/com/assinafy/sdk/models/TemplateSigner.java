@@ -19,6 +19,8 @@ public final class TemplateSigner {
     @JsonProperty("notification_methods")
     private List<String> notificationMethods;
 
+    private Integer step;
+
     public TemplateSigner(String roleId) {
         this(roleId, null);
     }
@@ -40,6 +42,12 @@ public final class TemplateSigner {
     public List<String> getNotificationMethods() { return notificationMethods; }
     public TemplateSigner setNotificationMethods(List<String> notificationMethods) {
         this.notificationMethods = notificationMethods;
+        return this;
+    }
+
+    public Integer getStep() { return step; }
+    public TemplateSigner setStep(Integer step) {
+        this.step = step;
         return this;
     }
 }

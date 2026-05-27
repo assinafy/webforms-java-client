@@ -31,6 +31,7 @@ public final class DocumentListItem {
     private Assignment assignment;
     private DocumentArtifacts artifacts;
     private List<DocumentPage> pages;
+    private List<Tag> tags;
 
     @JsonProperty("signing_url")
     private String signingUrl;
@@ -76,6 +77,9 @@ public final class DocumentListItem {
 
     public List<DocumentPage> getPages() { return pages; }
     public void setPages(List<DocumentPage> pages) { this.pages = pages; }
+
+    public List<Tag> getTags() { return tags; }
+    public void setTags(List<Tag> tags) { this.tags = tags; }
 
     public String getSigningUrl() { return signingUrl; }
     public void setSigningUrl(String signingUrl) { this.signingUrl = signingUrl; }

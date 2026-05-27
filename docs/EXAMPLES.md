@@ -79,6 +79,12 @@ byte[] thumbnail = client.documents.thumbnail(doc.getId());
 // Verify hash
 Map<String, Object> verification = client.documents.verify(hash);
 
+// Document tags
+List<Tag> tags = client.documents.listTags(doc.getId());
+client.documents.appendTags(doc.getId(), List.of("Urgent"));
+client.documents.replaceTags(doc.getId(), List.of("Contracts", "2026-Q1"));
+client.documents.detachTag(doc.getId(), tagId);
+
 // Signing progress
 boolean isSigned = client.documents.isFullySigned(doc.getId());
 SigningProgress progress = client.documents.getSigningProgress(doc.getId());
@@ -169,6 +175,19 @@ PaginatedResult<WebhookDispatch> dispatches = client.webhooks.listDispatches(
 client.webhooks.retryDispatch(dispatchId);
 ```
 
+## Tags
+
+```java
+// Workspace-scoped tag catalogue
+PaginatedResult<Tag> tags = client.tags.list(Map.of("search", "contract"));
+
+// Create / update / delete
+Tag created = client.tags.create(new CreateTagPayload("Contracts").setColor("ff8800"));
+Tag updated = client.tags.update(created.getId(),
+    new UpdateTagPayload().setName("Sales Contracts").clearColor());
+client.tags.delete(updated.getId(), true);
+```
+
 ## Field Definitions
 
 ```java
@@ -211,10 +230,12 @@ DocumentDetails doc = client.documents.createFromTemplate(
         new TemplateSigner(firstRole.getId(), signerId)
             .setVerificationMethod("Email")
             .setNotificationMethods(List.of("Email"))
+            .setStep(1)
     ),
     new CreateDocumentFromTemplateOptions()
         .setName("NDA - John Doe")
         .setMessage("Please sign at your earliest convenience.")
+        .setTags(List.of("Generated"))
 );
 
 // Estimate cost
@@ -259,6 +280,9 @@ client.assignments.decline(documentId, assignmentId, signerAccessCode, "Not happ
 ## Signer Self-Service
 
 ```java
+// Fetch full signer-facing document details
+DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
+
 // Profile, terms, verification
 Signer self = client.signerSelf.getSelf(signerAccessCode);
 client.signerSelf.acceptTerms(signerAccessCode);
@@ -278,7 +302,9 @@ byte[] signature = client.signerSelf.downloadSignature(signerAccessCode, "signat
 
 // Multi-document flows
 DocumentDetails current = client.signerSelf.getCurrentDocument(signerId, signerAccessCode);
-PaginatedResult<DocumentDetails> all = client.signerSelf.listDocuments(signerId, signerAccessCode);
+PaginatedResult<DocumentDetails> all = client.signerSelf.listDocuments(
+    signerId, signerAccessCode, Map.of("status", "pending_signature"));
+byte[] signerCopy = client.signerSelf.downloadDocument(signerId, documentId, "original", signerAccessCode);
 client.signerSelf.signMultiple(signerAccessCode, List.of(doc1.getId(), doc2.getId()));
 client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Reason");
 ```

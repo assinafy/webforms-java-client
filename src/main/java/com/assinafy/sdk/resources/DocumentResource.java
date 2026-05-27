@@ -9,6 +9,7 @@ import com.assinafy.sdk.models.DocumentListItem;
 import com.assinafy.sdk.models.DocumentStatus;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.SigningProgress;
+import com.assinafy.sdk.models.Tag;
 import com.assinafy.sdk.models.TemplateSigner;
 import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.MediaType;
@@ -216,6 +217,7 @@ public final class DocumentResource extends BaseResource {
             if (options.getMessage() != null) body.put("message", options.getMessage());
             if (options.getExpiresAt() != null) body.put("expires_at", options.getExpiresAt());
             if (options.getEditorFields() != null) body.put("editor_fields", options.getEditorFields());
+            if (options.getTags() != null) body.put("tags", options.getTags());
         }
         return httpPost("/accounts/" + accId + "/templates/" + tmplId + "/documents", body,
                 DocumentDetails.class);
@@ -231,17 +233,16 @@ public final class DocumentResource extends BaseResource {
         String accId = accountId(accountId);
         validateTemplateSigners(signers);
         return httpPost("/accounts/" + accId + "/templates/" + tmplId + "/documents/estimate-cost",
-                Map.of("signers", signers), Map.class);
+                Map.of("signers", signers), new TypeReference<Map<String, Object>>() {}, Map.of());
     }
 
     public Map<String, Object> estimateCostFromTemplate(String templateId, List<TemplateSigner> signers) {
         return estimateCostFromTemplate(templateId, signers, null);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     public Map<String, Object> verify(String hash) {
         String h = requireId(hash, "Signature hash");
-        return (Map<String, Object>) httpGet("/documents/" + h + "/verify", Map.class);
+        return httpGet("/documents/" + h + "/verify", new TypeReference<Map<String, Object>>() {});
     }
 
     /**
@@ -257,7 +258,6 @@ public final class DocumentResource extends BaseResource {
      * {@code PUT /public/documents/{document_id}/send-token} — request that a fresh signing token be sent
      * to the given recipient. Unauthenticated endpoint used by signer landing pages.
      */
-    @SuppressWarnings({"rawtypes", "unchecked"})
     public Map<String, Object> sendToken(String documentId, String recipient, String channel) {
         String id = requireId(documentId, "Document ID");
         if (recipient == null || recipient.isBlank()) {
@@ -269,7 +269,62 @@ public final class DocumentResource extends BaseResource {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("recipient", recipient);
         body.put("channel", channel);
-        return (Map<String, Object>) httpPut("/public/documents/" + id + "/send-token", body, Map.class);
+        return httpPut("/public/documents/" + id + "/send-token", body,
+                new TypeReference<Map<String, Object>>() {}, Map.of());
+    }
+
+    /** {@code GET /accounts/{account_id}/documents/{document_id}/tags} */
+    public List<Tag> listTags(String documentId, String accountId) {
+        String docId = requireId(documentId, "Document ID");
+        String accId = accountId(accountId);
+        List<Tag> result = httpGet("/accounts/" + accId + "/documents/" + docId + "/tags",
+                new TypeReference<List<Tag>>() {});
+        return result != null ? result : Collections.emptyList();
+    }
+
+    public List<Tag> listTags(String documentId) {
+        return listTags(documentId, null);
+    }
+
+    /** {@code PUT /accounts/{account_id}/documents/{document_id}/tags} */
+    public List<Tag> replaceTags(String documentId, List<String> tags, String accountId) {
+        String docId = requireId(documentId, "Document ID");
+        String accId = accountId(accountId);
+        validateTagNames(tags, true);
+        List<Tag> result = httpPut("/accounts/" + accId + "/documents/" + docId + "/tags",
+                Map.of("tags", tags), new TypeReference<List<Tag>>() {}, Map.of());
+        return result != null ? result : Collections.emptyList();
+    }
+
+    public List<Tag> replaceTags(String documentId, List<String> tags) {
+        return replaceTags(documentId, tags, null);
+    }
+
+    /** {@code POST /accounts/{account_id}/documents/{document_id}/tags} */
+    public List<Tag> appendTags(String documentId, List<String> tags, String accountId) {
+        String docId = requireId(documentId, "Document ID");
+        String accId = accountId(accountId);
+        validateTagNames(tags, false);
+        List<Tag> result = httpPost("/accounts/" + accId + "/documents/" + docId + "/tags",
+                Map.of("tags", tags), new TypeReference<List<Tag>>() {}, Map.of());
+        return result != null ? result : Collections.emptyList();
+    }
+
+    public List<Tag> appendTags(String documentId, List<String> tags) {
+        return appendTags(documentId, tags, null);
+    }
+
+    /** {@code DELETE /accounts/{account_id}/documents/{document_id}/tags/{tag_id}} */
+    public Map<String, Object> detachTag(String documentId, String tagId, String accountId) {
+        String docId = requireId(documentId, "Document ID");
+        String tid = requireId(tagId, "Tag ID");
+        String accId = accountId(accountId);
+        return httpDelete("/accounts/" + accId + "/documents/" + docId + "/tags/" + tid,
+                new TypeReference<Map<String, Object>>() {});
+    }
+
+    public Map<String, Object> detachTag(String documentId, String tagId) {
+        return detachTag(documentId, tagId, null);
     }
 
     public boolean isFullySigned(String documentId) {
@@ -303,6 +358,20 @@ public final class DocumentResource extends BaseResource {
     private void validateTemplateSigners(List<TemplateSigner> signers) {
         if (signers == null || signers.isEmpty()) {
             throw new ValidationException("At least one template signer is required");
+        }
+    }
+
+    private void validateTagNames(List<String> tags, boolean allowEmpty) {
+        if (tags == null) {
+            throw new ValidationException("Tag names are required");
+        }
+        if (!allowEmpty && tags.isEmpty()) {
+            throw new ValidationException("At least one tag name is required");
+        }
+        for (String tag : tags) {
+            if (tag == null || tag.isBlank()) {
+                throw new ValidationException("Tag names cannot be blank");
+            }
         }
     }
 }

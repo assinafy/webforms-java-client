@@ -60,6 +60,18 @@ class SignerSelfResourceTest {
     }
 
     @Test
+    void getSign_passesAccessCodeAndTermsFlag() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "name", "x.pdf")));
+
+        resource.getSign("code-123", true);
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getPath()).contains("/sign?");
+        assertThat(req.getPath()).contains("signer-access-code=code-123");
+        assertThat(req.getPath()).contains("has_accepted_terms=true");
+    }
+
+    @Test
     void acceptTerms_putsAccessCodeInBody() throws Exception {
         server.enqueue(okJson(Map.of("has_accepted_terms", true)));
 
@@ -180,6 +192,20 @@ class SignerSelfResourceTest {
     }
 
     @Test
+    void listDocuments_acceptsDocumentedFilters() throws Exception {
+        server.enqueue(okJson(List.of()));
+
+        resource.listDocuments("signer-1", "code-1", Map.of("status", "pending_signature",
+                "method", "virtual"));
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getPath()).contains("/signers/signer-1/documents?");
+        assertThat(req.getPath()).contains("status=pending_signature");
+        assertThat(req.getPath()).contains("method=virtual");
+        assertThat(req.getPath()).contains("signer-access-code=code-1");
+    }
+
+    @Test
     void signMultiple_putsDocumentIds() throws Exception {
         server.enqueue(okJson(List.of()));
 
@@ -218,5 +244,18 @@ class SignerSelfResourceTest {
     void declineMultiple_requiresReason() {
         assertThatThrownBy(() -> resource.declineMultiple("code", List.of("doc"), ""))
                 .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void downloadDocument_usesSignerScopedArtifactEndpoint() throws Exception {
+        server.enqueue(new MockResponse().setBody("PDF")
+                .setHeader("Content-Type", "application/pdf"));
+
+        byte[] bytes = resource.downloadDocument("signer-1", "doc-1", "original", "code-1");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getPath())
+                .isEqualTo("/signers/signer-1/documents/doc-1/download/original?signer-access-code=code-1");
+        assertThat(new String(bytes)).isEqualTo("PDF");
     }
 }

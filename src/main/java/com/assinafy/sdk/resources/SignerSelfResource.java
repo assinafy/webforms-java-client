@@ -12,6 +12,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.RequestBody;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -33,6 +34,19 @@ public final class SignerSelfResource extends BaseResource {
     /** {@code GET /signers/self} — return the calling signer's profile. */
     public Signer getSelf(String signerAccessCode) {
         return httpGet("/signers/self", accessCodeQuery(signerAccessCode), Signer.class);
+    }
+
+    /** {@code GET /sign} - retrieve the signer-facing document and assignment details. */
+    public DocumentDetails getSign(String signerAccessCode, Boolean hasAcceptedTerms) {
+        Map<String, String> query = new LinkedHashMap<>(accessCodeQuery(signerAccessCode));
+        if (hasAcceptedTerms != null) {
+            query.put("has_accepted_terms", String.valueOf(hasAcceptedTerms));
+        }
+        return httpGet("/sign", query, DocumentDetails.class);
+    }
+
+    public DocumentDetails getSign(String signerAccessCode) {
+        return getSign(signerAccessCode, null);
     }
 
     /** {@code PUT /signers/accept-terms} — accept the platform terms of use. */
@@ -101,6 +115,15 @@ public final class SignerSelfResource extends BaseResource {
                 accessCodeQuery(signerAccessCode), DocumentDetails.class);
     }
 
+    /** {@code GET /signers/{signer_id}/documents} with documented filters such as status, method and search. */
+    public PaginatedResult<DocumentDetails> listDocuments(String signerId, String signerAccessCode,
+            Map<String, String> params) {
+        String sid = requireId(signerId, "Signer ID");
+        Map<String, String> query = new LinkedHashMap<>(params != null ? params : Map.of());
+        query.put(SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode));
+        return httpGetList("/signers/" + sid + "/documents", query, DocumentDetails.class);
+    }
+
     /** {@code PUT /signers/documents/sign-multiple} — sign several virtual-method documents in one call. */
     public void signMultiple(String signerAccessCode, List<String> documentIds) {
         if (documentIds == null || documentIds.isEmpty()) {
@@ -123,6 +146,16 @@ public final class SignerSelfResource extends BaseResource {
                 "decline_reason", declineReason
         );
         httpPutVoid("/signers/documents/decline-multiple", body, accessCodeQuery(signerAccessCode));
+    }
+
+    /** {@code GET /signers/{signer_id}/documents/{document_id}/download/{artifact_name}} */
+    public byte[] downloadDocument(String signerId, String documentId, String artifactName,
+            String signerAccessCode) {
+        String sid = requireId(signerId, "Signer ID");
+        String docId = requireId(documentId, "Document ID");
+        String artifact = artifactName != null ? artifactName : "original";
+        return httpGetBinary("/signers/" + sid + "/documents/" + docId + "/download/" + artifact,
+                accessCodeQuery(signerAccessCode));
     }
 
     private Map<String, String> accessCodeQuery(String signerAccessCode) {

@@ -29,6 +29,7 @@ public final class TemplateListItem {
 
     private List<TemplatePage> pages;
     private List<TemplateRole> roles;
+    private List<Tag> tags;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -62,4 +63,7 @@ public final class TemplateListItem {
 
     public List<TemplateRole> getRoles() { return roles; }
     public void setRoles(List<TemplateRole> roles) { this.roles = roles; }
+
+    public List<Tag> getTags() { return tags; }
+    public void setTags(List<Tag> tags) { this.tags = tags; }
 }

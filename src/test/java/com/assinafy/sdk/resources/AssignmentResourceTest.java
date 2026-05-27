@@ -143,6 +143,16 @@ class AssignmentResourceTest {
     }
 
     @Test
+    void create_serializesSequentialSigningStep() throws Exception {
+        server.enqueue(okJson(Map.of("id", "a1")));
+
+        resource.create("doc-1", new CreateAssignmentPayload()
+                .setSigners(List.of(SignerRef.of("s1").setStep(2))));
+
+        assertThat(server.takeRequest().getBody().readUtf8()).contains("\"step\":2");
+    }
+
+    @Test
     void resendNotification_requiresAllThreeIds() {
         assertThatThrownBy(() -> resource.resendNotification("", "a", "s"))
                 .isInstanceOf(ValidationException.class);

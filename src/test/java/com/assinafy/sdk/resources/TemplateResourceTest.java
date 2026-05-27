@@ -64,12 +64,19 @@ class TemplateResourceTest {
 
     @Test
     void get_returnsParsedTemplate() throws Exception {
-        server.enqueue(okJson(Map.of("id", "tmpl-1", "name", "Sample")));
+        server.enqueue(okJson(Map.of(
+                "id", "tmpl-1",
+                "name", "Sample",
+                "tags", List.of(Map.of("id", "tag-1", "name", "HR")),
+                "default_document_tags", List.of(Map.of("id", "tag-2", "name", "Contracts"))
+        )));
 
         TemplateDetails details = resource.get("tmpl-1");
 
         assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/acc/templates/tmpl-1");
         assertThat(details.getId()).isEqualTo("tmpl-1");
+        assertThat(details.getTags().get(0).getName()).isEqualTo("HR");
+        assertThat(details.getDefaultDocumentTags().get(0).getName()).isEqualTo("Contracts");
     }
 
     @Test

@@ -10,10 +10,12 @@ import com.assinafy.sdk.models.UploadAndRequestSignaturesOptions;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesResult;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesSigner;
 import com.assinafy.sdk.resources.AssignmentResource;
+import com.assinafy.sdk.resources.AuthenticationResource;
 import com.assinafy.sdk.resources.DocumentResource;
 import com.assinafy.sdk.resources.FieldResource;
 import com.assinafy.sdk.resources.SignerResource;
 import com.assinafy.sdk.resources.SignerSelfResource;
+import com.assinafy.sdk.resources.TagResource;
 import com.assinafy.sdk.resources.TemplateResource;
 import com.assinafy.sdk.resources.WebhookResource;
 import okhttp3.OkHttpClient;
@@ -34,17 +36,14 @@ public final class AssinafyClient {
     public final AssignmentResource assignments;
     public final WebhookResource webhooks;
     public final TemplateResource templates;
+    public final TagResource tags;
     public final FieldResource fields;
     public final SignerSelfResource signerSelf;
+    public final AuthenticationResource auth;
 
     public AssinafyClient(AssinafyClientOptions options) {
         if (options == null) {
             throw new ValidationException("Client options are required");
-        }
-        if ((options.getApiKey() == null || options.getApiKey().isBlank())
-                && (options.getToken() == null || options.getToken().isBlank())) {
-            throw new ValidationException(
-                    "An API key (options.apiKey) or legacy access token (options.token) is required.");
         }
         if (options.getTimeoutMs() <= 0) {
             throw new ValidationException("Request timeout must be greater than zero");
@@ -70,7 +69,7 @@ public final class AssinafyClient {
                             .header("User-Agent", "assinafy-webforms-java-client-sdk");
                     if (options.getApiKey() != null && !options.getApiKey().isBlank()) {
                         requestBuilder.header("X-Api-Key", options.getApiKey());
-                    } else {
+                    } else if (options.getToken() != null && !options.getToken().isBlank()) {
                         requestBuilder.header("Authorization", "Bearer " + options.getToken());
                     }
                     return chain.proceed(requestBuilder.build());
@@ -83,8 +82,10 @@ public final class AssinafyClient {
         this.assignments = new AssignmentResource(httpClient, baseUrl, accountId);
         this.webhooks = new WebhookResource(httpClient, baseUrl, accountId);
         this.templates = new TemplateResource(httpClient, baseUrl, accountId);
+        this.tags = new TagResource(httpClient, baseUrl, accountId);
         this.fields = new FieldResource(httpClient, baseUrl, accountId);
         this.signerSelf = new SignerSelfResource(httpClient, baseUrl);
+        this.auth = new AuthenticationResource(httpClient, baseUrl);
     }
 
     public static AssinafyClient create(String apiKey, String accountId) {

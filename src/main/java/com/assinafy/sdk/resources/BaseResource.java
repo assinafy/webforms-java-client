@@ -106,9 +106,39 @@ public abstract class BaseResource {
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    protected <T> T httpPut(String path, Object body, TypeReference<T> typeRef, Map<String, String> queryParams) {
+        Request request = buildRequest("PUT", path, body, queryParams);
+        return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
+    }
+
     protected void httpDelete(String path) {
         Request request = buildRequest("DELETE", path, null);
         executeVoid(request);
+    }
+
+    protected void httpDelete(String path, Map<String, String> queryParams) {
+        Request request = buildRequest("DELETE", path, null, queryParams);
+        executeVoid(request);
+    }
+
+    protected <T> T httpDelete(String path, Class<T> dataType) {
+        Request request = buildRequest("DELETE", path, null);
+        return execute(request, MAPPER.getTypeFactory().constructType(dataType));
+    }
+
+    protected <T> T httpDelete(String path, Class<T> dataType, Map<String, String> queryParams) {
+        Request request = buildRequest("DELETE", path, null, queryParams);
+        return execute(request, MAPPER.getTypeFactory().constructType(dataType));
+    }
+
+    protected <T> T httpDelete(String path, TypeReference<T> typeRef) {
+        Request request = buildRequest("DELETE", path, null);
+        return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
+    }
+
+    protected <T> T httpDelete(String path, TypeReference<T> typeRef, Map<String, String> queryParams) {
+        Request request = buildRequest("DELETE", path, null, queryParams);
+        return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
     }
 
     protected void httpPostVoid(String path, Object body) {

@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.4.0] - 2026-05-27
+
+### Added
+- Authentication resource for the documented login, social-login, API-key, and password flows:
+  `client.auth.login`, `socialLogin`, `getApiKey`, `createApiKey`, `deleteApiKey`,
+  `changePassword`, `requestPasswordReset`, and `resetPassword`.
+- Workspace tag resource for `GET/POST/PUT/DELETE /accounts/{account_id}/tags`.
+- Document tag helpers for listing, replacing, appending, and detaching tags.
+- Signer-facing helpers for `GET /sign`, filtered signer document listing, and signer-scoped
+  document artifact download.
+- Tag parsing on document and template models, `default_document_tags` parsing on template details,
+  document-tag support when creating documents from templates, and sequential-signing `step` support.
+
+### Changed
+- Maven now emits Java 17 bytecode with `--release 17` for broader SDK compatibility.
+- The client can now be constructed without credentials for public/authentication endpoints; authenticated
+  endpoints still require API credentials at the API layer.
+
+### Verified Live
+- `GET /accounts/{id}/tags`
+- Full tag CRUD round-trip (create -> update -> force delete)
+- Existing catalogue, document, webhook, template, field, signer CRUD, and public-document smoke checks.
+
+### Test Suite
+- 108 mock-backed unit tests + 12 live smoke tests (skipped without env vars). All green.
+
 ## [1.3.0] - 2026-05-12
 
 ### Added

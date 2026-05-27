@@ -16,6 +16,8 @@ public final class SignerRef {
     @JsonProperty("notification_methods")
     private List<String> notificationMethods;
 
+    private Integer step;
+
     public SignerRef() {}
 
     public static SignerRef of(String id) {
@@ -36,6 +38,12 @@ public final class SignerRef {
     public List<String> getNotificationMethods() { return notificationMethods; }
     public SignerRef setNotificationMethods(List<String> notificationMethods) {
         this.notificationMethods = notificationMethods;
+        return this;
+    }
+
+    public Integer getStep() { return step; }
+    public SignerRef setStep(Integer step) {
+        this.step = step;
         return this;
     }
 }

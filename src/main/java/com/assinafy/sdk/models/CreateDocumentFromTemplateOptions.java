@@ -17,6 +17,8 @@ public final class CreateDocumentFromTemplateOptions {
     @JsonProperty("editor_fields")
     private List<Object> editorFields;
 
+    private List<String> tags;
+
     public String getName() { return name; }
     public CreateDocumentFromTemplateOptions setName(String name) { this.name = name; return this; }
 
@@ -29,6 +31,12 @@ public final class CreateDocumentFromTemplateOptions {
     public List<Object> getEditorFields() { return editorFields; }
     public CreateDocumentFromTemplateOptions setEditorFields(List<Object> editorFields) {
         this.editorFields = editorFields;
+        return this;
+    }
+
+    public List<String> getTags() { return tags; }
+    public CreateDocumentFromTemplateOptions setTags(List<String> tags) {
+        this.tags = tags;
         return this;
     }
 }

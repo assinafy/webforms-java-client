@@ -23,6 +23,10 @@ public final class TemplateDetails {
 
     private List<TemplateRole> roles;
     private List<TemplatePage> pages;
+    private List<Tag> tags;
+
+    @JsonProperty("default_document_tags")
+    private List<Tag> defaultDocumentTags;
 
     @JsonProperty("created_at")
     private String createdAt;
@@ -56,6 +60,14 @@ public final class TemplateDetails {
 
     public List<TemplatePage> getPages() { return pages; }
     public void setPages(List<TemplatePage> pages) { this.pages = pages; }
+
+    public List<Tag> getTags() { return tags; }
+    public void setTags(List<Tag> tags) { this.tags = tags; }
+
+    public List<Tag> getDefaultDocumentTags() { return defaultDocumentTags; }
+    public void setDefaultDocumentTags(List<Tag> defaultDocumentTags) {
+        this.defaultDocumentTags = defaultDocumentTags;
+    }
 
     public String getCreatedAt() { return createdAt; }
     public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }

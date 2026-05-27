@@ -169,6 +169,57 @@ class DocumentResourceTest {
     }
 
     @Test
+    void createFromTemplate_includesOptionalDocumentTags() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "name", "x.pdf")));
+
+        resource.createFromTemplate("template-1", List.of(new TemplateSigner("role-1", "signer-1")),
+                new com.assinafy.sdk.models.CreateDocumentFromTemplateOptions()
+                        .setTags(List.of("Contracts", "2026-Q1")), null);
+
+        String body = server.takeRequest().getBody().readUtf8();
+        assertThat(body).contains("\"tags\"", "Contracts", "2026-Q1");
+    }
+
+    @Test
+    void documentTagMethodsUseDocumentedEndpoints() throws Exception {
+        server.enqueue(okJson(List.of(Map.of("id", "tag-1", "name", "Contracts"))));
+        server.enqueue(okJson(List.of(Map.of("id", "tag-2", "name", "Urgent"))));
+        server.enqueue(okJson(List.of()));
+        server.enqueue(okJson(Map.of("detached", true)));
+
+        var listed = resource.listTags("doc-1");
+        var appended = resource.appendTags("doc-1", List.of("Urgent"));
+        var replaced = resource.replaceTags("doc-1", List.of());
+        Map<String, Object> detached = resource.detachTag("doc-1", "tag-1");
+
+        assertThat(listed.get(0).getName()).isEqualTo("Contracts");
+        assertThat(appended.get(0).getName()).isEqualTo("Urgent");
+        assertThat(replaced).isEmpty();
+        assertThat(detached).containsEntry("detached", true);
+
+        assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/acc/documents/doc-1/tags");
+        RecordedRequest append = server.takeRequest();
+        assertThat(append.getMethod()).isEqualTo("POST");
+        assertThat(append.getPath()).isEqualTo("/accounts/acc/documents/doc-1/tags");
+        RecordedRequest replace = server.takeRequest();
+        assertThat(replace.getMethod()).isEqualTo("PUT");
+        assertThat(replace.getBody().readUtf8()).contains("\"tags\":[]");
+        RecordedRequest detach = server.takeRequest();
+        assertThat(detach.getMethod()).isEqualTo("DELETE");
+        assertThat(detach.getPath()).isEqualTo("/accounts/acc/documents/doc-1/tags/tag-1");
+    }
+
+    @Test
+    void documentTagMethodsValidateInputs() {
+        assertThatThrownBy(() -> resource.appendTags("doc-1", List.of()))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.replaceTags("doc-1", null))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.detachTag("doc-1", ""))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
     void verify_callsHashPath() throws Exception {
         server.enqueue(okJson(Map.of("is_valid", true)));
 

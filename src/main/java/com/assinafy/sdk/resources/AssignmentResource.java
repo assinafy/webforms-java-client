@@ -168,6 +168,9 @@ public final class AssignmentResource extends BaseResource {
         if (ref.getNotificationMethods() != null && !ref.getNotificationMethods().isEmpty()) {
             result.put("notification_methods", ref.getNotificationMethods());
         }
+        if (ref.getStep() != null) {
+            result.put("step", ref.getStep());
+        }
         if ((id == null || id.isBlank()) && !allowWithoutId) {
             throw new ValidationException("Invalid signer reference: ID is required for this operation");
         }

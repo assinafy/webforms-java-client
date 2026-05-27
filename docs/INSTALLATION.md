@@ -2,8 +2,7 @@
 
 ## Requirements
 
-- Java 17 or later (the published artifact is built against Java 25; if you need an older JDK, rebuild
-  from source with `mvn -Djava.version=17 install`)
+- Java 17 or later
 - Maven 3.8+ or Gradle 7+
 
 ## Maven
@@ -14,7 +13,7 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>1.3.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
@@ -28,7 +27,7 @@ mvn install
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:1.3.0'
+    implementation 'com.assinafy:webforms-java-client-sdk:1.4.0'
 }
 ```
 
@@ -36,7 +35,7 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:1.3.0")
+    implementation("com.assinafy:webforms-java-client-sdk:1.4.0")
 }
 ```
 

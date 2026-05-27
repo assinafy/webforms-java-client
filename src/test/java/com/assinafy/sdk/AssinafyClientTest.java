@@ -1,19 +1,18 @@
 package com.assinafy.sdk;
 
-import com.assinafy.sdk.exceptions.ValidationException;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AssinafyClientTest {
 
     @Test
-    void constructor_throwsWhenNoCredentials() {
-        assertThatThrownBy(() -> new AssinafyClient(new AssinafyClientOptions().setAccountId("acc")))
-                .isInstanceOf(ValidationException.class);
+    void constructor_allowsNoCredentialsForUnauthenticatedEndpoints() {
+        AssinafyClient client = new AssinafyClient(new AssinafyClientOptions().setAccountId("acc"));
+        assertThat(client.auth).isNotNull();
+        assertThat(client.documents).isNotNull();
     }
 
     @Test
@@ -26,8 +25,10 @@ class AssinafyClientTest {
         assertThat(client.assignments).isNotNull();
         assertThat(client.webhooks).isNotNull();
         assertThat(client.templates).isNotNull();
+        assertThat(client.tags).isNotNull();
         assertThat(client.fields).isNotNull();
         assertThat(client.signerSelf).isNotNull();
+        assertThat(client.auth).isNotNull();
     }
 
     @Test
