@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Dependency maintenance (Dependabot), all verified green on JDK 21 + 25:
+  - JUnit Jupiter 5.11.4 → 6.1.0 (test scope; JUnit 6 requires Java 17+, satisfied by the Java 21 baseline)
+  - Jackson Databind 2.18.2 → 2.22.0
+  - AssertJ 3.27.3 → 3.27.7
+  - maven-compiler-plugin 3.13.0 → 3.15.0, maven-surefire-plugin 3.5.2 → 3.5.6,
+    maven-source-plugin 3.3.1 → 3.4.0, maven-javadoc-plugin 3.11.2 → 3.12.0,
+    maven-enforcer-plugin 3.5.0 → 3.6.3
+  - GitHub Actions: actions/checkout v4.2.2 → v6.0.3, actions/setup-java v4.7.1 → v5.2.0 (SHA-pinned)
+
+### Held
+- OkHttp 4.12.0 → 5.x is **not** taken yet: OkHttp 5 publishes as a Kotlin-Multiplatform artifact, so a plain
+  Maven build resolves `com.squareup.okhttp3:okhttp:5.x` to a classless KMP root (`package okhttp3 does not
+  exist`). Migrating requires switching to the `okhttp-jvm` artifact and adapting to MockWebServer API changes.
+  Tracked separately.
+
 ## [1.5.0] - 2026-06-05
 
 Full file-by-file audit against https://api.assinafy.com.br/v1/docs, verified live against the sandbox API.

@@ -80,4 +80,4 @@ The SDK pulls in:
 | Dependency                       | Version   | Purpose              |
 |----------------------------------|-----------|----------------------|
 | `com.squareup.okhttp3:okhttp`    | 4.12.0    | HTTP client          |
-| `com.fasterxml.jackson.core:jackson-databind` | 2.18.2 | JSON serialization |
+| `com.fasterxml.jackson.core:jackson-databind` | 2.22.0 | JSON serialization |
