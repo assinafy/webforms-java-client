@@ -7,6 +7,7 @@ public final class AssinafyClientOptions {
     private String accountId;
     private String baseUrl = "https://api.assinafy.com.br/v1";
     private int timeoutMs = 30_000;
+    private int maxRetries = 0;
 
     public String getApiKey() { return apiKey; }
     public AssinafyClientOptions setApiKey(String apiKey) { this.apiKey = apiKey; return this; }
@@ -22,4 +23,12 @@ public final class AssinafyClientOptions {
 
     public int getTimeoutMs() { return timeoutMs; }
     public AssinafyClientOptions setTimeoutMs(int timeoutMs) { this.timeoutMs = timeoutMs; return this; }
+
+    /**
+     * Maximum number of automatic retries on a rate-limit/temporary error (HTTP 429 or 503). Defaults to
+     * {@code 0} (no automatic retries). When greater than zero, the client waits for the server's
+     * {@code Retry-After}/{@code X-Rate-Limit-Reset} hint (capped) before each retry.
+     */
+    public int getMaxRetries() { return maxRetries; }
+    public AssinafyClientOptions setMaxRetries(int maxRetries) { this.maxRetries = maxRetries; return this; }
 }

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.OkHttpClient;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,17 +34,6 @@ public final class AssignmentResource extends BaseResource {
         Map<String, Object> body = buildPayload(payload, true);
         return (Map<String, Object>) httpPost("/documents/" + docId + "/assignments/estimate-cost",
                 body, Map.class);
-    }
-
-    /**
-     * {@code GET /documents/{documentId}/assignments/{assignmentId}} — signer-facing assignment lookup.
-     * The {@code signer-access-code} is passed as a query parameter.
-     */
-    public Assignment get(String documentId, String assignmentId, String signerAccessCode) {
-        String docId = requireId(documentId, "Document ID");
-        String asgId = requireId(assignmentId, "Assignment ID");
-        return httpGet("/documents/" + docId + "/assignments/" + asgId,
-                requireAccessCodeQuery(signerAccessCode), Assignment.class);
     }
 
     /**
@@ -77,15 +67,34 @@ public final class AssignmentResource extends BaseResource {
                 requireAccessCodeQuery(signerAccessCode));
     }
 
-    /** {@code PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration} */
+    /**
+     * {@code PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration} — set a new expiration
+     * for the assignment.
+     *
+     * <p>Per the API, a {@code null} {@code expiresAt} is accepted and clears the expiration (the assignment no
+     * longer expires); a blank/empty string is rejected as it is not a valid ISO-8601 datetime. Prefer
+     * {@link #clearExpiration(String, String)} when the intent is to remove the expiration.</p>
+     *
+     * @param expiresAt new ISO-8601 expiration timestamp, or {@code null} to remove the expiration entirely
+     */
     public Assignment resetExpiration(String documentId, String assignmentId, String expiresAt) {
         String docId = requireId(documentId, "Document ID");
         String asgId = requireId(assignmentId, "Assignment ID");
-        if (expiresAt == null || expiresAt.isBlank()) {
-            throw new ValidationException("expires_at is required");
+        if (expiresAt != null && expiresAt.isBlank()) {
+            throw new ValidationException("expires_at must be a valid ISO-8601 timestamp or null");
         }
+        Map<String, Object> body = new HashMap<>();
+        body.put("expires_at", expiresAt);
         return httpPut("/documents/" + docId + "/assignments/" + asgId + "/reset-expiration",
-                Map.of("expires_at", expiresAt), Assignment.class);
+                body, Assignment.class);
+    }
+
+    /**
+     * Convenience for {@code PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration} with a
+     * {@code null} {@code expires_at}, which removes the assignment's expiration so it no longer expires.
+     */
+    public Assignment clearExpiration(String documentId, String assignmentId) {
+        return resetExpiration(documentId, assignmentId, null);
     }
 
     /** {@code PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend} */

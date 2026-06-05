@@ -34,7 +34,14 @@ public final class Signer {
     @JsonProperty("notification_methods")
     private List<String> notificationMethods;
 
+    private Integer step;
+
+    private Boolean notified;
+
     private Boolean completed;
+
+    @JsonProperty("notification_history")
+    private List<AssignmentSignerNotification> notificationHistory;
 
     public String getId() {
         return id;
@@ -122,6 +129,45 @@ public final class Signer {
 
     public void setCompleted(Boolean completed) {
         this.completed = completed;
+    }
+
+    /**
+     * Step the signer belongs to in the sequential signing flow. Signers in the same step sign in parallel;
+     * the next step activates once every signer in the previous step has signed. Only populated inside
+     * {@code assignment.signers}; {@code null} for legacy records (new assignments default to {@code 1}).
+     */
+    public Integer getStep() {
+        return step;
+    }
+
+    public void setStep(Integer step) {
+        this.step = step;
+    }
+
+    /**
+     * {@code true} once the signature-request notification has been dispatched to this signer; {@code false}
+     * for signers in steps not yet activated. {@code null} for legacy records. Only populated inside
+     * {@code assignment.signers}.
+     */
+    public Boolean getNotified() {
+        return notified;
+    }
+
+    public void setNotified(Boolean notified) {
+        this.notified = notified;
+    }
+
+    /**
+     * Tracked notification-delivery history for this signer within an assignment. Only present in
+     * account-owner contexts (inside {@code assignment.signers}); {@code null} otherwise. May be an empty
+     * list when the configured channel does not persist delivery history.
+     */
+    public List<AssignmentSignerNotification> getNotificationHistory() {
+        return notificationHistory;
+    }
+
+    public void setNotificationHistory(List<AssignmentSignerNotification> notificationHistory) {
+        this.notificationHistory = notificationHistory;
     }
 
 }

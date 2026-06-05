@@ -1,5 +1,6 @@
 package com.assinafy.sdk.resources;
 
+import com.assinafy.sdk.exceptions.ApiException;
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.ConfirmSignerDataPayload;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -149,6 +150,23 @@ class SignerSelfResourceTest {
     }
 
     @Test
+    void uploadSignature_surfacesEnvelopeError() throws Exception {
+        // HTTP 200 carrying an error envelope must still raise an ApiException (the old binary path swallowed it).
+        String body = MAPPER.writeValueAsString(Map.of("status", 422, "message", "Invalid image", "data", List.of()));
+        server.enqueue(new MockResponse().setBody(body).setHeader("Content-Type", "application/json"));
+
+        assertThatThrownBy(() -> resource.uploadSignature("code-xyz", new byte[]{(byte) 0x89, 0x50}, "signature"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Invalid image");
+    }
+
+    @Test
+    void uploadSignature_rejectsEmptyBytes() {
+        assertThatThrownBy(() -> resource.uploadSignature("code", new byte[0], "signature"))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
     void downloadSignature_appendsAccessCode() throws Exception {
         server.enqueue(new MockResponse().setBody("PNGBYTES")
                 .setHeader("Content-Type", "image/png"));
@@ -170,14 +188,27 @@ class SignerSelfResourceTest {
     }
 
     @Test
-    void getCurrentDocument_passesAccessCode() throws Exception {
-        server.enqueue(okJson(Map.of("id", "doc-1", "name", "x.pdf")));
+    void getCurrentDocument_passesAccessCodeAndParsesCurrentSigner() throws Exception {
+        server.enqueue(okJson(Map.of(
+                "id", "doc-1",
+                "name", "x.pdf",
+                "current_signer", Map.of(
+                        "id", "signer-1",
+                        "full_name", "Signer Name",
+                        "email", "signer@example.com",
+                        "verification_method", "Email",
+                        "notification_methods", List.of("Email")
+                )
+        )));
 
-        resource.getCurrentDocument("signer-1", "code-1");
+        var doc = resource.getCurrentDocument("signer-1", "code-1");
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getPath())
                 .isEqualTo("/signers/signer-1/document?signer-access-code=code-1");
+        assertThat(doc.getCurrentSigner()).isNotNull();
+        assertThat(doc.getCurrentSigner().getId()).isEqualTo("signer-1");
+        assertThat(doc.getCurrentSigner().getVerificationMethod()).isEqualTo("Email");
     }
 
     @Test

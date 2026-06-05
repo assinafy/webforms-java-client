@@ -21,6 +21,11 @@ public final class WebhookResource extends BaseResource {
         super(httpClient, baseUrl, defaultAccountId);
     }
 
+    /**
+     * {@code PUT /accounts/{account_id}/webhooks/subscriptions} — create or replace the workspace's single
+     * webhook subscription. The body carries {@code url}, {@code email}, {@code events}, and {@code is_active}
+     * (defaults to {@code true} when {@code payload.active} is {@code null}).
+     */
     public WebhookSubscription register(RegisterWebhookPayload payload, String accountId) {
         if (payload.getUrl() == null || payload.getUrl().isBlank()) {
             throw new ValidationException("Webhook URL is required");
@@ -48,6 +53,10 @@ public final class WebhookResource extends BaseResource {
         return register(payload, null);
     }
 
+    /**
+     * {@code GET /accounts/{account_id}/webhooks/subscriptions} — fetch the current webhook subscription, or
+     * {@code null} when none is configured (the API's 404 is mapped to {@code null}).
+     */
     public WebhookSubscription getSubscription(String accountId) {
         String id = accountId(accountId);
         return httpGetOptional("/accounts/" + id + "/webhooks/subscriptions", WebhookSubscription.class);
@@ -57,6 +66,10 @@ public final class WebhookResource extends BaseResource {
         return getSubscription(null);
     }
 
+    /**
+     * {@code DELETE /accounts/{account_id}/webhooks/subscriptions} — permanently delete the webhook
+     * subscription. To keep it but stop deliveries, use {@link #inactivate} instead.
+     */
     public void deleteSubscription(String accountId) {
         String id = accountId(accountId);
         httpDelete("/accounts/" + id + "/webhooks/subscriptions");
@@ -66,6 +79,10 @@ public final class WebhookResource extends BaseResource {
         deleteSubscription(null);
     }
 
+    /**
+     * {@code PUT /accounts/{account_id}/webhooks/inactivate} — deactivate the subscription (sets
+     * {@code is_active=false}) without deleting it, so it can be re-activated later via {@link #register}.
+     */
     public WebhookSubscription inactivate(String accountId) {
         String id = accountId(accountId);
         return httpPut("/accounts/" + id + "/webhooks/inactivate", null, WebhookSubscription.class);
@@ -75,10 +92,15 @@ public final class WebhookResource extends BaseResource {
         return inactivate(null);
     }
 
+    /** {@code GET /webhooks/event-types} — list the catalogue of subscribable webhook event types. */
     public List<WebhookEventTypeInfo> listEventTypes() {
         return httpGet("/webhooks/event-types", new TypeReference<List<WebhookEventTypeInfo>>() {});
     }
 
+    /**
+     * {@code GET /accounts/{account_id}/webhooks} — list webhook delivery dispatches, with optional filters
+     * ({@code page}, {@code per-page}, {@code event}, {@code delivered}, {@code from}, {@code to}).
+     */
     public PaginatedResult<WebhookDispatch> listDispatches(ListDispatchesParams params, String accountId) {
         String id = accountId(accountId);
         Map<String, String> queryParams = buildDispatchQueryParams(params);
@@ -93,6 +115,7 @@ public final class WebhookResource extends BaseResource {
         return listDispatches(null, null);
     }
 
+    /** {@code POST /accounts/{account_id}/webhooks/{dispatch_id}/retry} — re-attempt a failed webhook delivery. */
     public WebhookDispatch retryDispatch(String dispatchId, String accountId) {
         String id = accountId(accountId);
         String did = requireId(dispatchId, "Dispatch ID");

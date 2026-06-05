@@ -59,6 +59,7 @@ public final class AssinafyClient {
                 ? rawBaseUrl.substring(0, rawBaseUrl.length() - 1)
                 : rawBaseUrl;
 
+        final int maxRetries = Math.max(0, options.getMaxRetries());
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(options.getTimeoutMs(), TimeUnit.MILLISECONDS)
                 .readTimeout(options.getTimeoutMs(), TimeUnit.MILLISECONDS)
@@ -72,7 +73,23 @@ public final class AssinafyClient {
                     } else if (options.getToken() != null && !options.getToken().isBlank()) {
                         requestBuilder.header("Authorization", "Bearer " + options.getToken());
                     }
-                    return chain.proceed(requestBuilder.build());
+                    okhttp3.Request request = requestBuilder.build();
+                    okhttp3.Response response = chain.proceed(request);
+
+                    int attempts = 0;
+                    while (isRetryable(response.code()) && attempts < maxRetries) {
+                        long waitMs = retryDelayMs(response, attempts);
+                        response.close();
+                        try {
+                            Thread.sleep(waitMs);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return chain.proceed(request);
+                        }
+                        attempts++;
+                        response = chain.proceed(request);
+                    }
+                    return response;
                 })
                 .build();
 
@@ -169,6 +186,39 @@ public final class AssinafyClient {
 
         Assignment assignment = assignments.create(document.getId(), assignmentPayload);
         return new UploadAndRequestSignaturesResult(document, assignment, signerIds);
+    }
+
+    private static boolean isRetryable(int statusCode) {
+        return statusCode == 429 || statusCode == 503;
+    }
+
+    private static final long MAX_RETRY_WAIT_MS = 30_000L;
+
+    /**
+     * Computes how long to wait before the next retry. Honors the server's {@code Retry-After} (delta-seconds)
+     * or {@code X-Rate-Limit-Reset} header when present; otherwise falls back to a simple linear backoff. The
+     * delay is capped at {@link #MAX_RETRY_WAIT_MS}.
+     */
+    private static long retryDelayMs(okhttp3.Response response, int attempt) {
+        Long headerSeconds = parseLong(response.header("Retry-After"));
+        if (headerSeconds == null) {
+            headerSeconds = parseLong(response.header("X-Rate-Limit-Reset"));
+        }
+        long waitMs = headerSeconds != null
+                ? headerSeconds * 1000L
+                : Math.min(MAX_RETRY_WAIT_MS, 1000L * (attempt + 1));
+        return Math.max(0L, Math.min(MAX_RETRY_WAIT_MS, waitMs));
+    }
+
+    private static Long parseLong(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     public OkHttpClient getHttpClient() {

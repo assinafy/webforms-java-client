@@ -20,11 +20,22 @@ public final class SignerResource extends BaseResource {
         super(httpClient, baseUrl, defaultAccountId);
     }
 
+    /**
+     * {@code POST /accounts/{account_id}/signers} — create a signer.
+     *
+     * <p><b>Idempotent by email.</b> When the payload carries an email, this first looks the signer up by email
+     * and, if one already exists, returns the existing record <em>without</em> sending the POST. As a safety net
+     * for a race, a duplicate-email error from the API (the live API reports this as HTTP 400, historically 409)
+     * is recovered by re-querying and returning the existing signer. Because of this, {@code create} will not
+     * apply changed {@code full_name}/{@code whatsapp_phone_number} values to an already-existing signer — use
+     * {@link #update} to modify an existing signer.</p>
+     */
     public Signer create(CreateSignerPayload payload, String accountId) {
         validateCreatePayload(payload);
         String id = accountId(accountId);
 
-        if (payload.getEmail() != null && !payload.getEmail().isBlank()) {
+        boolean hasEmail = payload.getEmail() != null && !payload.getEmail().isBlank();
+        if (hasEmail) {
             Signer existing = findByEmail(payload.getEmail(), id);
             if (existing != null) {
                 return existing;
@@ -34,7 +45,9 @@ public final class SignerResource extends BaseResource {
         try {
             return httpPost("/accounts/" + id + "/signers", normalisePayload(payload), Signer.class);
         } catch (ApiException e) {
-            if (e.getStatusCode() == 409 && payload.getEmail() != null && !payload.getEmail().isBlank()) {
+            // The API rejects a duplicate email (observed as HTTP 400, historically 409). Recover by
+            // returning the pre-existing signer when we can find it; otherwise surface the original error.
+            if ((e.getStatusCode() == 400 || e.getStatusCode() == 409) && hasEmail) {
                 Signer duplicate = findByEmail(payload.getEmail(), id);
                 if (duplicate != null) {
                     return duplicate;
@@ -48,6 +61,7 @@ public final class SignerResource extends BaseResource {
         return create(payload, null);
     }
 
+    /** {@code GET /accounts/{account_id}/signers/{signer_id}} — retrieve a signer's information. */
     public Signer get(String signerId, String accountId) {
         String id = accountId(accountId);
         String sid = requireId(signerId, "Signer ID");
@@ -58,6 +72,10 @@ public final class SignerResource extends BaseResource {
         return get(signerId, null);
     }
 
+    /**
+     * {@code GET /accounts/{account_id}/signers} — list signers of the workspace. Supports the documented
+     * {@code search} query parameter (filters by {@code full_name} or {@code email}) plus pagination params.
+     */
     public PaginatedResult<Signer> list(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
         return httpGetList("/accounts/" + id + "/signers",
@@ -72,6 +90,7 @@ public final class SignerResource extends BaseResource {
         return list(null, null);
     }
 
+    /** {@code PUT /accounts/{account_id}/signers/{signer_id}} — update a signer's information. */
     public Signer update(String signerId, UpdateSignerPayload payload, String accountId) {
         String id = accountId(accountId);
         String sid = requireId(signerId, "Signer ID");
@@ -88,6 +107,7 @@ public final class SignerResource extends BaseResource {
         return update(signerId, payload, null);
     }
 
+    /** {@code DELETE /accounts/{account_id}/signers/{signer_id}} — delete a signer. */
     public void delete(String signerId, String accountId) {
         String id = accountId(accountId);
         String sid = requireId(signerId, "Signer ID");
@@ -98,15 +118,19 @@ public final class SignerResource extends BaseResource {
         delete(signerId, null);
     }
 
+    /**
+     * Finds a signer by exact email using {@code GET /accounts/{account_id}/signers?search=...} and matching
+     * case-insensitively on the email. Returns {@code null} when no signer matches. Note the lookup pages
+     * through up to 100 search results, so it may miss a match if the workspace has many same-prefix emails.
+     */
     public Signer findByEmail(String email, String accountId) {
         assertEmail(email);
         String id = accountId(accountId);
         try {
             PaginatedResult<Signer> result = list(
                     queryParams("search", email, "per_page", "100"), id);
-            String lower = email.toLowerCase();
             return result.getData().stream()
-                    .filter(s -> s.getEmail() != null && s.getEmail().equalsIgnoreCase(lower))
+                    .filter(s -> s.getEmail() != null && s.getEmail().equalsIgnoreCase(email))
                     .findFirst()
                     .orElse(null);
         } catch (ApiException e) {

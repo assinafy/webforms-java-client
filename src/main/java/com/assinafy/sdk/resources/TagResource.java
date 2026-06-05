@@ -13,6 +13,8 @@ import java.util.Map;
 
 public final class TagResource extends BaseResource {
 
+    private static final int MAX_TAG_NAME_LENGTH = 64;
+
     public TagResource(OkHttpClient httpClient, String baseUrl, String defaultAccountId) {
         super(httpClient, baseUrl, defaultAccountId);
     }
@@ -78,6 +80,13 @@ public final class TagResource extends BaseResource {
         if (payload.getName() == null || payload.getName().isBlank()) {
             throw new ValidationException("Tag name is required");
         }
+        assertNameLength(payload.getName());
+    }
+
+    private void assertNameLength(String name) {
+        if (name != null && name.trim().length() > MAX_TAG_NAME_LENGTH) {
+            throw new ValidationException("Tag name must be at most " + MAX_TAG_NAME_LENGTH + " characters");
+        }
     }
 
     private Map<String, Object> buildUpdateBody(UpdateTagPayload payload) {
@@ -89,6 +98,7 @@ public final class TagResource extends BaseResource {
             if (payload.getName().isBlank()) {
                 throw new ValidationException("Tag name cannot be blank");
             }
+            assertNameLength(payload.getName());
             body.put("name", payload.getName());
         }
         if (payload.isColorSet()) {

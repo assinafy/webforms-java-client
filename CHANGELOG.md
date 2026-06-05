@@ -1,5 +1,67 @@
 # Changelog
 
+## [1.5.0] - 2026-06-05
+
+Full file-by-file audit against https://api.assinafy.com.br/v1/docs, verified live against the sandbox API.
+See [docs/AUDIT.md](docs/AUDIT.md) for the detailed audit report.
+
+### Breaking
+- **Removed `AssignmentResource.get(documentId, assignmentId, signerAccessCode)`.** It targeted an undocumented
+  route that returns HTTP 404 for every call (verified live: a sibling sub-route on the same IDs returns 200,
+  and auth failures return 401 — so the 404 is route-nonexistence). Use
+  `client.signerSelf.getSign(signerAccessCode)` (`GET /sign`), whose `DocumentDetails` carries the signer-facing
+  assignment view.
+- **`SignerSelfResource.uploadSignature(...)` now returns `void`** (was `byte[]`). `POST /signature` returns a
+  JSON envelope, not an artifact; the method now parses that envelope and raises `ApiException` on an error
+  (including an error envelope returned under HTTP 200) instead of returning the raw JSON bytes.
+
+### Fixed
+- `AssignmentResource.resetExpiration` now accepts a `null` `expires_at` to clear an assignment's expiration
+  (the documented behavior, verified live), and sends `{"expires_at": null}` instead of failing. Added
+  `clearExpiration(documentId, assignmentId)` for that intent.
+- `AuthenticationResource.resetPassword` no longer requires `token`; the docs mark it optional (it may be
+  delivered out-of-band). `email` and `new_password` remain required.
+- `FieldResource.validate` no longer throws `NullPointerException` on a `null` value; it forwards
+  `{"value": null}` to the API.
+- Binary endpoints (document/page/thumbnail/signature download) now surface the server's error message and
+  body via `ApiException`, instead of a generic "API request failed with status N".
+- `SignerResource.create` duplicate-email recovery now also handles the HTTP 400 the live API returns for a
+  duplicate (previously only 409). Removed a redundant `toLowerCase` in `findByEmail`.
+
+### Added
+- `current_signer`, `page_count`, and `created_by` fields on `DocumentDetails` (signer-facing and public
+  document responses were silently dropping these documented fields).
+- `step`, `notified`, and `notification_history` on `Signer` (the assignment-signer fields), plus a new
+  `AssignmentSignerNotification` model — exposes sequential-signing order, per-signer notified state, and
+  delivery history.
+- Opt-in retry: `AssinafyClientOptions.setMaxRetries(int)` retries HTTP 429/503 honoring `Retry-After`.
+  `ApiException.getRetryAfterSeconds()` surfaces the server's hint regardless.
+- Per-method Javadoc (HTTP verb + path) on every public resource method (previously missing on the Signer,
+  Field, Template, Webhook, and most Document methods).
+- `docs/EXAMPLES.md` now documents every method with full request and response JSON payloads.
+
+### Changed
+- **Java toolchain:** compile target raised from Java 17 to **Java 21**; CI now runs `mvn verify` on a JDK
+  **21 + 25** matrix (was a single JDK 25 job that never exercised the bytecode floor). `DocumentPage`/
+  `TemplatePage` dimensions are now `int` (the API returns integers).
+- **GitHub Actions:** actions pinned to commit SHAs, build matrix added, least-privilege permissions kept.
+  Added Dependabot, a tag-triggered `release.yml` (GitHub Packages, `packages: write`), and a `.gitlab-ci.yml`
+  for GitLab→GitHub mirror parity.
+- **pom.xml:** `distributionManagement` (GitHub Packages), a `release` profile that attaches `-sources`/
+  `-javadoc` jars, `maven-enforcer-plugin` (JDK 21+/Maven 3.8+), reproducible-build timestamp, SCM/developer
+  metadata, and refreshed dependencies (Jackson 2.18.2, JUnit 5.11.4, AssertJ 3.27.3, Surefire 3.5.2). Added a
+  Maven Wrapper (`./mvnw`).
+- `LiveSmokeTest` now defaults to the **sandbox** base URL (was production) and honors `ASSINAFY_BASE_URL`;
+  expanded to cover the document and field lifecycles and the assignment expiration round-trip.
+
+### Verified Live (sandbox)
+- All catalogue/read endpoints, full document lifecycle (upload → process → page/thumbnail/original download →
+  delete), field CRUD + validate/validate-multiple, tag CRUD, signer CRUD, assignment create + estimate-cost +
+  reset/clear expiration, public-document 404, and the removed-route 404.
+
+### Test Suite
+- 120 mock-backed unit tests + 16 live smoke tests (skipped without env vars). All green on JDK 21 and 25.
+
 ## [1.4.0] - 2026-05-27
 
 ### Added

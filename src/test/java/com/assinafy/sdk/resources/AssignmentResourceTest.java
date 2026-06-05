@@ -129,6 +129,38 @@ class AssignmentResourceTest {
     }
 
     @Test
+    void create_parsesSequentialSignerFields() throws Exception {
+        // Sequential-signing data (step/notified) and notification_history are returned on assignment signers.
+        server.enqueue(okJson(Map.of(
+                "id", "a1",
+                "signers", List.of(Map.of(
+                        "id", "signer-1",
+                        "full_name", "Bill M",
+                        "verification_method", "Email",
+                        "notification_methods", List.of("Email"),
+                        "step", 2,
+                        "notified", true,
+                        "completed", false,
+                        "notification_history", List.of(Map.of(
+                                "event", "signature_request",
+                                "status", "sent",
+                                "sent_at", "2026-06-05T20:49:18Z"
+                        ))
+                ))
+        )));
+
+        Assignment result = resource.create("doc-1", new CreateAssignmentPayload().setSignerStrings("signer-1"));
+
+        var signer = result.getSigners().get(0);
+        assertThat(signer.getStep()).isEqualTo(2);
+        assertThat(signer.getNotified()).isTrue();
+        assertThat(signer.getNotificationHistory()).hasSize(1);
+        assertThat(signer.getNotificationHistory().get(0).getEvent()).isEqualTo("signature_request");
+        assertThat(signer.getNotificationHistory().get(0).getStatus()).isEqualTo("sent");
+        assertThat(signer.getNotificationHistory().get(0).getSentAt()).isEqualTo("2026-06-05T20:49:18Z");
+    }
+
+    @Test
     void create_acceptsSignerRefObjects() throws Exception {
         server.enqueue(okJson(Map.of("id", "a1")));
 
@@ -183,24 +215,6 @@ class AssignmentResourceTest {
     }
 
     @Test
-    void get_passesAccessCodeAsQueryParameter() throws Exception {
-        server.enqueue(okJson(Map.of("id", "a1")));
-
-        resource.get("doc-1", "a1", "code-xyz");
-
-        RecordedRequest req = server.takeRequest();
-        assertThat(req.getMethod()).isEqualTo("GET");
-        assertThat(req.getPath())
-                .isEqualTo("/documents/doc-1/assignments/a1?signer-access-code=code-xyz");
-    }
-
-    @Test
-    void get_requiresAccessCode() {
-        assertThatThrownBy(() -> resource.get("doc-1", "a1", ""))
-                .isInstanceOf(ValidationException.class);
-    }
-
-    @Test
     void sign_postsEntriesArray() throws Exception {
         server.enqueue(okJson(List.of()));
 
@@ -250,9 +264,43 @@ class AssignmentResourceTest {
     }
 
     @Test
-    void resetExpiration_requiresExpiresAt() {
+    void resetExpiration_rejectsBlankButNonNull() {
         assertThatThrownBy(() -> resource.resetExpiration("doc-1", "a1", ""))
                 .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void resetExpiration_allowsNullToClearExpiration() throws Exception {
+        server.enqueue(okJson(Map.of("id", "a1", "expires_at", "value")));
+
+        resource.resetExpiration("doc-1", "a1", null);
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PUT");
+        assertThat(req.getPath())
+                .isEqualTo("/documents/doc-1/assignments/a1/reset-expiration");
+        assertThat(req.getBody().readUtf8()).isEqualTo("{\"expires_at\":null}");
+    }
+
+    @Test
+    void clearExpiration_sendsNullExpiresAt() throws Exception {
+        server.enqueue(okJson(Map.of("id", "a1")));
+
+        resource.clearExpiration("doc-1", "a1");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PUT");
+        assertThat(req.getBody().readUtf8()).isEqualTo("{\"expires_at\":null}");
+    }
+
+    @Test
+    void resetExpiration_sendsProvidedTimestamp() throws Exception {
+        server.enqueue(okJson(Map.of("id", "a1")));
+
+        resource.resetExpiration("doc-1", "a1", "2027-01-15T12:00:00Z");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getBody().readUtf8()).contains("\"expires_at\":\"2027-01-15T12:00:00Z\"");
     }
 
     @Test

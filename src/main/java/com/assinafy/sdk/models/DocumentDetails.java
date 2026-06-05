@@ -25,6 +25,15 @@ public final class DocumentDetails {
     private List<DocumentPage> pages;
     private List<Tag> tags;
 
+    @JsonProperty("current_signer")
+    private Signer currentSigner;
+
+    @JsonProperty("page_count")
+    private String pageCount;
+
+    @JsonProperty("created_by")
+    private String createdBy;
+
     @JsonProperty("created_at")
     private String createdAt;
 
@@ -107,4 +116,27 @@ public final class DocumentDetails {
 
     public List<DocumentActivity> getActivities() { return activities; }
     public void setActivities(List<DocumentActivity> activities) { this.activities = activities; }
+
+    /**
+     * The signer resolved from the {@code signer-access-code} on signer-facing endpoints
+     * ({@code GET /signers/{signer_id}/document} and {@code GET /sign}); {@code null} on account-owner
+     * document responses.
+     */
+    public Signer getCurrentSigner() { return currentSigner; }
+    public void setCurrentSigner(Signer currentSigner) { this.currentSigner = currentSigner; }
+
+    /**
+     * Page count as returned by the public lookup ({@code GET /public/documents/{document_id}}). The API
+     * returns this as a string (e.g. {@code "1"}); {@code null} on the full account-owner document shape,
+     * which exposes the page list via {@link #getPages()} instead.
+     */
+    public String getPageCount() { return pageCount; }
+    public void setPageCount(String pageCount) { this.pageCount = pageCount; }
+
+    /**
+     * Display name of the document's creator, returned by the public lookup
+     * ({@code GET /public/documents/{document_id}}); {@code null} on other document responses.
+     */
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
 }

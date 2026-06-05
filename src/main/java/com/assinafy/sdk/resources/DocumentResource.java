@@ -40,6 +40,10 @@ public final class DocumentResource extends BaseResource {
         super(httpClient, baseUrl, defaultAccountId);
     }
 
+    /**
+     * {@code POST /accounts/{account_id}/documents} — upload a PDF (multipart {@code file} field) to create a
+     * document. The file must be a readable {@code .pdf} no larger than 25&nbsp;MB.
+     */
     public DocumentDetails upload(File file, String accountId) {
         validateFile(file);
         String id = accountId(accountId);
@@ -112,6 +116,10 @@ public final class DocumentResource extends BaseResource {
         return document;
     }
 
+    /**
+     * {@code GET /accounts/{account_id}/documents} — list the workspace's documents. Supports documented
+     * filters (e.g. {@code status}, {@code search}) plus pagination ({@code page}, {@code per-page}, {@code sort}).
+     */
     public PaginatedResult<DocumentListItem> list(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
         return httpGetList("/accounts/" + id + "/documents",
@@ -126,12 +134,14 @@ public final class DocumentResource extends BaseResource {
         return list(null, null);
     }
 
+    /** {@code GET /documents/statuses} — list the catalogue of document statuses and whether each is deletable. */
     public List<DocumentStatus> statuses() {
         List<DocumentStatus> result = httpGet("/documents/statuses",
                 new TypeReference<List<DocumentStatus>>() {});
         return result != null ? result : Collections.emptyList();
     }
 
+    /** {@code GET /documents/{document_id}} — retrieve full document details, including pages and assignment. */
     public DocumentDetails details(String documentId) {
         String id = requireId(documentId, "Document ID");
         return httpGet("/documents/" + id, DocumentDetails.class);
@@ -141,6 +151,11 @@ public final class DocumentResource extends BaseResource {
         return details(documentId);
     }
 
+    /**
+     * Polls {@code GET /documents/{document_id}} until the document reaches a ready status
+     * ({@code metadata_ready}, {@code pending_signature}, or {@code certificated}), throwing a
+     * {@link ValidationException} if it enters a failed status or the {@code maxWaitMs} budget elapses.
+     */
     public DocumentDetails waitUntilReady(String documentId, long maxWaitMs, long pollIntervalMs) {
         String id = requireId(documentId, "Document ID");
         long start = System.currentTimeMillis();
@@ -172,27 +187,42 @@ public final class DocumentResource extends BaseResource {
         return waitUntilReady(documentId, 30_000, 2_000);
     }
 
+    /**
+     * {@code GET /documents/{document_id}/download/{artifact_name}} — download a document artifact as bytes.
+     *
+     * <p>Common artifact names are {@code "original"} (always available after upload) and {@code "certificated"}
+     * (the final signed PDF, available only once the document is certificated). When {@code artifactName} is
+     * {@code null} this defaults to {@code "certificated"}; requesting an artifact that does not yet exist
+     * raises an {@link com.assinafy.sdk.exceptions.ApiException} (HTTP 404, "Artefato não está disponível").</p>
+     */
     public byte[] download(String documentId, String artifactName) {
         String id = requireId(documentId, "Document ID");
         String artifact = artifactName != null ? artifactName : "certificated";
         return httpGetBinary("/documents/" + id + "/download/" + artifact);
     }
 
+    /**
+     * Convenience for {@link #download(String, String)} with the {@code "certificated"} artifact — the final
+     * signed PDF. Use {@code download(id, "original")} to fetch the originally uploaded PDF instead.
+     */
     public byte[] download(String documentId) {
         return download(documentId, "certificated");
     }
 
+    /** {@code GET /documents/{document_id}/thumbnail} — download the document's thumbnail image (JPEG). */
     public byte[] thumbnail(String documentId) {
         String id = requireId(documentId, "Document ID");
         return httpGetBinary("/documents/" + id + "/thumbnail");
     }
 
+    /** {@code GET /documents/{document_id}/pages/{page_id}/download} — download a single page image. */
     public byte[] downloadPage(String documentId, String pageId) {
         String docId = requireId(documentId, "Document ID");
         String pid = requireId(pageId, "Page ID");
         return httpGetBinary("/documents/" + docId + "/pages/" + pid + "/download");
     }
 
+    /** {@code GET /documents/{document_id}/activities} — list the document's activity/audit-trail entries. */
     public List<DocumentActivity> activities(String documentId) {
         String id = requireId(documentId, "Document ID");
         List<DocumentActivity> result = httpGet("/documents/" + id + "/activities",
@@ -200,11 +230,17 @@ public final class DocumentResource extends BaseResource {
         return result != null ? result : Collections.emptyList();
     }
 
+    /** {@code DELETE /documents/{document_id}} — delete a document (only allowed for deletable statuses). */
     public void delete(String documentId) {
         String id = requireId(documentId, "Document ID");
         httpDelete("/documents/" + id);
     }
 
+    /**
+     * {@code POST /accounts/{account_id}/templates/{template_id}/documents} — generate a document from a
+     * template. Each {@link TemplateSigner} binds a template role to a signer; optional {@code name},
+     * {@code message}, {@code expires_at}, {@code editor_fields}, and {@code tags} are taken from {@code options}.
+     */
     public DocumentDetails createFromTemplate(String templateId, List<TemplateSigner> signers,
             CreateDocumentFromTemplateOptions options, String accountId) {
         String tmplId = requireId(templateId, "Template ID");
@@ -227,6 +263,12 @@ public final class DocumentResource extends BaseResource {
         return createFromTemplate(templateId, signers, null, null);
     }
 
+    /**
+     * {@code POST /accounts/{account_id}/templates/{template_id}/documents/estimate-cost} — estimate the credit
+     * cost of generating a document from a template for the given signers, without creating it. Returns the raw
+     * cost-estimate object ({@code documents}, {@code credits}, {@code total_credits}, {@code document_balance},
+     * {@code has_sufficient_resources}, …).
+     */
     public Map<String, Object> estimateCostFromTemplate(String templateId, List<TemplateSigner> signers,
             String accountId) {
         String tmplId = requireId(templateId, "Template ID");
@@ -240,6 +282,10 @@ public final class DocumentResource extends BaseResource {
         return estimateCostFromTemplate(templateId, signers, null);
     }
 
+    /**
+     * {@code GET /documents/{signature_hash}/verify} — verify a document by its signature hash and return the
+     * verification details. This endpoint is public (no API key required).
+     */
     public Map<String, Object> verify(String hash) {
         String h = requireId(hash, "Signature hash");
         return httpGet("/documents/" + h + "/verify", new TypeReference<Map<String, Object>>() {});

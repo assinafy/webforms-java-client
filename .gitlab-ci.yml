@@ -1,0 +1,32 @@
+# GitLab CI mirror of .github/workflows/ci.yml. This repository's source of truth is GitLab; GitHub is a
+# downstream mirror. Keep this file and the GitHub Actions workflow in sync (same Java matrix, same `mvn verify`).
+
+stages:
+  - test
+
+variables:
+  # Cache Maven downloads inside the project so GitLab can cache them between runs.
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  MAVEN_CLI_OPTS: "--batch-mode --no-transfer-progress"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .m2/repository
+
+.test-template: &test-template
+  stage: test
+  script:
+    - mvn $MAVEN_CLI_OPTS verify
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+# Compile target is Java 21; verify on the supported floor (21) and the latest LTS (25).
+test:jdk21:
+  <<: *test-template
+  image: maven:3.9-eclipse-temurin-21
+
+test:jdk25:
+  <<: *test-template
+  image: maven:3.9-eclipse-temurin-25

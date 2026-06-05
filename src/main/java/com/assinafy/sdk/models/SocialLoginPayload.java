@@ -6,7 +6,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public final class SocialLoginPayload {
 
+    @JsonProperty("provider")
     private final String provider;
+
+    @JsonProperty("token")
     private final String token;
 
     @JsonProperty("has_accepted_terms")

@@ -10,8 +10,8 @@ public final class TemplatePage {
 
     private String id;
     private int number;
-    private double height;
-    private double width;
+    private int height;
+    private int width;
 
     @JsonProperty("download_url")
     private String downloadUrl;
@@ -24,11 +24,13 @@ public final class TemplatePage {
     public int getNumber() { return number; }
     public void setNumber(int number) { this.number = number; }
 
-    public double getHeight() { return height; }
-    public void setHeight(double height) { this.height = height; }
+    /** Page height in pixels. The API returns an integer. */
+    public int getHeight() { return height; }
+    public void setHeight(int height) { this.height = height; }
 
-    public double getWidth() { return width; }
-    public void setWidth(double width) { this.width = width; }
+    /** Page width in pixels. The API returns an integer. */
+    public int getWidth() { return width; }
+    public void setWidth(int width) { this.width = width; }
 
     public String getDownloadUrl() { return downloadUrl; }
     public void setDownloadUrl(String downloadUrl) { this.downloadUrl = downloadUrl; }

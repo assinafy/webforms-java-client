@@ -12,6 +12,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.OkHttpClient;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -21,6 +22,7 @@ public final class FieldResource extends BaseResource {
         super(httpClient, baseUrl, defaultAccountId);
     }
 
+    /** {@code POST /accounts/{account_id}/fields} — create a field definition. */
     public FieldDefinition create(CreateFieldPayload payload, String accountId) {
         validateCreatePayload(payload);
         String id = accountId(accountId);
@@ -31,6 +33,7 @@ public final class FieldResource extends BaseResource {
         return create(payload, null);
     }
 
+    /** {@code GET /accounts/{account_id}/fields} — list field definitions for the workspace. */
     public PaginatedResult<FieldDefinition> list(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
         return httpGetList("/accounts/" + id + "/fields",
@@ -45,6 +48,7 @@ public final class FieldResource extends BaseResource {
         return list(null, null);
     }
 
+    /** {@code GET /accounts/{account_id}/fields/{field_id}} — retrieve a single field definition. */
     public FieldDefinition get(String fieldId, String accountId) {
         String id = accountId(accountId);
         String fid = requireId(fieldId, "Field ID");
@@ -55,6 +59,7 @@ public final class FieldResource extends BaseResource {
         return get(fieldId, null);
     }
 
+    /** {@code PUT /accounts/{account_id}/fields/{field_id}} — update a field definition. */
     public FieldDefinition update(String fieldId, UpdateFieldPayload payload, String accountId) {
         if (payload == null) {
             throw new ValidationException("Field update payload is required");
@@ -68,6 +73,7 @@ public final class FieldResource extends BaseResource {
         return update(fieldId, payload, null);
     }
 
+    /** {@code DELETE /accounts/{account_id}/fields/{field_id}} — delete a field definition. */
     public void delete(String fieldId, String accountId) {
         String id = accountId(accountId);
         String fid = requireId(fieldId, "Field ID");
@@ -78,14 +84,22 @@ public final class FieldResource extends BaseResource {
         delete(fieldId, null);
     }
 
+    /**
+     * {@code POST /accounts/{account_id}/fields/{field_id}/validate} — validate a single value against a field
+     * definition's type/regex rules. Returns {@code {type, success, error_message}}. A {@code null} value is
+     * forwarded to the API (which decides validity) rather than rejected client-side. When provided, the
+     * {@code signerAccessCode} is sent as the {@code signer-access-code} query parameter.
+     */
     public FieldValidationResult validate(String fieldId, Object value, String signerAccessCode, String accountId) {
         String id = accountId(accountId);
         String fid = requireId(fieldId, "Field ID");
         Map<String, String> query = signerAccessCode != null && !signerAccessCode.isBlank()
                 ? Map.of("signer-access-code", signerAccessCode)
                 : Map.of();
+        Map<String, Object> body = new HashMap<>();
+        body.put("value", value);
         return httpPost("/accounts/" + id + "/fields/" + fid + "/validate",
-                Map.of("value", value), FieldValidationResult.class, query);
+                body, FieldValidationResult.class, query);
     }
 
     public FieldValidationResult validate(String fieldId, Object value, String signerAccessCode) {
@@ -96,6 +110,11 @@ public final class FieldResource extends BaseResource {
         return validate(fieldId, value, null, null);
     }
 
+    /**
+     * {@code POST /accounts/{account_id}/fields/validate-multiple} — validate several field/value pairs in one
+     * call. The request body is a JSON array of {@code {field_id, value}} objects; the response is an array of
+     * {@code {field_id, type, success, error_message}} results.
+     */
     public List<FieldValidationResult> validateMultiple(List<FieldValidationPayload> values,
             String signerAccessCode, String accountId) {
         if (values == null || values.isEmpty()) {
@@ -119,6 +138,7 @@ public final class FieldResource extends BaseResource {
         return validateMultiple(values, null, null);
     }
 
+    /** {@code GET /field-types} — list the available field types (e.g. {@code text}, {@code cpf}, {@code email}). */
     public List<FieldTypeInfo> listTypes() {
         List<FieldTypeInfo> result = httpGet("/field-types", new TypeReference<List<FieldTypeInfo>>() {});
         return result != null ? result : Collections.emptyList();

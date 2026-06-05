@@ -97,6 +97,19 @@ class FieldResourceTest {
     }
 
     @Test
+    void validate_allowsNullValueWithoutNpe() throws Exception {
+        // A null value must be forwarded as {"value":null}, not throw NullPointerException client-side.
+        server.enqueue(okJson(Map.of("type", "text", "success", false, "error_message", "Required")));
+
+        FieldValidationResult result = resource.validate("field-1", null);
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getBody().readUtf8()).isEqualTo("{\"value\":null}");
+        assertThat(result.getSuccess()).isFalse();
+    }
+
+    @Test
     void validateMultiple_postsValues() throws Exception {
         server.enqueue(okJson(List.of(Map.of("field_id", "field-1", "type", "email", "success", true,
                 "error_message", ""))));

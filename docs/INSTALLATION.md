@@ -2,8 +2,8 @@
 
 ## Requirements
 
-- Java 17 or later
-- Maven 3.8+ or Gradle 7+
+- Java 21 or later (the artifact is compiled to Java 21 bytecode)
+- Maven 3.8+ or Gradle 7+ (a Maven Wrapper, `./mvnw`, is included for contributors)
 
 ## Maven
 
@@ -13,7 +13,7 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>1.4.0</version>
+    <version>1.5.0</version>
 </dependency>
 ```
 
@@ -27,7 +27,7 @@ mvn install
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:1.4.0'
+    implementation 'com.assinafy:webforms-java-client-sdk:1.5.0'
 }
 ```
 
@@ -35,7 +35,7 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:1.4.0")
+    implementation("com.assinafy:webforms-java-client-sdk:1.5.0")
 }
 ```
 
@@ -80,4 +80,4 @@ The SDK pulls in:
 | Dependency                       | Version   | Purpose              |
 |----------------------------------|-----------|----------------------|
 | `com.squareup.okhttp3:okhttp`    | 4.12.0    | HTTP client          |
-| `com.fasterxml.jackson.core:jackson-databind` | 2.17.2 | JSON serialization |
+| `com.fasterxml.jackson.core:jackson-databind` | 2.18.2 | JSON serialization |

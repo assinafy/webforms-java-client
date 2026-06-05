@@ -1,0 +1,49 @@
+name: Release
+
+# Publishes the SDK (jar + sources + javadoc) to GitHub Packages when a version tag is pushed.
+# Kept separate from CI so day-to-day builds retain read-only permissions.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to GitHub Packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up JDK
+        # actions/setup-java@v4.7.1 — configures a settings.xml whose "github" server authenticates with the
+        # workflow token granted by `packages: write` above.
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - name: Verify
+        run: mvn --batch-mode --no-transfer-progress verify
+
+      - name: Deploy (sources + javadoc + jar)
+        run: mvn --batch-mode --no-transfer-progress -DskipTests -Prelease deploy
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

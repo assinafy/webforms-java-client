@@ -230,13 +230,49 @@ class DocumentResourceTest {
     }
 
     @Test
-    void getPublic_hitsPublicPath() throws Exception {
-        server.enqueue(okJson(Map.of("id", "doc-1", "name", "x.pdf")));
+    void getPublic_hitsPublicPathAndParsesPageCountAndCreatedBy() throws Exception {
+        server.enqueue(okJson(Map.of(
+                "resource", "document",
+                "id", "doc-1",
+                "name", "x.pdf",
+                "page_count", "1",
+                "created_by", "John Smith"
+        )));
 
         DocumentDetails d = resource.getPublic("doc-1");
 
         assertThat(server.takeRequest().getPath()).isEqualTo("/public/documents/doc-1");
         assertThat(d.getId()).isEqualTo("doc-1");
+        assertThat(d.getPageCount()).isEqualTo("1");
+        assertThat(d.getCreatedBy()).isEqualTo("John Smith");
+    }
+
+    @Test
+    void download_surfacesErrorEnvelopeMessageOnFailure() throws Exception {
+        // Binary endpoints must surface the API's error message, not a generic "status 404".
+        String body = "{\"status\":404,\"data\":null,\"message\":\"Artefato não está disponível.\"}";
+        server.enqueue(new MockResponse().setResponseCode(404).setBody(body)
+                .setHeader("Content-Type", "application/json"));
+
+        assertThatThrownBy(() -> resource.download("doc-1", "certificated"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
+                .hasMessageContaining("Artefato não está disponível.");
+    }
+
+    @Test
+    void apiException_capturesRetryAfterOn429() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(429)
+                .setBody(MAPPER.writeValueAsString(Map.of("status", 429, "message", "Too Many Requests")))
+                .setHeader("Content-Type", "application/json")
+                .setHeader("Retry-After", "30"));
+
+        try {
+            resource.statuses();
+            throw new AssertionError("expected ApiException");
+        } catch (com.assinafy.sdk.exceptions.ApiException e) {
+            assertThat(e.getStatusCode()).isEqualTo(429);
+            assertThat(e.getRetryAfterSeconds()).isEqualTo(30);
+        }
     }
 
     @Test

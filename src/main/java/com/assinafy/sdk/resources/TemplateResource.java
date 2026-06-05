@@ -13,6 +13,10 @@ public final class TemplateResource extends BaseResource {
         super(httpClient, baseUrl, defaultAccountId);
     }
 
+    /**
+     * {@code GET /accounts/{account_id}/templates} — list the workspace's templates. Supports the documented
+     * {@code search} query parameter plus pagination.
+     */
     public PaginatedResult<TemplateListItem> list(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
         return httpGetList("/accounts/" + id + "/templates",
@@ -27,6 +31,10 @@ public final class TemplateResource extends BaseResource {
         return list(null, null);
     }
 
+    /**
+     * {@code GET /accounts/{account_id}/templates/{template_id}} — retrieve a single template, including its
+     * roles, pages, field placements, tags, and default document tags.
+     */
     public TemplateDetails get(String templateId, String accountId) {
         String id = accountId(accountId);
         String tmplId = requireId(templateId, "Template ID");

@@ -1,5 +1,56 @@
 # Assinafy SDK Audit
 
+## Audit 2026-06-05 (v1.5.0)
+
+Source of truth: https://api.assinafy.com.br/v1/docs (rendered to markdown and parsed endpoint-by-endpoint).
+Live verification: https://sandbox.assinafy.com.br/v1.
+
+### Method
+
+Every documented endpoint (~80) was catalogued from the API reference. The SDK was then audited file-by-file
+across 14 areas — each API domain (authentication, signer, signer self-service, document, template, tag,
+assignment, signer documents, field, webhooks) plus four cross-cutting areas (transport/envelope/error
+handling, all models, build/CI tooling, and documentation). Each finding was independently re-verified against
+the docs and, where a read-only call could decide it, against the live sandbox. Findings requiring a write
+(create/expiration/404 route checks) were confirmed live with disposable sandbox data.
+
+### Confirmed findings and resolutions
+
+| Severity | Area | Finding | Resolution |
+|---|---|---|---|
+| Critical | Assignment | `assignments.get()` hit an undocumented route returning 404 for every call (verified live; sibling sub-route on same IDs returns 200, auth failures return 401). | Removed; callers use `signerSelf.getSign()` (`GET /sign`). |
+| High | Assignment | `resetExpiration` rejected `null`, but the API accepts `null` to clear the expiration (verified live). | Accept `null`; send `{"expires_at": null}`; added `clearExpiration(...)`. |
+| High | Tooling | CI built only on JDK 25 while the pom targeted Java 17 — the bytecode floor was never exercised. | Target **Java 21**; CI matrix on JDK 21 + 25. |
+| High | Docs | README/EXAMPLES had zero request/response JSON payloads; Javadoc verb+path missing on 5 resources. | EXAMPLES rewritten with real payloads; verb+path Javadoc added to every public method. |
+| Medium | Auth | `resetPassword` over-required `token` (docs mark it optional). | Made `token` optional. |
+| Medium | Signer | Idempotent create silently dropped updated fields; recovery only caught 409 (live returns 400). | Documented semantics; recovery now also handles 400. |
+| Medium | Signer self | `uploadSignature` returned raw JSON-envelope bytes and ignored envelope errors. | Returns `void`; parses envelope; raises `ApiException` on error. |
+| Medium | Document / models | Public lookup dropped `page_count`/`created_by`; signer-facing doc dropped `current_signer`. | Added the fields to `DocumentDetails`. |
+| Medium | Assignment / models | `Signer` (used for `assignment.signers`) dropped `step`, `notified`, `notification_history`. | Added the fields + `AssignmentSignerNotification` model. |
+| Medium | Transport | Binary download errors discarded the API error envelope; no 429/`Retry-After` handling. | Binary errors now surface message/body; `ApiException.getRetryAfterSeconds()` + opt-in `maxRetries`. |
+| Medium | Tooling | Actions on mutable tags; no source/javadoc jars; no publish/release workflow; smoke test defaulted to production. | SHA-pinned actions + Dependabot; `release` profile + `release.yml` + `distributionManagement`; smoke test defaults to sandbox. |
+| Low | Field / models | `validate(null)` threw NPE; page dimensions typed `double` though the API returns integers. | `validate` forwards `{"value": null}`; dimensions are `int`. |
+
+No false positives survived verification (every reported discrepancy was reproduced against the docs and/or the
+live API). Two intentionally-omitted endpoints were re-confirmed: `POST/PUT /accounts/{id}/templates` remain
+prose-only in the docs with no request contract, so no guessed upload/update methods were added.
+
+### Verification
+
+```bash
+mvn clean test          # 120 unit tests, 0 failures (JDK 21 and 25)
+ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ASSINAFY_BASE_URL=https://sandbox.assinafy.com.br/v1 \
+  mvn test -Dtest=LiveSmokeTest   # 16 live tests, 0 failures
+```
+
+Live coverage included the full document lifecycle (upload → process → download original/thumbnail/page →
+delete), field CRUD + validate, tag CRUD, signer CRUD, assignment create + estimate-cost + reset/clear
+expiration, public-document 404 envelope parsing, and the now-removed 404 route.
+
+---
+
+## Audit 2026-05-27 (v1.4.0)
+
 Audit date: 2026-05-27
 
 Source of truth: https://api.assinafy.com.br/v1/docs

@@ -6,7 +6,7 @@ Covers the documented authentication, document, signer, assignment, field defini
 
 ## Requirements
 
-- Java 17+
+- Java 21+ (the SDK is compiled to Java 21 bytecode; CI verifies it on JDK 21 and 25)
 - Maven 3.8+ (or Gradle 7+)
 
 ## Installation
@@ -17,14 +17,14 @@ Covers the documented authentication, document, signer, assignment, field defini
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>1.4.0</version>
+    <version>1.5.0</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:1.4.0'
+implementation 'com.assinafy:webforms-java-client-sdk:1.5.0'
 ```
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full setup instructions.
@@ -55,6 +55,14 @@ UploadAndRequestSignaturesResult result = client.uploadAndRequestSignatures(
 
 System.out.println("Document ID: " + result.getDocument().getId());
 ```
+
+> **Full request/response payloads** for every method are in [docs/EXAMPLES.md](docs/EXAMPLES.md).
+
+## Response envelope
+
+Every response is wrapped as `{ "status": <int>, "message": "<string>", "data": <payload> }`. The SDK unwraps
+`data` into the typed model and raises an `ApiException` whenever `status >= 400` (even under an HTTP 200).
+List endpoints also read the `X-Pagination-*` response headers into `PaginatedResult.getMeta()`.
 
 ## Authentication
 
@@ -101,6 +109,7 @@ client.auth.resetPassword("user@example.com", resetToken, "new-password");
 | `accountId`      | String  | —                                  | Default account/workspace ID              |
 | `baseUrl`        | String  | `https://api.assinafy.com.br/v1`   | API base URL (sandbox or production)      |
 | `timeoutMs`      | int     | `30000`                            | Request timeout in milliseconds           |
+| `maxRetries`     | int     | `0`                                | Auto-retries on HTTP 429/503 (honors `Retry-After`) |
 
 ### Factory Methods
 
@@ -136,8 +145,14 @@ DocumentDetails details = client.documents.details(doc.getId());
 // Wait until ready for signing
 DocumentDetails ready = client.documents.waitUntilReady(doc.getId());
 
-// Download signed PDF
+// Download the final signed PDF (defaults to the "certificated" artifact; 404s until certificated)
 byte[] pdf = client.documents.download(doc.getId());
+byte[] original = client.documents.download(doc.getId(), "original");
+byte[] thumbnail = client.documents.thumbnail(doc.getId());
+byte[] pageImage = client.documents.downloadPage(doc.getId(), pageId);
+
+// Audit trail
+List<DocumentActivity> activities = client.documents.activities(doc.getId());
 
 // Check signing progress
 boolean done = client.documents.isFullySigned(doc.getId());
@@ -165,9 +180,10 @@ Signer signer = client.signers.create(
         .setWhatsappPhoneNumber("+5548999990000")
 );
 
-// Idempotent by email — reuses if already exists
+// Idempotent by email — reuses an existing signer instead of creating a duplicate (does not update fields)
 Signer existing = client.signers.findByEmail("john@example.com");
 
+Signer fetched = client.signers.get(signer.getId());
 PaginatedResult<Signer> list = client.signers.list(Map.of("search", "john"));
 client.signers.update(signer.getId(), new UpdateSignerPayload().setFullName("Johnny Doe"));
 client.signers.delete(signer.getId());
@@ -184,7 +200,8 @@ Assignment assignment = client.assignments.create(doc.getId(),
         .setExpiresAt("2024-12-31T23:59:00Z"));
 
 client.assignments.resendNotification(doc.getId(), assignment.getId(), signer1.getId());
-client.assignments.resetExpiration(doc.getId(), assignment.getId(), "2025-06-30T00:00:00Z");
+client.assignments.resetExpiration(doc.getId(), assignment.getId(), "2027-06-30T00:00:00Z");
+client.assignments.clearExpiration(doc.getId(), assignment.getId());  // remove expiration (sends expires_at: null)
 client.assignments.estimateResendCost(doc.getId(), assignment.getId(), signer1.getId());
 client.assignments.whatsappNotifications(doc.getId(), assignment.getId());
 ```
@@ -195,8 +212,9 @@ Endpoints authorised via a short-lived `signer-access-code`. These are typically
 signer landing page rather than from the account-holder's server.
 
 ```java
-// Fetch the assignment the signer is being asked to complete
-Assignment a = client.assignments.get(doc.getId(), assignmentId, signerAccessCode);
+// Fetch the assignment the signer is being asked to complete (GET /sign returns the document view,
+// whose getAssignment()/getCurrentSigner() carry the signer-facing assignment data).
+DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
 
 // Submit collect-method field values
 client.assignments.sign(doc.getId(), assignmentId, signerAccessCode, List.of(
@@ -247,7 +265,8 @@ WebhookSubscription sub = client.webhooks.register(
 );
 
 client.webhooks.getSubscription();
-client.webhooks.inactivate();
+client.webhooks.inactivate();         // deactivate but keep the subscription
+client.webhooks.deleteSubscription(); // permanently remove the subscription
 client.webhooks.listEventTypes();
 client.webhooks.listDispatches();
 client.webhooks.retryDispatch(dispatchId);
@@ -271,6 +290,10 @@ FieldDefinition field = client.fields.create(new CreateFieldPayload("text", "Ref
 
 PaginatedResult<FieldDefinition> fields = client.fields.list(
     Map.of("include_standard", "true"));
+
+FieldDefinition one = client.fields.get(field.getId());
+client.fields.update(field.getId(), new UpdateFieldPayload().setName("Internal Reference"));
+client.fields.delete(field.getId());
 
 FieldValidationResult validation = client.fields.validate(field.getId(), "ABC-123");
 List<FieldTypeInfo> fieldTypes = client.fields.listTypes();
@@ -318,9 +341,16 @@ try {
 # Run tests in Docker (recommended)
 docker compose run --rm test
 
-# Or run locally with Maven (requires Java 17+)
-mvn test
+# Or run locally with the Maven Wrapper (requires JDK 21+)
+./mvnw test
+
+# Live smoke tests against the sandbox (skipped unless credentials are set; defaults to the sandbox base URL)
+ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ./mvnw test -Dtest=LiveSmokeTest
 ```
+
+CI runs `mvn verify` on a JDK 21 + 25 matrix (GitHub Actions, mirrored to `.gitlab-ci.yml`). Releases publish
+to GitHub Packages on a `v*` tag via the `release` profile (`-Prelease`, which also builds `-sources` and
+`-javadoc` jars).
 
 ## License
 

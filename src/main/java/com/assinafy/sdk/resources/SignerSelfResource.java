@@ -79,11 +79,16 @@ public final class SignerSelfResource extends BaseResource {
     /**
      * {@code POST /signature} — upload the signer's signature or initial image.
      *
+     * <p>The image is sent as the raw request body (content type auto-detected as {@code image/png} or
+     * {@code image/jpeg} from the file header). The API responds with a JSON envelope
+     * ({@code {"status":200,"message":"","data":[]}}), so this method returns {@code void} and raises an
+     * {@link com.assinafy.sdk.exceptions.ApiException} on an error envelope or non-2xx status.</p>
+     *
      * @param signerAccessCode access code for the signer
      * @param imageBytes raw PNG or JPEG image bytes
      * @param type either {@code "signature"} or {@code "initial"}; defaults to {@code "signature"}
      */
-    public byte[] uploadSignature(String signerAccessCode, byte[] imageBytes, String type) {
+    public void uploadSignature(String signerAccessCode, byte[] imageBytes, String type) {
         if (imageBytes == null || imageBytes.length == 0) {
             throw new ValidationException("Signature image bytes are required");
         }
@@ -91,7 +96,7 @@ public final class SignerSelfResource extends BaseResource {
         MediaType mediaType = detectImageMediaType(imageBytes);
         RequestBody body = RequestBody.create(imageBytes, mediaType);
         Map<String, String> params = signatureQuery(signerAccessCode, signatureType);
-        return httpPostBinary("/signature", params, body);
+        httpPostBinaryEnvelope("/signature", params, body);
     }
 
     /** {@code GET /signature/{type}} — download the signer's signature or initial image. */

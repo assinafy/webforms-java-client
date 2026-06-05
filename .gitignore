@@ -15,3 +15,12 @@ target/
 .classpath
 .project
 .factorypath
+
+# Local Claude Code session state (never commit)
+.claude/
+
+# Local Maven repo cache (used by GitLab CI's MAVEN_OPTS)
+.m2/
+
+# Local audit/scratch artifacts (never commit; may contain sandbox credentials)
+.audit/

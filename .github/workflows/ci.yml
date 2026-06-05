@@ -5,6 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege: CI only needs to read the repository.
 permissions:
   contents: read
 
@@ -14,20 +15,29 @@ concurrency:
 
 jobs:
   test:
-    name: Maven tests
+    name: Maven tests (JDK ${{ matrix.java }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    strategy:
+      fail-fast: false
+      matrix:
+        # The SDK compiles to Java 21 bytecode (the floor consumers must run); verify the test suite on the
+        # supported floor (21) and the latest LTS (25). Add new LTS releases here as they ship.
+        java: ["21", "25"]
+
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        # actions/checkout@v4.2.2 pinned to a commit SHA for supply-chain safety.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
-      - name: Set up JDK 25
-        uses: actions/setup-java@v4
+      - name: Set up JDK ${{ matrix.java }}
+        # actions/setup-java@v4.7.1 pinned to a commit SHA.
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: ${{ matrix.java }}
           cache: maven
 
       - name: Run tests
-        run: mvn --batch-mode --no-transfer-progress test
+        run: mvn --batch-mode --no-transfer-progress verify

@@ -109,6 +109,37 @@ class AuthenticationResourceTest {
     }
 
     @Test
+    void resetPassword_omitsTokenWhenAbsentButKeepsEmailAndNewPassword() throws Exception {
+        server.enqueue(okJson(Map.of("email", "me@example.com")));
+
+        // The docs mark `token` optional; a null token must be accepted and simply omitted from the body.
+        resource.resetPassword("me@example.com", null, "new-secret");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getPath()).isEqualTo("/authentication/reset-password");
+        String body = req.getBody().readUtf8();
+        assertThat(body).contains("\"email\":\"me@example.com\"", "\"new_password\":\"new-secret\"");
+        assertThat(body).doesNotContain("\"token\"");
+    }
+
+    @Test
+    void resetPassword_includesTokenWhenProvided() throws Exception {
+        server.enqueue(okJson(Map.of("email", "me@example.com")));
+
+        resource.resetPassword("me@example.com", "reset-tok", "new-secret");
+
+        assertThat(server.takeRequest().getBody().readUtf8()).contains("\"token\":\"reset-tok\"");
+    }
+
+    @Test
+    void resetPassword_stillRequiresEmailAndNewPassword() {
+        assertThatThrownBy(() -> resource.resetPassword("", null, "new"))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.resetPassword("me@example.com", "tok", ""))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
     void validatesRequiredFields() {
         assertThatThrownBy(() -> resource.login("", "secret")).isInstanceOf(ValidationException.class);
         assertThatThrownBy(() -> resource.socialLogin(new SocialLoginPayload("google", "token", null)))

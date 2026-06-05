@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Keep Maven dependencies (OkHttp, Jackson, JUnit, AssertJ, build plugins) current.
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # Keep the SHA-pinned GitHub Actions current (Dependabot updates the pinned SHA + version comment).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10

@@ -176,9 +176,19 @@ public abstract class BaseResource {
         return executeBinary(request);
     }
 
+    /**
+     * POST a binary (e.g. image) request body to an endpoint that responds with a JSON envelope rather than a
+     * binary artifact. The envelope is parsed so envelope-level errors ({@code status >= 400}) surface as
+     * {@link ApiException}; the success payload is discarded.
+     */
+    protected void httpPostBinaryEnvelope(String path, Map<String, String> queryParams, RequestBody body) {
+        Request request = new Request.Builder().url(buildUrl(path, queryParams)).post(body).build();
+        execute(request, MAPPER.getTypeFactory().constructType(Object.class));
+    }
+
     protected <T> T httpPostMultipart(String path, RequestBody multipartBody, Class<T> dataType) {
         Request request = new Request.Builder()
-                .url(baseUrl + path)
+                .url(buildUrl(path, Collections.emptyMap()))
                 .post(multipartBody)
                 .build();
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
@@ -273,7 +283,11 @@ public abstract class BaseResource {
         try (Response response = httpClient.newCall(request).execute()) {
             ResponseBody responseBody = response.body();
             String json = responseBody != null ? responseBody.string() : "";
-            return parseEnvelope(json, response.code(), dataType);
+            try {
+                return parseEnvelope(json, response.code(), dataType);
+            } catch (ApiException e) {
+                throw attachRetryAfter(e, response);
+            }
         } catch (ApiException e) {
             throw e;
         } catch (ValidationException e) {
@@ -288,10 +302,14 @@ public abstract class BaseResource {
             if (!response.isSuccessful()) {
                 ResponseBody responseBody = response.body();
                 String json = responseBody != null ? responseBody.string() : "";
-                if (!json.isBlank()) {
-                    tryThrowEnvelopeError(json, response.code());
+                try {
+                    if (!json.isBlank()) {
+                        tryThrowEnvelopeError(json, response.code());
+                    }
+                    throw new ApiException(response.code());
+                } catch (ApiException e) {
+                    throw attachRetryAfter(e, response);
                 }
-                throw new ApiException(response.code());
             }
         } catch (ApiException e) {
             throw e;
@@ -303,7 +321,16 @@ public abstract class BaseResource {
     private byte[] executeBinary(Request request) {
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                throw new ApiException(response.code());
+                ResponseBody responseBody = response.body();
+                String json = responseBody != null ? responseBody.string() : "";
+                try {
+                    if (!json.isBlank()) {
+                        tryThrowEnvelopeError(json, response.code());
+                    }
+                    throw new ApiException(response.code());
+                } catch (ApiException e) {
+                    throw attachRetryAfter(e, response);
+                }
             }
             ResponseBody responseBody = response.body();
             return responseBody != null ? responseBody.bytes() : new byte[0];
@@ -318,13 +345,42 @@ public abstract class BaseResource {
         try (Response response = httpClient.newCall(request).execute()) {
             ResponseBody responseBody = response.body();
             String json = responseBody != null ? responseBody.string() : "";
-            List<T> data = parseEnvelope(json, response.code(), listType);
+            List<T> data;
+            try {
+                data = parseEnvelope(json, response.code(), listType);
+            } catch (ApiException e) {
+                throw attachRetryAfter(e, response);
+            }
             PaginationMeta meta = parsePaginationMeta(response);
             return new PaginatedResult<>(data != null ? data : Collections.emptyList(), meta);
         } catch (ApiException e) {
             throw e;
         } catch (IOException e) {
             throw new NetworkException("Network error: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Captures the server's retry hint into the exception so callers can back off on 429. Reads
+     * {@code Retry-After} first, then falls back to {@code X-Rate-Limit-Reset}. Only the delta-seconds form is
+     * surfaced; an HTTP-date {@code Retry-After} is ignored. Header lookup is case-insensitive (OkHttp).
+     */
+    private ApiException attachRetryAfter(ApiException e, Response response) {
+        Integer seconds = parseRetryAfterSeconds(response.header("Retry-After"));
+        if (seconds == null) {
+            seconds = parseRetryAfterSeconds(response.header("X-Rate-Limit-Reset"));
+        }
+        return seconds != null ? e.withRetryAfterSeconds(seconds) : e;
+    }
+
+    private Integer parseRetryAfterSeconds(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ex) {
+            return null;
         }
     }
 
