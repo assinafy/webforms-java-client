@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.5.1] - 2026-06-05
 
 ### Changed
 - Dependency maintenance (Dependabot), all verified green on JDK 21 + 25:

@@ -17,14 +17,14 @@ Covers the documented authentication, document, signer, assignment, field defini
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>1.5.0</version>
+    <version>1.5.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:1.5.0'
+implementation 'com.assinafy:webforms-java-client-sdk:1.5.1'
 ```
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full setup instructions.
