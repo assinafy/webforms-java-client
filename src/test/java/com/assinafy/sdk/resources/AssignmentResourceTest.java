@@ -2,7 +2,11 @@ package com.assinafy.sdk.resources;
 
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.Assignment;
+import com.assinafy.sdk.models.CostEstimate;
 import com.assinafy.sdk.models.CreateAssignmentPayload;
+import com.assinafy.sdk.models.PaginatedResult;
+import com.assinafy.sdk.models.ResendCostEstimate;
+import com.assinafy.sdk.models.ResendResult;
 import com.assinafy.sdk.models.SignerRef;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.OkHttpClient;
@@ -312,5 +316,75 @@ class AssignmentResourceTest {
         assertThat(server.takeRequest().getPath())
                 .isEqualTo("/documents/doc-1/assignments/a1/whatsapp-notifications");
         assertThat(notifications).hasSize(1);
+    }
+
+    @Test
+    void list_sendsCamelCaseAccountIdQueryAndParsesPagination() throws Exception {
+        String body = MAPPER.writeValueAsString(Map.of("status", 200, "data",
+                List.of(Map.of("id", "a1", "method", "virtual"))));
+        server.enqueue(new MockResponse()
+                .setBody(body)
+                .setHeader("Content-Type", "application/json")
+                .setHeader("x-pagination-current-page", "1")
+                .setHeader("x-pagination-total-count", "10"));
+
+        PaginatedResult<Assignment> page = resource.list();
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getPath()).isEqualTo("/assignments?accountId=acc");
+        assertThat(page.getData().get(0).getId()).isEqualTo("a1");
+        assertThat(page.getMeta().getTotal()).isEqualTo(10);
+    }
+
+    @Test
+    void estimateCost_parsesTypedCostEstimate() throws Exception {
+        server.enqueue(okJson(Map.of(
+                "documents", 1,
+                "credits", 0,
+                "needs_extra_document", false,
+                "total_credits", 0,
+                "breakdown", List.of(),
+                "document_balance", 86,
+                "credit_balance", 0,
+                "has_sufficient_resources", true)));
+
+        CostEstimate cost = resource.estimateCost("doc-1",
+                new CreateAssignmentPayload().setSignerStrings("s1"));
+
+        assertThat(server.takeRequest().getPath()).isEqualTo("/documents/doc-1/assignments/estimate-cost");
+        assertThat(cost.getDocuments()).isEqualTo(1);
+        assertThat(cost.getHasSufficientResources()).isTrue();
+        assertThat(cost.getBlockingReason()).isNull();
+    }
+
+    @Test
+    void resendNotification_parsesTypedResult() throws Exception {
+        server.enqueue(okJson(Map.of("is_sent", true, "document_id", "doc-1", "signer_id", "s1")));
+
+        ResendResult result = resource.resendNotification("doc-1", "a1", "s1");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PUT");
+        assertThat(req.getPath()).isEqualTo("/documents/doc-1/assignments/a1/signers/s1/resend");
+        assertThat(result.getSent()).isTrue();
+        assertThat(result.getDocumentId()).isEqualTo("doc-1");
+    }
+
+    @Test
+    void estimateResendCost_parsesCompactShape() throws Exception {
+        server.enqueue(okJson(Map.of(
+                "total", 0,
+                "breakdown", List.of(Map.of("code", "NotificationEmailResend", "name", "Email Resend", "cost", 0)),
+                "credit_balance", 0,
+                "has_sufficient_credits", true)));
+
+        ResendCostEstimate cost = resource.estimateResendCost("doc-1", "a1", "s1");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath())
+                .isEqualTo("/documents/doc-1/assignments/a1/signers/s1/estimate-resend-cost");
+        assertThat(cost.getHasSufficientCredits()).isTrue();
+        assertThat(cost.getBreakdown().get(0).getCode()).isEqualTo("NotificationEmailResend");
     }
 }

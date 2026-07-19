@@ -2,7 +2,11 @@ package com.assinafy.sdk.resources;
 
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.Assignment;
+import com.assinafy.sdk.models.CostEstimate;
 import com.assinafy.sdk.models.CreateAssignmentPayload;
+import com.assinafy.sdk.models.PaginatedResult;
+import com.assinafy.sdk.models.ResendCostEstimate;
+import com.assinafy.sdk.models.ResendResult;
 import com.assinafy.sdk.models.SignerRef;
 import com.assinafy.sdk.models.WhatsappNotification;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -20,6 +24,29 @@ public final class AssignmentResource extends BaseResource {
         super(httpClient, baseUrl, defaultAccountId);
     }
 
+    /**
+     * {@code GET /assignments} — list assignments across the account.
+     *
+     * <p>Unlike the other assignment routes this one is not document-scoped; the API takes the account context
+     * as the camelCase {@code accountId} query parameter (not a path segment). The SDK supplies it from the
+     * client's default account id (or the explicit {@code accountId}). Supports {@code page} / {@code per-page}
+     * and returns pagination metadata via {@link PaginatedResult#getMeta()}.</p>
+     */
+    public PaginatedResult<Assignment> list(Map<String, String> params, String accountId) {
+        String id = accountId(accountId);
+        Map<String, String> query = new LinkedHashMap<>(params != null ? params : Map.of());
+        query.put("accountId", id);
+        return httpGetList("/assignments", query, Assignment.class);
+    }
+
+    public PaginatedResult<Assignment> list(Map<String, String> params) {
+        return list(params, null);
+    }
+
+    public PaginatedResult<Assignment> list() {
+        return list(null, null);
+    }
+
     /** {@code POST /documents/{documentId}/assignments} — create an assignment (virtual or collect). */
     public Assignment create(String documentId, CreateAssignmentPayload payload) {
         String docId = requireId(documentId, "Document ID");
@@ -27,13 +54,15 @@ public final class AssignmentResource extends BaseResource {
         return httpPost("/documents/" + docId + "/assignments", body, Assignment.class);
     }
 
-    /** {@code POST /documents/{documentId}/assignments/estimate-cost} — estimate cost without creating. */
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    public Map<String, Object> estimateCost(String documentId, CreateAssignmentPayload payload) {
+    /**
+     * {@code POST /documents/{documentId}/assignments/estimate-cost} — estimate the credit cost of an
+     * assignment without creating it. Inspect {@link CostEstimate#getHasSufficientResources()} and
+     * {@link CostEstimate#getBlockingReason()} before creating.
+     */
+    public CostEstimate estimateCost(String documentId, CreateAssignmentPayload payload) {
         String docId = requireId(documentId, "Document ID");
         Map<String, Object> body = buildPayload(payload, true);
-        return (Map<String, Object>) httpPost("/documents/" + docId + "/assignments/estimate-cost",
-                body, Map.class);
+        return httpPost("/documents/" + docId + "/assignments/estimate-cost", body, CostEstimate.class);
     }
 
     /**
@@ -97,28 +126,33 @@ public final class AssignmentResource extends BaseResource {
         return resetExpiration(documentId, assignmentId, null);
     }
 
-    /** {@code PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend} */
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    public Map<String, Object> resendNotification(String documentId, String assignmentId, String signerId) {
+    /**
+     * {@code PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend} — resend the
+     * signature-request notification to a signer. Response payload: {@code {is_sent, document_id, signer_id}}.
+     */
+    public ResendResult resendNotification(String documentId, String assignmentId, String signerId) {
         String docId = requireId(documentId, "Document ID");
         String asgId = requireId(assignmentId, "Assignment ID");
         String sid = requireId(signerId, "Signer ID");
-        return (Map<String, Object>) httpPut(
+        return httpPut(
                 "/documents/" + docId + "/assignments/" + asgId + "/signers/" + sid + "/resend",
-                null, Map.class);
+                null, ResendResult.class);
     }
 
     /**
-     * {@code POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost}
+     * {@code POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost} —
+     * estimate the credit cost of resending a request to a signer. The live response is the compact
+     * {@link ResendCostEstimate} shape ({@code total}, {@code breakdown}, {@code credit_balance},
+     * {@code has_sufficient_credits}) — note this differs from the full {@link CostEstimate} the OpenAPI spec
+     * references for this route; the SDK follows the live behavior.
      */
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    public Map<String, Object> estimateResendCost(String documentId, String assignmentId, String signerId) {
+    public ResendCostEstimate estimateResendCost(String documentId, String assignmentId, String signerId) {
         String docId = requireId(documentId, "Document ID");
         String asgId = requireId(assignmentId, "Assignment ID");
         String sid = requireId(signerId, "Signer ID");
-        return (Map<String, Object>) httpPost(
+        return httpPost(
                 "/documents/" + docId + "/assignments/" + asgId + "/signers/" + sid + "/estimate-resend-cost",
-                null, Map.class);
+                null, ResendCostEstimate.class);
     }
 
     /** {@code GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications} */

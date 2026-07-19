@@ -1,5 +1,92 @@
 # Changelog
 
+## [2.0.0] - 2026-07-19
+
+Second full file-by-file audit against https://api.assinafy.com.br/v1/docs, verified live against the sandbox
+API endpoint-by-endpoint. See [docs/AUDIT.md](docs/AUDIT.md) for the detailed report. This is a **breaking**
+release: several methods that returned untyped `Map<String, Object>` now return typed models, one method that
+targeted a non-existent route was removed, and a signer-facing payload's field names were corrected.
+
+### Breaking
+- **Typed returns replace raw `Map<String, Object>`** (the SDK is now uniformly typed):
+  - `assignments.estimateCost(...)` → `CostEstimate` (was `Map`).
+  - `documents.estimateCostFromTemplate(...)` → `CostEstimate` (was `Map`).
+  - `assignments.estimateResendCost(...)` → `ResendCostEstimate` (was `Map`) — modelled on the **live** compact
+    shape (`total`, `breakdown`, `credit_balance`, `has_sufficient_credits`), which differs from the full
+    `CostEstimate` the OpenAPI spec references for that route.
+  - `assignments.resendNotification(...)` → `ResendResult` (was `Map`).
+  - `documents.verify(...)` → `DocumentVerification` (was `Map`).
+- **`tags.delete(...)`, `documents.detachTag(...)`, and `documents.sendToken(...)` now return `void`** (were
+  `Map<String, Object>`). The server response carried only a boolean/echo already asserted by the envelope path.
+- **Removed `webhooks.deleteSubscription()`.** It targeted `DELETE /accounts/{id}/webhooks/subscriptions`, a
+  route the API does not define (verified live: it returns the router-level 404 "Página não encontrada", while
+  routed methods on the same path reach the controller). Use `webhooks.inactivate()` (`PUT .../inactivate`) to
+  stop deliveries — there is no hard-delete server-side.
+- **`signerSelf.confirmSignerData(...)` now returns the updated `Signer`** (was `void`), and
+  **`ConfirmSignerDataPayload` fields are corrected** to the endpoint's real schema: `full_name`, `email`,
+  `government_id` (removed `whatsapp_phone_number` and `has_accepted_terms`, which the endpoint ignores).
+- **`WebhookSubscription` no longer exposes `getId()`/`getCreatedAt()`** — the API models the subscription as a
+  singleton per account and returns neither field (both getters always returned `null`).
+
+### Fixed
+- **`signerSelf.acceptTerms(...)` and `signerSelf.verifyEmail(...)` now send the `signer-access-code` as the
+  required query parameter** instead of in the JSON body. Per the API's security scheme the code is a query
+  parameter, so the previous body placement failed authentication against the real API. `verifyEmail` sends
+  only `{"verification-code": ...}` in the body; `acceptTerms` sends no body.
+- **`fields.validateMultiple(...)` now serializes a `null` value** as `{"field_id": ..., "value": null}`
+  instead of dropping the `value` key (`@JsonInclude(NON_NULL)` was removed from `FieldValidationPayload`). The
+  API requires the key to be present, so a `null` value previously produced an HTTP 400 — inconsistent with the
+  single `validate(...)` path, which already worked.
+- **The void and binary transport paths now surface an error envelope returned under HTTP 200.**
+  `executeVoid`/`executeBinary` inspect the envelope status (as the typed path already did), so a
+  `{"status": 4xx, ...}` body under HTTP 200 on a delete/download raises `ApiException` instead of being
+  swallowed (or returned as if it were the artifact).
+- **`ApiException.getRetryAfterSeconds()` is only populated on retryable statuses (429/503).** It previously
+  fell back to the always-present `X-Rate-Limit-Reset` header on every error, so a permanent 400/401 wrongly
+  reported a retry hint. A caller keying retries on its presence no longer backs off on non-retryable failures.
+
+### Added
+- **New endpoint coverage** (all verified live):
+  - `documents.rename(documentId, name)` → `PATCH /documents/{id}` (and a new `httpPatch` transport helper).
+  - `documents.search(params[, accountId])` → `GET /accounts/{id}/documents/search` (lightweight search).
+  - `assignments.list([params][, accountId])` → `GET /assignments` (sends the account context as the camelCase
+    `accountId` query parameter, as the API requires).
+  - `signerSelf.searchDocuments(signerId, signerAccessCode, term)` → `GET /signers/{id}/documents/search`.
+  - `auth.linkSocialLogin(provider, token)` → `POST /auth/link-social-login`.
+  - `webhooks.update(...)` — discoverability alias for `register(...)` (the spec names the PUT "Update").
+- `Signer.getSignatureReusable()` (`is_signature_reusable` from `GET /signers/self`), and an
+  `uploadSignature(..., Boolean reuse)` overload that sets the `reuse` query parameter.
+- New typed models: `CostEstimate`, `CostEstimateBreakdownItem`, `DocumentVerification`, `ResendCostEstimate`,
+  `ResendResult`.
+
+### Documentation
+- Corrected the README/EXAMPLES claim that the API-key endpoints require a token-authenticated client:
+  `getApiKey()` works with an API-key-only client (verified live). Documented that the browser-redirect OAuth
+  flows (`GET /auth/authenticate`, `GET /login-callback`) are intentionally out of scope for a server SDK, and
+  that `documents.sendToken` uses `{recipient, channel}` (the live contract) rather than the spec's stale
+  `{email}` body. Enriched method Javadoc across tags, documents, fields, and signer-self.
+
+### Notes
+- **`templates.get(templateId)` was re-verified and kept.** Although `GET /accounts/{id}/templates/{id}` is
+  absent from the OpenAPI spec, live probing proves it is a real controller (resource-level "Template não
+  encontrado." 404, not the router-level 404), unlike the phantom route removed in 1.5.0.
+- Account/user/logo/theme management endpoints remain intentionally out of scope; this SDK stays focused on the
+  webforms document-signing flows.
+
+### Tooling
+- Dependency bumps (patch): Jackson Databind 2.22.0 → 2.22.1, JUnit Jupiter 6.1.0 → 6.1.2. AssertJ (3.27.7),
+  and the compiler/surefire plugins are kept on their latest **stable** releases (the newer 4.0.0-M1 /
+  4.0.0-beta / 3.6.0-M1 artifacts are pre-releases). OkHttp remains on 4.12.0 — 5.x publishes as a
+  Kotlin-Multiplatform artifact and requires switching to `okhttp-jvm` plus MockWebServer API changes; tracked
+  separately.
+- GitHub Actions bumped and re-pinned to commit SHAs: `actions/checkout` v6.0.3 → **v7.0.0**,
+  `actions/setup-java` v5.2.0 → **v5.6.0** (in both `ci.yml` and `release.yml`). Least-privilege permissions,
+  the JDK 21 + 25 matrix, concurrency, and the GitLab CI mirror are unchanged.
+- Reproducible-build timestamp updated to the 2.0.0 release date.
+
+### Test Suite
+- 154 mock-backed unit tests + 20 live smoke tests (skipped without env vars). All green on JDK 21 and 25.
+
 ## [1.5.1] - 2026-06-05
 
 ### Changed

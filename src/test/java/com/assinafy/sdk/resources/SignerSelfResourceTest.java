@@ -55,6 +55,17 @@ class SignerSelfResourceTest {
     }
 
     @Test
+    void getSelf_parsesSignatureReusableFlag() throws Exception {
+        server.enqueue(okJson(Map.of("id", "signer-1", "full_name", "Test",
+                "has_signature", true, "has_initial", false, "is_signature_reusable", false)));
+
+        var self = resource.getSelf("code-123");
+
+        assertThat(self.getHasSignature()).isTrue();
+        assertThat(self.getSignatureReusable()).isFalse();
+    }
+
+    @Test
     void getSelf_throwsOnMissingAccessCode() {
         assertThatThrownBy(() -> resource.getSelf(""))
                 .isInstanceOf(ValidationException.class);
@@ -73,45 +84,49 @@ class SignerSelfResourceTest {
     }
 
     @Test
-    void acceptTerms_putsAccessCodeInBody() throws Exception {
+    void acceptTerms_putsAccessCodeInQueryNotBody() throws Exception {
         server.enqueue(okJson(Map.of("has_accepted_terms", true)));
 
         resource.acceptTerms("code-123");
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getMethod()).isEqualTo("PUT");
-        assertThat(req.getPath()).isEqualTo("/signers/accept-terms");
-        assertThat(req.getBody().readUtf8()).contains("\"signer-access-code\":\"code-123\"");
+        assertThat(req.getPath()).isEqualTo("/signers/accept-terms?signer-access-code=code-123");
+        // The access code is the query parameter; it must NOT be in the body (the endpoint has no body).
+        assertThat(req.getBody().readUtf8()).doesNotContain("signer-access-code");
     }
 
     @Test
-    void verifyEmail_postsCodes() throws Exception {
+    void verifyEmail_putsAccessCodeInQueryAndCodeInBody() throws Exception {
         server.enqueue(okJson(Map.of("verified", true)));
 
         resource.verifyEmail("123456", "code-123");
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getMethod()).isEqualTo("POST");
-        assertThat(req.getPath()).isEqualTo("/verify");
+        assertThat(req.getPath()).isEqualTo("/verify?signer-access-code=code-123");
         String body = req.getBody().readUtf8();
         assertThat(body).contains("\"verification-code\":\"123456\"");
-        assertThat(body).contains("\"signer-access-code\":\"code-123\"");
+        assertThat(body).doesNotContain("signer-access-code");
     }
 
     @Test
-    void confirmSignerData_putsToCorrectUrl() throws Exception {
-        server.enqueue(okJson(Map.of()));
+    void confirmSignerData_putsSpecFieldsAndReturnsSigner() throws Exception {
+        server.enqueue(okJson(Map.of("id", "signer-1", "full_name", "Jane Doe", "email", "a@b.com")));
 
-        resource.confirmSignerData("doc-1", "code-abc",
-                new ConfirmSignerDataPayload().setEmail("a@b.com").setHasAcceptedTerms(true));
+        var signer = resource.confirmSignerData("doc-1", "code-abc",
+                new ConfirmSignerDataPayload().setFullName("Jane Doe").setEmail("a@b.com")
+                        .setGovernmentId("15774136604"));
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getMethod()).isEqualTo("PUT");
         assertThat(req.getPath())
                 .isEqualTo("/documents/doc-1/signers/confirm-data?signer-access-code=code-abc");
         String body = req.getBody().readUtf8();
+        assertThat(body).contains("\"full_name\":\"Jane Doe\"");
         assertThat(body).contains("\"email\":\"a@b.com\"");
-        assertThat(body).contains("\"has_accepted_terms\":true");
+        assertThat(body).contains("\"government_id\":\"15774136604\"");
+        assertThat(signer.getId()).isEqualTo("signer-1");
     }
 
     @Test
@@ -129,6 +144,40 @@ class SignerSelfResourceTest {
         assertThat(req.getHeader("Content-Type")).contains("image/png");
         Buffer body = req.getBody();
         assertThat(body.readByteArray()).isEqualTo(png);
+    }
+
+    @Test
+    void uploadSignature_includesReuseQueryWhenProvided() throws Exception {
+        server.enqueue(okJson(List.of()));
+        byte[] png = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47};
+
+        resource.uploadSignature("code-xyz", png, "signature", true);
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getPath()).contains("type=signature");
+        assertThat(req.getPath()).contains("reuse=true");
+        assertThat(req.getPath()).contains("signer-access-code=code-xyz");
+    }
+
+    @Test
+    void uploadSignature_omitsReuseWhenNull() throws Exception {
+        server.enqueue(okJson(List.of()));
+
+        resource.uploadSignature("code-xyz", new byte[]{(byte) 0x89, 0x50}, "signature");
+
+        assertThat(server.takeRequest().getPath()).doesNotContain("reuse=");
+    }
+
+    @Test
+    void searchDocuments_hitsSearchEndpointWithTerm() throws Exception {
+        server.enqueue(okJson(List.of()));
+
+        resource.searchDocuments("signer-1", "code-1", "contract");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getPath()).contains("/signers/signer-1/documents/search?");
+        assertThat(req.getPath()).contains("search=contract");
+        assertThat(req.getPath()).contains("signer-access-code=code-1");
     }
 
     @Test

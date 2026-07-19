@@ -37,6 +37,25 @@ public final class AuthenticationResource extends BaseResource {
     }
 
     /**
+     * {@code POST /auth/link-social-login} - link a social-login provider to the authenticated user's account.
+     *
+     * <p>The request body is {@code {provider, token}} — note there is no {@code has_accepted_terms} here,
+     * unlike {@link #socialLogin(SocialLoginPayload)}. The success envelope carries no data, so this returns
+     * {@code void}. Requires an authenticated (token) session.</p>
+     *
+     * @param provider social provider identifier (e.g. {@code "google"})
+     * @param token token issued by the provider
+     */
+    public void linkSocialLogin(String provider, String token) {
+        requireValue(provider, "Provider");
+        requireValue(token, "Provider token");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("provider", provider);
+        body.put("token", token);
+        httpPostVoid("/auth/link-social-login", body);
+    }
+
+    /**
      * {@code POST /users/api-keys} - create a new API key for the authenticated user.
      *
      * <p>This endpoint is protected by {@code Authorization: Bearer {access_token}}, so it requires a client

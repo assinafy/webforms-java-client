@@ -1,5 +1,72 @@
 # Assinafy SDK Audit
 
+## Audit 2026-07-19 (v2.0.0)
+
+Source of truth, in priority order: (1) **live sandbox** behavior (`https://sandbox.assinafy.com.br/v1`),
+(2) the machine-readable **OpenAPI 3 spec** (`https://api.assinafy.com.br/v1/docs/openapi.json` — 65 paths / 86
+operations / 37 schemas), (3) the rendered docs. When live behavior contradicted the spec, live won and the
+contradiction was recorded.
+
+### Method
+
+The full OpenAPI spec was pulled and every one of the 86 operations was catalogued and mapped to an SDK method.
+The SDK was then audited file-by-file across 14 domains (each API area plus the cross-cutting transport, models,
+build/CI, and docs), comparing **code ↔ spec ↔ live** for each endpoint. Each finding was verified against the
+live sandbox with disposable, self-cleaning data (create-then-delete under a unique prefix), and each material
+finding was independently re-checked adversarially. Coverage delta this round vs. the API: **6 documented
+endpoints were missing** and are now implemented; **1 method targeted a non-existent route** and was removed;
+**5 methods returned untyped `Map`** and are now typed. All changes are verified by 154 mock unit tests and 20
+live smoke tests (green on JDK 21 + 25).
+
+### Confirmed findings and resolutions
+
+| Severity | Area | Finding | Resolution |
+|---|---|---|---|
+| High | Signer self | `acceptTerms`/`verifyEmail` sent the `signer-access-code` in the JSON body; the API requires it as a query parameter (would 401 in production). The unit tests enshrined the wrong placement. | Send it as `?signer-access-code=`; `verifyEmail` body is only `{"verification-code"}`. Tests corrected. |
+| High | Webhooks | `deleteSubscription()` hit `DELETE .../webhooks/subscriptions`, which the API does not route (live: router-level 404, vs controller 404 on routed methods) — could never succeed. | **Removed.** Use `inactivate()`; there is no hard-delete server-side. |
+| High | Signer self | `ConfirmSignerDataPayload` used `whatsapp_phone_number`/`has_accepted_terms`; the endpoint's schema is `full_name`/`email`/`government_id`, and the returned `Signer` was discarded. | Corrected the payload fields; `confirmSignerData` now returns `Signer`. |
+| High | Documents | `PATCH /documents/{id}` (rename) and `GET .../documents/search` were unimplemented (both live-verified 200). | Added `documents.rename(...)` (+ a `httpPatch` transport helper) and `documents.search(...)`. |
+| High | Assignments | `GET /assignments` (list) was unimplemented; live requires the account context as the camelCase `?accountId=`. | Added `assignments.list(...)` sending `accountId` literally. |
+| Medium | Fields | `validate-multiple` dropped a `null` value (`@JsonInclude(NON_NULL)`) → API 400, inconsistent with single `validate(null)`. | Removed the annotation so `{"value": null}` is always serialized. |
+| Medium | Transport | `executeVoid`/`executeBinary` didn't inspect the envelope on HTTP 200, so a `200 + error-envelope` (e.g. a failed download) was swallowed/returned as the artifact. | Both paths now raise `ApiException` on an error envelope even under HTTP 2xx. |
+| Medium | Transport | `getRetryAfterSeconds()` was populated on every error via the always-present `X-Rate-Limit-Reset`, wrongly signalling a retry on permanent 400/401. | Only attached on retryable statuses (429/503). |
+| Medium | Models | `estimateCost`, `estimateCostFromTemplate`, `estimateResendCost`, `resendNotification`, `verify` returned untyped `Map`. | Added typed `CostEstimate` (+`CostEstimateBreakdownItem`), `ResendCostEstimate`, `ResendResult`, `DocumentVerification`. |
+| Medium | Auth | `POST /auth/link-social-login` was unimplemented (live: route exists). | Added `auth.linkSocialLogin(provider, token)`. |
+| Medium | Signer self | `GET /signers/{id}/documents/search` unimplemented; `is_signature_reusable` (from `/signers/self`) dropped; `uploadSignature` omitted the `reuse` query param. | Added `searchDocuments(...)`, `Signer.getSignatureReusable()`, and a `reuse` overload. |
+| Low | Tags/Docs | `tags.delete` / `documents.detachTag` / `documents.sendToken` returned an opaque `Map`; `WebhookSubscription` exposed never-populated `id`/`createdAt`. | Return `void`; removed the dead getters. |
+| Low | Docs | README/EXAMPLES falsely claimed the API-key endpoints require a token client (`getApiKey` works with an API key, verified live); Javadoc gaps on filters/payloads. | Corrected the docs; enriched Javadoc; documented the stale-spec `send-token` body and the omitted OAuth flows. |
+
+### Verified not-a-bug (kept after live testing)
+
+- **`templates.get(templateId)`** (`GET /accounts/{id}/templates/{id}`) is **absent from the spec** but is a
+  real controller live (resource-level `"Template não encontrado."` 404, not the router-level 404). Unlike the
+  phantom `assignments.get()` removed in 1.5.0, this route exists — **kept**.
+- **`documents.sendToken`** sends `{recipient, channel}` and **document-tag** append/replace accept tag *names*:
+  both contradict the spec but match live behavior — the SDK is correct, the spec is stale.
+- **`create/update` field payloads** accept more fields than the documented body (e.g. `is_active` on create,
+  `type`/`is_required` on update) — live honors them, so the broader payloads are correct.
+
+### Intentionally out of scope
+
+Account/user/logo/theme management (`/accounts` CRUD, `/accounts/{id}/logo`, `/accounts/{id}/theme` — 9 live
+endpoints) is deliberately not wrapped: this SDK stays focused on the webforms document-signing flows. The
+browser-redirect OAuth endpoints (`GET /auth/authenticate`, `GET /login-callback`) are front-end redirects, not
+JSON APIs, and are likewise omitted.
+
+### Verification
+
+```bash
+mvn clean test          # 154 unit tests, 0 failures (JDK 21 and 25)
+ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ASSINAFY_BASE_URL=https://sandbox.assinafy.com.br/v1 \
+  mvn test -Dtest=LiveSmokeTest   # 20 live tests, 0 failures
+```
+
+Live coverage this round added: document rename (PATCH), lightweight search, assignments list (camelCase
+`accountId`), and typed public verify — on top of the existing document/field/tag/signer lifecycles and the
+assignment create + reset/clear-expiration round-trip.
+
+---
+
 ## Audit 2026-06-05 (v1.5.0)
 
 Source of truth: https://api.assinafy.com.br/v1/docs (rendered to markdown and parsed endpoint-by-endpoint).

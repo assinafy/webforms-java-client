@@ -78,7 +78,11 @@ Response `data`:
 client.auth.socialLogin(new SocialLoginPayload("google", googleToken, true));
 // Request: { "provider": "google", "token": "<google-token>", "has_accepted_terms": true }
 
-// API keys (these require a token-authenticated client, NOT an API-key-only client)
+// Link a social provider to the authenticated user — POST /auth/link-social-login
+client.auth.linkSocialLogin("google", googleToken);
+// Request: { "provider": "google", "token": "<google-token>" }   (no has_accepted_terms, unlike social-login)
+
+// API keys. getApiKey() works with an API-key-only client (returns the masked key, or null when none exists).
 ApiKeyResponse masked  = client.auth.getApiKey();      // GET /users/api-keys     -> { "api_key": "k_****" }
 ApiKeyResponse created = client.auth.createApiKey("password"); // POST /users/api-keys -> { "api_key": "k_new" }
 client.auth.deleteApiKey();                            // DELETE /users/api-keys
@@ -89,6 +93,9 @@ client.auth.requestPasswordReset("user@example.com");         // PUT /authentica
 client.auth.resetPassword("user@example.com", resetToken, "new"); // PUT /authentication/reset-password
 client.auth.resetPassword("user@example.com", null, "new");       // token omitted from the body
 ```
+
+> The browser-redirect OAuth flows (`GET /auth/authenticate`, `GET /login-callback`) are intentionally not
+> wrapped by this server-side SDK — they are front-end redirect endpoints, not JSON APIs.
 
 ## Documents
 
@@ -157,6 +164,23 @@ PaginatedResult<DocumentListItem> page = client.documents.list(
 System.out.println("Total: " + page.getMeta().getTotal());   // from X-Pagination-Total-Count header
 ```
 
+Supported filters: `status`, `method`, `search`, `tags`, `sort`, plus `page`/`per-page`.
+
+### Search — `GET /accounts/{account_id}/documents/search`
+
+```java
+// Lightweight search — same DocumentListItem shape but without the expanded assignment/pages sub-objects.
+PaginatedResult<DocumentListItem> hits = client.documents.search(Map.of("search", "invoice", "status", "pending_signature"));
+```
+
+### Rename — `PATCH /documents/{document_id}`
+
+```java
+DocumentDetails renamed = client.documents.rename(doc.getId(), "Signed contract.pdf");
+// Request: { "name": "Signed contract.pdf" }   (required, max 255 chars; allowed before an assignment exists)
+// Response data: the full DocumentDetails with the updated name.
+```
+
 ### Statuses — `GET /documents/statuses`
 
 ```java
@@ -193,7 +217,20 @@ client.documents.delete(doc.getId());                                 // DELETE 
 ### Verify — `GET /documents/{signature_hash}/verify` (public)
 
 ```java
-Map<String, Object> verification = client.documents.verify(signatureHash);
+DocumentVerification verification = client.documents.verify(signatureHash);
+if (verification.getIsValid()) { /* signed & valid */ }
+```
+
+Response `data` (an invalid/unknown hash returns `is_valid: false` with a `message`; `page_count`/`signer_count`
+are strings):
+
+```json
+{
+  "hash": "FE32EDDA...", "id": "63ddb172402799bfc991d10d", "status": "certificated",
+  "page_count": "1", "signer_count": "1", "completed_count": 1,
+  "completed_at": "2026-01-27T19:27:44Z", "verified_at": "2026-01-27T19:27:46Z",
+  "is_valid": true, "message": ""
+}
 ```
 
 ### Public lookup — `GET /public/documents/{document_id}` (no API key)
@@ -322,21 +359,32 @@ Response `data` (abridged — note per-signer `step`, `notified`, `notification_
 }
 ```
 
+### List — `GET /assignments`
+
+```java
+// Not document-scoped: the SDK sends the account context as the camelCase `accountId` query parameter.
+PaginatedResult<Assignment> all = client.assignments.list(Map.of("per_page", "20"));
+```
+
 ### Estimate cost — `POST /documents/{documentId}/assignments/estimate-cost`
 
 ```java
-Map<String, Object> cost = client.assignments.estimateCost(doc.getId(),
+CostEstimate cost = client.assignments.estimateCost(doc.getId(),
     new CreateAssignmentPayload()
         .setSigners(List.of(new SignerRef().setId(signerId).setVerificationMethod("Email"))));
+if (!cost.getHasSufficientResources()) {
+    System.out.println("Blocked: " + cost.getBlockingReason());   // PendingPayment | InsufficientDocuments | InsufficientCredits
+}
 ```
 
-Response `data`:
+Response `data` (typed as `CostEstimate`):
 
 ```json
 {
-  "documents": 1, "credits": 0, "total_credits": 0,
+  "documents": 1, "credits": 0, "needs_extra_document": false, "extra_document_cost": 0,
+  "total_credits": 0, "breakdown": [],
   "document_balance": 67, "credit_balance": 0,
-  "has_sufficient_resources": true, "blocking_reason": null
+  "has_sufficient_resources": true, "blocking_reason": null, "message": null
 }
 ```
 
@@ -348,10 +396,15 @@ client.assignments.resetExpiration(doc.getId(), assignment.getId(), "2027-06-30T
 // Pass null (or use clearExpiration) to remove the expiration: { "expires_at": null }
 client.assignments.clearExpiration(doc.getId(), assignment.getId());
 
-// PUT .../assignments/{asg}/signers/{signerId}/resend
-client.assignments.resendNotification(doc.getId(), assignment.getId(), signer1.getId());
+// PUT .../assignments/{asg}/signers/{signerId}/resend  -> ResendResult { is_sent, document_id, signer_id }
+ResendResult resent = client.assignments.resendNotification(doc.getId(), assignment.getId(), signer1.getId());
+
 // POST .../assignments/{asg}/signers/{signerId}/estimate-resend-cost
-client.assignments.estimateResendCost(doc.getId(), assignment.getId(), signer1.getId());
+// Note: live returns this compact shape (not the full CostEstimate the spec references).
+ResendCostEstimate resendCost = client.assignments.estimateResendCost(doc.getId(), assignment.getId(), signer1.getId());
+// Response data: { "total": 0, "breakdown": [ { "code": "NotificationEmailResend", "name": "Email Notification Resend", "cost": 0 } ],
+//                  "credit_balance": 0, "has_sufficient_credits": true }
+
 // GET .../assignments/{asg}/whatsapp-notifications
 List<WhatsappNotification> notifications = client.assignments.whatsappNotifications(doc.getId(), assignment.getId());
 ```
@@ -405,8 +458,8 @@ Response `data` (also returned by `getSubscription()`):
 
 ```java
 WebhookSubscription current = client.webhooks.getSubscription();    // GET .../webhooks/subscriptions (null if none)
-client.webhooks.inactivate();                                       // PUT .../webhooks/inactivate
-client.webhooks.deleteSubscription();                               // DELETE .../webhooks/subscriptions
+client.webhooks.update(sub);                                        // alias for register() (PUT is create-or-replace)
+client.webhooks.inactivate();                                       // PUT .../webhooks/inactivate (stop deliveries)
 List<WebhookEventTypeInfo> types = client.webhooks.listEventTypes();// GET /webhooks/event-types
 PaginatedResult<WebhookDispatch> dispatches = client.webhooks.listDispatches(   // GET /accounts/{id}/webhooks
     new ListDispatchesParams().setDelivered(false).setPerPage(20));
@@ -477,8 +530,8 @@ DocumentDetails doc = client.documents.createFromTemplate(
     new CreateDocumentFromTemplateOptions()
         .setName("NDA - John Doe").setTags(List.of("Generated")));
 
-// Estimate cost — POST /accounts/{id}/templates/{tid}/documents/estimate-cost
-Map<String, Object> cost = client.documents.estimateCostFromTemplate(
+// Estimate cost — POST /accounts/{id}/templates/{tid}/documents/estimate-cost  (typed CostEstimate)
+CostEstimate cost = client.documents.estimateCostFromTemplate(
     templateId, List.of(new TemplateSigner(firstRole.getId(), signerId)));
 ```
 
@@ -501,16 +554,20 @@ DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
 Signer current = signingView.getCurrentSigner();   // who the access code resolved to
 
 Signer self = client.signerSelf.getSelf(signerAccessCode);            // GET /signers/self
+boolean canReuse = Boolean.TRUE.equals(self.getSignatureReusable());  // is_signature_reusable
+// The access code is sent as the ?signer-access-code query parameter for these two calls:
 client.signerSelf.acceptTerms(signerAccessCode);                      // PUT /signers/accept-terms
 client.signerSelf.verifyEmail("123456", signerAccessCode);            // POST /verify
 
-// PUT /documents/{id}/signers/confirm-data — required before signing a virtual-method document
-client.signerSelf.confirmSignerData(documentId, signerAccessCode,
+// PUT /documents/{id}/signers/confirm-data — returns the updated Signer
+Signer confirmed = client.signerSelf.confirmSignerData(documentId, signerAccessCode,
     new ConfirmSignerDataPayload()
-        .setEmail("signer@example.com").setWhatsappPhoneNumber("+5548999990000").setHasAcceptedTerms(true));
+        .setFullName("John Doe").setEmail("signer@example.com").setGovernmentId("15774136604"));
+// Request: { "full_name": "John Doe", "email": "signer@example.com", "government_id": "15774136604" }
 
 // POST /signature — upload (PNG/JPEG auto-detected); returns void, throws on error envelope
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
+client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature", true); // ?reuse=true
 byte[] saved = client.signerSelf.downloadSignature(signerAccessCode, "signature"); // GET /signature/{type}
 ```
 
@@ -521,9 +578,12 @@ byte[] saved = client.signerSelf.downloadSignature(signerAccessCode, "signature"
 DocumentDetails currentDoc = client.signerSelf.getCurrentDocument(signerId, signerAccessCode);
 Signer who = currentDoc.getCurrentSigner();
 
-// GET /signers/{id}/documents (+ filters)
+// GET /signers/{id}/documents (pagination via page/per-page)
 PaginatedResult<DocumentDetails> mine = client.signerSelf.listDocuments(
-    signerId, signerAccessCode, Map.of("status", "pending_signature"));
+    signerId, signerAccessCode, Map.of("page", "1", "per_page", "20"));
+
+// GET /signers/{id}/documents/search — search the signer's documents by term
+PaginatedResult<DocumentDetails> found = client.signerSelf.searchDocuments(signerId, signerAccessCode, "invoice");
 
 // GET /signers/{id}/documents/{docId}/download/{artifact}
 byte[] copy = client.signerSelf.downloadDocument(signerId, documentId, "original", signerAccessCode);
@@ -563,11 +623,11 @@ import com.assinafy.sdk.exceptions.*;
 try {
     DocumentDetails doc = client.documents.upload(new File("contract.pdf"));
 } catch (ValidationException e) {
-    // Client-side validation failed (invalid file type, missing fields, etc.)
+    // Thrown ONLY by client-side pre-flight checks (invalid file type, missing account/id, etc.).
+    // Server-side validation failures come back as an ApiException with getStatusCode() == 400 and a message.
     System.err.println("Validation: " + e.getMessage());
-    e.getErrors().forEach((k, v) -> System.err.println("  " + k + ": " + v));
 } catch (ApiException e) {
-    // API returned an error (HTTP non-2xx or an error envelope)
+    // API returned an error (HTTP non-2xx or an error envelope) — includes server-side 400 validation errors
     System.err.println("API " + e.getStatusCode() + ": " + e.getMessage());
     System.err.println("Body: " + e.getResponseBody());
     if (e.getStatusCode() == 429 && e.getRetryAfterSeconds() != null) {

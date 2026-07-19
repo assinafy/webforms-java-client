@@ -107,8 +107,8 @@ class WebhookResourceTest {
                         "id", "dispatch-1",
                         "event", "document_ready",
                         "payload", Map.of("account_id", "acc"),
-                        "created_at", 1705312200,
-                        "updated_at", 1705312201
+                        "created_at", "2024-01-15T10:30:00Z",
+                        "updated_at", "2024-01-15T10:30:01Z"
                 )
         )));
         server.enqueue(new MockResponse()
@@ -119,7 +119,58 @@ class WebhookResourceTest {
 
         WebhookDispatch dispatch = result.getData().get(0);
         assertThat(dispatch.getPayload()).containsEntry("account_id", "acc");
-        assertThat(dispatch.getCreatedAt()).isEqualTo("1705312200");
+        assertThat(dispatch.getCreatedAt()).isEqualTo("2024-01-15T10:30:00Z");
+    }
+
+    @Test
+    void register_putsToSubscriptionsPath() throws Exception {
+        server.enqueue(okJson(Map.of("is_active", true, "url", "https://example.com/webhook",
+                "email", "ops@example.com", "events", List.of("document_ready"))));
+
+        WebhookSubscription sub = resource.register(
+                new RegisterWebhookPayload("https://example.com/webhook", "ops@example.com")
+                        .setEvents(List.of("document_ready")));
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PUT");
+        assertThat(req.getPath()).isEqualTo("/accounts/acc/webhooks/subscriptions");
+        assertThat(sub.isActive()).isTrue();
+        assertThat(sub.getUrl()).isEqualTo("https://example.com/webhook");
+    }
+
+    @Test
+    void getSubscription_getsSubscriptionsPath() throws Exception {
+        server.enqueue(okJson(Map.of("is_active", false, "url", "https://hooks/x",
+                "email", "ops@example.com", "events", List.of("document_ready"),
+                "updated_at", "2026-07-18T02:36:02Z")));
+
+        WebhookSubscription sub = resource.getSubscription();
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("GET");
+        assertThat(req.getPath()).isEqualTo("/accounts/acc/webhooks/subscriptions");
+        assertThat(sub.getEvents()).containsExactly("document_ready");
+        assertThat(sub.getUpdatedAt()).isEqualTo("2026-07-18T02:36:02Z");
+    }
+
+    @Test
+    void getSubscription_returnsNullOn404() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(404)
+                .setBody(MAPPER.writeValueAsString(Map.of("status", 404, "message", "Conta não encontrada.")))
+                .setHeader("Content-Type", "application/json"));
+
+        assertThat(resource.getSubscription()).isNull();
+    }
+
+    @Test
+    void retryDispatch_postsToRetryPath() throws Exception {
+        server.enqueue(okJson(Map.of("id", "dispatch-1", "event", "document_ready")));
+
+        resource.retryDispatch("dispatch-1");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath()).isEqualTo("/accounts/acc/webhooks/dispatch-1/retry");
     }
 
     @Test

@@ -33,7 +33,11 @@ public final class FieldResource extends BaseResource {
         return create(payload, null);
     }
 
-    /** {@code GET /accounts/{account_id}/fields} — list field definitions for the workspace. */
+    /**
+     * {@code GET /accounts/{account_id}/fields} — list field definitions for the workspace. Supported query
+     * parameters: {@code include_standard} (add the built-in signature/initial/signatureDate types) and
+     * {@code include_inactive}. Note this endpoint returns all matching fields and does not paginate.
+     */
     public PaginatedResult<FieldDefinition> list(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
         return httpGetList("/accounts/" + id + "/fields",

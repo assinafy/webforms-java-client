@@ -36,7 +36,11 @@ public final class SignerSelfResource extends BaseResource {
         return httpGet("/signers/self", accessCodeQuery(signerAccessCode), Signer.class);
     }
 
-    /** {@code GET /sign} - retrieve the signer-facing document and assignment details. */
+    /**
+     * {@code GET /sign} — retrieve the signer-facing document and assignment details. While the document is
+     * still being prepared the API responds 409 (surfaced as an {@link com.assinafy.sdk.exceptions.ApiException}
+     * with {@code getStatusCode() == 409}); retry with backoff until it succeeds.
+     */
     public DocumentDetails getSign(String signerAccessCode, Boolean hasAcceptedTerms) {
         Map<String, String> query = new LinkedHashMap<>(accessCodeQuery(signerAccessCode));
         if (hasAcceptedTerms != null) {
@@ -49,30 +53,37 @@ public final class SignerSelfResource extends BaseResource {
         return getSign(signerAccessCode, null);
     }
 
-    /** {@code PUT /signers/accept-terms} — accept the platform terms of use. */
+    /**
+     * {@code PUT /signers/accept-terms} — accept the platform terms of use. The {@code signer-access-code} is
+     * sent as the required query parameter (the endpoint takes no request body).
+     */
     public AcceptTermsResponse acceptTerms(String signerAccessCode) {
-        String code = requireAccessCode(signerAccessCode);
-        return httpPut("/signers/accept-terms", Map.of(SIGNER_ACCESS_CODE, code), AcceptTermsResponse.class);
+        return httpPut("/signers/accept-terms", null, AcceptTermsResponse.class,
+                accessCodeQuery(signerAccessCode));
     }
 
-    /** {@code POST /verify} — exchange a verification code for confirmation that the signer's email matches. */
+    /**
+     * {@code POST /verify} — exchange a one-time verification code for confirmation that the signer's email
+     * matches. The {@code signer-access-code} is sent as the required query parameter and the body carries only
+     * {@code {"verification-code": ...}}.
+     */
     public VerifyEmailResponse verifyEmail(String verificationCode, String signerAccessCode) {
-        String code = requireAccessCode(signerAccessCode);
         requireId(verificationCode, "Verification code");
-        Map<String, Object> body = Map.of(
-                "verification-code", verificationCode,
-                SIGNER_ACCESS_CODE, code
-        );
-        return httpPost("/verify", body, VerifyEmailResponse.class);
+        Map<String, Object> body = Map.of("verification-code", verificationCode);
+        return httpPost("/verify", body, VerifyEmailResponse.class, accessCodeQuery(signerAccessCode));
     }
 
-    /** {@code PUT /documents/{documentId}/signers/confirm-data} — confirm signer data before signing. */
-    public void confirmSignerData(String documentId, String signerAccessCode, ConfirmSignerDataPayload payload) {
+    /**
+     * {@code PUT /documents/{documentId}/signers/confirm-data} — confirm/update the signer's identifying data
+     * before signing. The request body carries any of {@code full_name}, {@code email}, {@code government_id};
+     * the {@code signer-access-code} is the required query parameter. Returns the updated {@link Signer}.
+     */
+    public Signer confirmSignerData(String documentId, String signerAccessCode, ConfirmSignerDataPayload payload) {
         String docId = requireId(documentId, "Document ID");
         if (payload == null) {
             throw new ValidationException("Payload is required");
         }
-        httpPut("/documents/" + docId + "/signers/confirm-data", payload, Map.class,
+        return httpPut("/documents/" + docId + "/signers/confirm-data", payload, Signer.class,
                 accessCodeQuery(signerAccessCode));
     }
 
@@ -87,16 +98,23 @@ public final class SignerSelfResource extends BaseResource {
      * @param signerAccessCode access code for the signer
      * @param imageBytes raw PNG or JPEG image bytes
      * @param type either {@code "signature"} or {@code "initial"}; defaults to {@code "signature"}
+     * @param reuse when non-{@code null}, sets the {@code reuse} query parameter, which controls whether the
+     *              signer's saved signature may be reused across documents ({@code is_signature_reusable})
      */
-    public void uploadSignature(String signerAccessCode, byte[] imageBytes, String type) {
+    public void uploadSignature(String signerAccessCode, byte[] imageBytes, String type, Boolean reuse) {
         if (imageBytes == null || imageBytes.length == 0) {
             throw new ValidationException("Signature image bytes are required");
         }
         String signatureType = resolveSignatureType(type);
         MediaType mediaType = detectImageMediaType(imageBytes);
         RequestBody body = RequestBody.create(imageBytes, mediaType);
-        Map<String, String> params = signatureQuery(signerAccessCode, signatureType);
+        Map<String, String> params = signatureQuery(signerAccessCode, signatureType, reuse);
         httpPostBinaryEnvelope("/signature", params, body);
+    }
+
+    /** {@code POST /signature} — upload without opting into signature reuse (see the {@code reuse} overload). */
+    public void uploadSignature(String signerAccessCode, byte[] imageBytes, String type) {
+        uploadSignature(signerAccessCode, imageBytes, type, null);
     }
 
     /** {@code GET /signature/{type}} — download the signer's signature or initial image. */
@@ -120,13 +138,32 @@ public final class SignerSelfResource extends BaseResource {
                 accessCodeQuery(signerAccessCode), DocumentDetails.class);
     }
 
-    /** {@code GET /signers/{signer_id}/documents} with documented filters such as status, method and search. */
+    /**
+     * {@code GET /signers/{signer_id}/documents} with pagination ({@code page}, {@code per-page}). To search by
+     * term, use {@link #searchDocuments(String, String, String)} instead — this route does not filter by search.
+     */
     public PaginatedResult<DocumentDetails> listDocuments(String signerId, String signerAccessCode,
             Map<String, String> params) {
         String sid = requireId(signerId, "Signer ID");
         Map<String, String> query = new LinkedHashMap<>(params != null ? params : Map.of());
         query.put(SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode));
         return httpGetList("/signers/" + sid + "/documents", query, DocumentDetails.class);
+    }
+
+    /**
+     * {@code GET /signers/{signer_id}/documents/search} — search the documents waiting for the signer by term.
+     * The {@code signer-access-code} is the required query parameter; {@code searchTerm} is passed as
+     * {@code search} when non-blank.
+     */
+    public PaginatedResult<DocumentDetails> searchDocuments(String signerId, String signerAccessCode,
+            String searchTerm) {
+        String sid = requireId(signerId, "Signer ID");
+        Map<String, String> query = new LinkedHashMap<>();
+        query.put(SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode));
+        if (searchTerm != null && !searchTerm.isBlank()) {
+            query.put("search", searchTerm);
+        }
+        return httpGetList("/signers/" + sid + "/documents/search", query, DocumentDetails.class);
     }
 
     /** {@code PUT /signers/documents/sign-multiple} — sign several virtual-method documents in one call. */
@@ -167,11 +204,14 @@ public final class SignerSelfResource extends BaseResource {
         return Map.of(SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode));
     }
 
-    private Map<String, String> signatureQuery(String signerAccessCode, String type) {
-        return Map.of(
-                SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode),
-                "type", type
-        );
+    private Map<String, String> signatureQuery(String signerAccessCode, String type, Boolean reuse) {
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put(SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode));
+        params.put("type", type);
+        if (reuse != null) {
+            params.put("reuse", String.valueOf(reuse));
+        }
+        return params;
     }
 
     private String resolveSignatureType(String type) {

@@ -17,14 +17,14 @@ Covers the documented authentication, document, signer, assignment, field defini
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>1.5.1</version>
+    <version>2.0.0</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:1.5.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.0.0'
 ```
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full setup instructions.
@@ -90,7 +90,9 @@ String accessToken = session.getAccessToken();
 AuthenticationResult googleSession = client.auth.socialLogin(
     new SocialLoginPayload("google", googleToken, true));
 
-// These API-key endpoints require a token-authenticated client.
+// API-key management. getApiKey() works with an API-key-only client (returns the masked key, or null if none
+// has been generated). createApiKey/deleteApiKey rotate the caller's key and are typically driven from a
+// token-authenticated session.
 ApiKeyResponse masked = client.auth.getApiKey();
 ApiKeyResponse created = client.auth.createApiKey("password");
 client.auth.deleteApiKey();
@@ -98,6 +100,9 @@ client.auth.deleteApiKey();
 client.auth.changePassword("user@example.com", "old-password", "new-password");
 client.auth.requestPasswordReset("user@example.com");
 client.auth.resetPassword("user@example.com", resetToken, "new-password");
+
+// Link a social-login provider (e.g. Google) to the authenticated user.
+client.auth.linkSocialLogin("google", googleToken);
 ```
 
 ## Configuration
@@ -139,8 +144,18 @@ DocumentDetails doc = client.documents.upload(pdfBytes, "contract.pdf");
 // List documents
 PaginatedResult<DocumentListItem> page = client.documents.list(Map.of("page", "1", "per_page", "20"));
 
+// Lightweight search (compact results — no expanded assignment/pages, cheaper for typeahead)
+PaginatedResult<DocumentListItem> hits = client.documents.search(Map.of("search", "invoice"));
+
+// Rename a document (PATCH /documents/{id}; allowed before an assignment exists)
+DocumentDetails renamed = client.documents.rename(doc.getId(), "Signed contract.pdf");
+
 // Get document details
 DocumentDetails details = client.documents.details(doc.getId());
+
+// Verify a signed document by its signature hash (public, no auth) — returns a typed result
+DocumentVerification verification = client.documents.verify(signatureHash);
+boolean valid = verification.getIsValid();
 
 // Wait until ready for signing
 DocumentDetails ready = client.documents.waitUntilReady(doc.getId());
@@ -199,10 +214,18 @@ Assignment assignment = client.assignments.create(doc.getId(),
         .setMessage("Please review and sign")
         .setExpiresAt("2024-12-31T23:59:00Z"));
 
-client.assignments.resendNotification(doc.getId(), assignment.getId(), signer1.getId());
+// List assignments across the account (the SDK sends the account context as the accountId query param)
+PaginatedResult<Assignment> assignments = client.assignments.list(Map.of("per_page", "20"));
+
+// Typed cost estimates
+CostEstimate cost = client.assignments.estimateCost(doc.getId(), new CreateAssignmentPayload()
+    .setSignerStrings(signer1.getId()));
+if (cost.getHasSufficientResources()) { /* ... */ }
+
+ResendResult resent = client.assignments.resendNotification(doc.getId(), assignment.getId(), signer1.getId());
 client.assignments.resetExpiration(doc.getId(), assignment.getId(), "2027-06-30T00:00:00Z");
 client.assignments.clearExpiration(doc.getId(), assignment.getId());  // remove expiration (sends expires_at: null)
-client.assignments.estimateResendCost(doc.getId(), assignment.getId(), signer1.getId());
+ResendCostEstimate resendCost = client.assignments.estimateResendCost(doc.getId(), assignment.getId(), signer1.getId());
 client.assignments.whatsappNotifications(doc.getId(), assignment.getId());
 ```
 
@@ -237,20 +260,24 @@ client.assignments.decline(doc.getId(), assignmentId, signerAccessCode, "Not hap
 Signer self = client.signerSelf.getSelf(signerAccessCode);
 client.signerSelf.acceptTerms(signerAccessCode);
 
-// Email/WhatsApp verification flow
+// Email/WhatsApp verification flow (the access code is sent as a query parameter)
 client.signerSelf.verifyEmail("123456", signerAccessCode);
-client.signerSelf.confirmSignerData(doc.getId(), signerAccessCode,
-    new ConfirmSignerDataPayload().setEmail("a@b.com").setHasAcceptedTerms(true));
+Signer confirmed = client.signerSelf.confirmSignerData(doc.getId(), signerAccessCode,
+    new ConfirmSignerDataPayload().setFullName("John Doe").setEmail("a@b.com")
+        .setGovernmentId("15774136604"));
 
-// Signature image upload (image type auto-detected as PNG or JPEG)
+// Signature image upload (image type auto-detected as PNG or JPEG). Pass reuse=true to allow the saved
+// signature to be reused across documents (sets is_signature_reusable).
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
+client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature", true);
 byte[] saved = client.signerSelf.downloadSignature(signerAccessCode, "signature");
 
 // Multi-document signer flows
 DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
 DocumentDetails current = client.signerSelf.getCurrentDocument(signerId, signerAccessCode);
 PaginatedResult<DocumentDetails> mine = client.signerSelf.listDocuments(
-    signerId, signerAccessCode, Map.of("status", "pending_signature"));
+    signerId, signerAccessCode, Map.of("page", "1", "per_page", "20"));
+PaginatedResult<DocumentDetails> found = client.signerSelf.searchDocuments(signerId, signerAccessCode, "invoice");
 byte[] signerCopy = client.signerSelf.downloadDocument(signerId, doc.getId(), "original", signerAccessCode);
 client.signerSelf.signMultiple(signerAccessCode, List.of(doc1.getId(), doc2.getId()));
 client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Not interested");
@@ -265,8 +292,8 @@ WebhookSubscription sub = client.webhooks.register(
 );
 
 client.webhooks.getSubscription();
-client.webhooks.inactivate();         // deactivate but keep the subscription
-client.webhooks.deleteSubscription(); // permanently remove the subscription
+client.webhooks.update(sub);          // alias for register(); PUT is create-or-replace
+client.webhooks.inactivate();         // stop deliveries but keep the subscription (there is no hard-delete endpoint)
 client.webhooks.listEventTypes();
 client.webhooks.listDispatches();
 client.webhooks.retryDispatch(dispatchId);

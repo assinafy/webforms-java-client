@@ -1,29 +1,22 @@
 package com.assinafy.sdk.models;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-@JsonInclude(JsonInclude.Include.NON_NULL)
+/**
+ * Options for creating an assignment (or estimating its cost). This is a builder-style holder; the resource
+ * serializes it into the wire body ({@code method}, {@code signers[]}, {@code message}, {@code expires_at},
+ * {@code copy_receivers}, {@code entries}) itself, so no Jackson field mapping is needed here.
+ */
 public final class CreateAssignmentPayload {
 
     private String method;
     private List<SignerRef> signers;
-
-    @JsonProperty("signer_ids")
     private List<String> signerIds;
-
     private String message;
-
-    @JsonProperty("expires_at")
     private String expiresAt;
-
-    @JsonProperty("copy_receivers")
     private List<String> copyReceivers;
-
     private List<Object> entries;
 
     public String getMethod() { return method; }

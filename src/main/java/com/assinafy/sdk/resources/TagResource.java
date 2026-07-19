@@ -5,7 +5,6 @@ import com.assinafy.sdk.models.CreateTagPayload;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.Tag;
 import com.assinafy.sdk.models.UpdateTagPayload;
-import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.OkHttpClient;
 
 import java.util.LinkedHashMap;
@@ -56,21 +55,24 @@ public final class TagResource extends BaseResource {
         return update(tagId, payload, null);
     }
 
-    /** {@code DELETE /accounts/{account_id}/tags/{tag_id}} - delete a workspace tag. */
-    public Map<String, Object> delete(String tagId, boolean force, String accountId) {
+    /**
+     * {@code DELETE /accounts/{account_id}/tags/{tag_id}} - delete a workspace tag. When {@code force} is
+     * {@code true} the {@code ?force=true} query is sent, which also detaches the tag from any documents it is
+     * attached to; otherwise the delete fails if the tag is still in use.
+     */
+    public void delete(String tagId, boolean force, String accountId) {
         String id = accountId(accountId);
         String tid = requireId(tagId, "Tag ID");
         Map<String, String> query = force ? Map.of("force", "true") : Map.of();
-        return httpDelete("/accounts/" + id + "/tags/" + tid,
-                new TypeReference<Map<String, Object>>() {}, query);
+        httpDelete("/accounts/" + id + "/tags/" + tid, query);
     }
 
-    public Map<String, Object> delete(String tagId, boolean force) {
-        return delete(tagId, force, null);
+    public void delete(String tagId, boolean force) {
+        delete(tagId, force, null);
     }
 
-    public Map<String, Object> delete(String tagId) {
-        return delete(tagId, false, null);
+    public void delete(String tagId) {
+        delete(tagId, false, null);
     }
 
     private void validateCreatePayload(CreateTagPayload payload) {

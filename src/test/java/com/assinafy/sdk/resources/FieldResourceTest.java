@@ -124,6 +124,43 @@ class FieldResourceTest {
     }
 
     @Test
+    void validateMultiple_serializesNullValueKey() throws Exception {
+        // The API requires the "value" key even when null; NON_NULL must not drop it (regression guard for the
+        // 400 "O atributo value é obrigatório" bug that made validateMultiple inconsistent with validate()).
+        server.enqueue(okJson(List.of(Map.of("field_id", "field-1", "type", "text", "success", true,
+                "error_message", ""))));
+
+        resource.validateMultiple(List.of(new FieldValidationPayload("field-1", null)));
+
+        String body = server.takeRequest().getBody().readUtf8();
+        assertThat(body).contains("\"field_id\":\"field-1\"");
+        assertThat(body).contains("\"value\":null");
+    }
+
+    @Test
+    void get_hitsFieldEndpoint() throws Exception {
+        server.enqueue(okJson(Map.of("id", "field-1", "name", "CPF", "type", "cpf")));
+
+        FieldDefinition field = resource.get("field-1");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("GET");
+        assertThat(req.getPath()).isEqualTo("/accounts/acc/fields/field-1");
+        assertThat(field.getName()).isEqualTo("CPF");
+    }
+
+    @Test
+    void delete_hitsFieldEndpoint() throws Exception {
+        server.enqueue(okJson(List.of()));
+
+        resource.delete("field-1");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("DELETE");
+        assertThat(req.getPath()).isEqualTo("/accounts/acc/fields/field-1");
+    }
+
+    @Test
     void listTypes_callsGlobalFieldTypesEndpoint() throws Exception {
         server.enqueue(okJson(List.of(Map.of("type", "text", "name", "Text"))));
 

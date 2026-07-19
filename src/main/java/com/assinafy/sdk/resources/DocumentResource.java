@@ -2,11 +2,13 @@ package com.assinafy.sdk.resources;
 
 import com.assinafy.sdk.exceptions.ApiException;
 import com.assinafy.sdk.exceptions.ValidationException;
+import com.assinafy.sdk.models.CostEstimate;
 import com.assinafy.sdk.models.CreateDocumentFromTemplateOptions;
 import com.assinafy.sdk.models.DocumentActivity;
 import com.assinafy.sdk.models.DocumentDetails;
 import com.assinafy.sdk.models.DocumentListItem;
 import com.assinafy.sdk.models.DocumentStatus;
+import com.assinafy.sdk.models.DocumentVerification;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.SigningProgress;
 import com.assinafy.sdk.models.Tag;
@@ -117,8 +119,9 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
-     * {@code GET /accounts/{account_id}/documents} — list the workspace's documents. Supports documented
-     * filters (e.g. {@code status}, {@code search}) plus pagination ({@code page}, {@code per-page}, {@code sort}).
+     * {@code GET /accounts/{account_id}/documents} — list the workspace's documents. Supported query
+     * parameters: {@code status}, {@code method}, {@code search}, {@code tags}, {@code sort}, plus pagination
+     * ({@code page}, {@code per-page}). The {@code per_page}/{@code perPage} key is normalized to {@code per-page}.
      */
     public PaginatedResult<DocumentListItem> list(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
@@ -132,6 +135,22 @@ public final class DocumentResource extends BaseResource {
 
     public PaginatedResult<DocumentListItem> list() {
         return list(null, null);
+    }
+
+    /**
+     * {@code GET /accounts/{account_id}/documents/search} — lightweight document search. Returns the same
+     * paginated {@link DocumentListItem} shape as {@link #list(Map, String)} but without the expanded
+     * {@code assignment}/{@code pages} sub-objects, so it is cheaper for autocomplete/typeahead. Accepts
+     * {@code search}, {@code status}, and pagination ({@code page}, {@code per-page}) query parameters.
+     */
+    public PaginatedResult<DocumentListItem> search(Map<String, String> params, String accountId) {
+        String id = accountId(accountId);
+        return httpGetList("/accounts/" + id + "/documents/search",
+                params != null ? params : Map.of(), DocumentListItem.class);
+    }
+
+    public PaginatedResult<DocumentListItem> search(Map<String, String> params) {
+        return search(params, null);
     }
 
     /** {@code GET /documents/statuses} — list the catalogue of document statuses and whether each is deletable. */
@@ -236,6 +255,24 @@ public final class DocumentResource extends BaseResource {
         httpDelete("/documents/" + id);
     }
 
+    private static final int MAX_DOCUMENT_NAME_LENGTH = 255;
+
+    /**
+     * {@code PATCH /documents/{document_id}} — rename a document. The request body is {@code {"name": name}} and
+     * the updated {@link DocumentDetails} is returned. {@code name} is required and limited to 255 characters;
+     * the server normalizes unsupported characters/diacritics.
+     */
+    public DocumentDetails rename(String documentId, String name) {
+        String id = requireId(documentId, "Document ID");
+        if (name == null || name.isBlank()) {
+            throw new ValidationException("Document name is required");
+        }
+        if (name.length() > MAX_DOCUMENT_NAME_LENGTH) {
+            throw new ValidationException("Document name must be at most " + MAX_DOCUMENT_NAME_LENGTH + " characters");
+        }
+        return httpPatch("/documents/" + id, Map.of("name", name), DocumentDetails.class);
+    }
+
     /**
      * {@code POST /accounts/{account_id}/templates/{template_id}/documents} — generate a document from a
      * template. Each {@link TemplateSigner} binds a template role to a signer; optional {@code name},
@@ -265,30 +302,33 @@ public final class DocumentResource extends BaseResource {
 
     /**
      * {@code POST /accounts/{account_id}/templates/{template_id}/documents/estimate-cost} — estimate the credit
-     * cost of generating a document from a template for the given signers, without creating it. Returns the raw
-     * cost-estimate object ({@code documents}, {@code credits}, {@code total_credits}, {@code document_balance},
-     * {@code has_sufficient_resources}, …).
+     * cost of generating a document from a template for the given signers, without creating it. Inspect
+     * {@link CostEstimate#getNeedsExtraDocument()}, {@link CostEstimate#getBlockingReason()}
+     * ({@code PendingPayment} / {@code InsufficientDocuments} / {@code InsufficientCredits}),
+     * {@link CostEstimate#getHasSufficientResources()}, and {@link CostEstimate#getBreakdown()} to decide.
      */
-    public Map<String, Object> estimateCostFromTemplate(String templateId, List<TemplateSigner> signers,
+    public CostEstimate estimateCostFromTemplate(String templateId, List<TemplateSigner> signers,
             String accountId) {
         String tmplId = requireId(templateId, "Template ID");
         String accId = accountId(accountId);
         validateTemplateSigners(signers);
         return httpPost("/accounts/" + accId + "/templates/" + tmplId + "/documents/estimate-cost",
-                Map.of("signers", signers), new TypeReference<Map<String, Object>>() {}, Map.of());
+                Map.of("signers", signers), CostEstimate.class, Map.of());
     }
 
-    public Map<String, Object> estimateCostFromTemplate(String templateId, List<TemplateSigner> signers) {
+    public CostEstimate estimateCostFromTemplate(String templateId, List<TemplateSigner> signers) {
         return estimateCostFromTemplate(templateId, signers, null);
     }
 
     /**
-     * {@code GET /documents/{signature_hash}/verify} — verify a document by its signature hash and return the
-     * verification details. This endpoint is public (no API key required).
+     * {@code GET /documents/{signature_hash}/verify} — verify a document by its signature hash. This endpoint
+     * is public (no API key required) and always responds 200; check {@link DocumentVerification#getIsValid()}.
+     * When the hash does not resolve to a signed document, {@code isValid} is {@code false} and
+     * {@link DocumentVerification#getMessage()} explains why.
      */
-    public Map<String, Object> verify(String hash) {
+    public DocumentVerification verify(String hash) {
         String h = requireId(hash, "Signature hash");
-        return httpGet("/documents/" + h + "/verify", new TypeReference<Map<String, Object>>() {});
+        return httpGet("/documents/" + h + "/verify", DocumentVerification.class);
     }
 
     /**
@@ -301,10 +341,17 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
-     * {@code PUT /public/documents/{document_id}/send-token} — request that a fresh signing token be sent
-     * to the given recipient. Unauthenticated endpoint used by signer landing pages.
+     * {@code PUT /public/documents/{document_id}/send-token} — request that a fresh signing token be sent to a
+     * signer. Unauthenticated endpoint used by signer landing pages.
+     *
+     * <p>The request body is {@code {"recipient": ..., "channel": ...}}, where {@code channel} is {@code "email"}
+     * or {@code "whatsapp"} (any other value yields a {@code "Canal inválido"} error) and {@code recipient} is
+     * the target email/phone. The target document must be in {@code pending_signature} status. (The OpenAPI spec
+     * documents an {@code {"email": ...}} body, but the live API rejects that and requires
+     * {@code recipient}+{@code channel}; the SDK follows the live behavior.) The success envelope carries no
+     * data, so this returns {@code void}.</p>
      */
-    public Map<String, Object> sendToken(String documentId, String recipient, String channel) {
+    public void sendToken(String documentId, String recipient, String channel) {
         String id = requireId(documentId, "Document ID");
         if (recipient == null || recipient.isBlank()) {
             throw new ValidationException("Recipient is required");
@@ -315,8 +362,7 @@ public final class DocumentResource extends BaseResource {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("recipient", recipient);
         body.put("channel", channel);
-        return httpPut("/public/documents/" + id + "/send-token", body,
-                new TypeReference<Map<String, Object>>() {}, Map.of());
+        httpPutVoid("/public/documents/" + id + "/send-token", body, Map.of());
     }
 
     /** {@code GET /accounts/{account_id}/documents/{document_id}/tags} */
@@ -360,17 +406,20 @@ public final class DocumentResource extends BaseResource {
         return appendTags(documentId, tags, null);
     }
 
-    /** {@code DELETE /accounts/{account_id}/documents/{document_id}/tags/{tag_id}} */
-    public Map<String, Object> detachTag(String documentId, String tagId, String accountId) {
+    /**
+     * {@code DELETE /accounts/{account_id}/documents/{document_id}/tags/{tag_id}} — detach a single tag from a
+     * document (the tag itself is not deleted from the workspace). An error is raised if the association or IDs
+     * are invalid.
+     */
+    public void detachTag(String documentId, String tagId, String accountId) {
         String docId = requireId(documentId, "Document ID");
         String tid = requireId(tagId, "Tag ID");
         String accId = accountId(accountId);
-        return httpDelete("/accounts/" + accId + "/documents/" + docId + "/tags/" + tid,
-                new TypeReference<Map<String, Object>>() {});
+        httpDelete("/accounts/" + accId + "/documents/" + docId + "/tags/" + tid);
     }
 
-    public Map<String, Object> detachTag(String documentId, String tagId) {
-        return detachTag(documentId, tagId, null);
+    public void detachTag(String documentId, String tagId) {
+        detachTag(documentId, tagId, null);
     }
 
     public boolean isFullySigned(String documentId) {

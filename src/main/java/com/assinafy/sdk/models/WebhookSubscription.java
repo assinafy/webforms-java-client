@@ -5,10 +5,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
 
+/**
+ * A workspace's single webhook subscription. The API models it as one subscription per account (there is no
+ * per-subscription {@code id} or creation timestamp — see {@code GET/PUT .../webhooks/subscriptions}).
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public final class WebhookSubscription {
 
-    private String id;
     private String url;
     private String email;
     private List<String> events;
@@ -16,14 +19,8 @@ public final class WebhookSubscription {
     @JsonProperty("is_active")
     private boolean active;
 
-    @JsonProperty("created_at")
-    private String createdAt;
-
     @JsonProperty("updated_at")
     private String updatedAt;
-
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
 
     public String getUrl() { return url; }
     public void setUrl(String url) { this.url = url; }
@@ -36,9 +33,6 @@ public final class WebhookSubscription {
 
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
-
-    public String getCreatedAt() { return createdAt; }
-    public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
 
     public String getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(String updatedAt) { this.updatedAt = updatedAt; }

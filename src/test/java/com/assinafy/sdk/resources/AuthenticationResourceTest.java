@@ -75,6 +75,48 @@ class AuthenticationResourceTest {
     }
 
     @Test
+    void linkSocialLogin_postsProviderAndTokenOnly() throws Exception {
+        server.enqueue(okJson(List.of()));
+
+        resource.linkSocialLogin("google", "provider-token");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath()).isEqualTo("/auth/link-social-login");
+        String body = req.getBody().readUtf8();
+        assertThat(body).contains("\"provider\":\"google\"", "\"token\":\"provider-token\"");
+        assertThat(body).doesNotContain("has_accepted_terms");
+    }
+
+    @Test
+    void linkSocialLogin_validatesRequiredFields() {
+        assertThatThrownBy(() -> resource.linkSocialLogin("", "token")).isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.linkSocialLogin("google", "")).isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void getApiKey_returnsNullWhenEnvelopeDataIsNull() throws Exception {
+        // The API returns data:null when no key has been generated yet; getApiKey() must surface that as null.
+        server.enqueue(new MockResponse()
+                .setBody("{\"status\":200,\"message\":\"\",\"data\":null}")
+                .setHeader("Content-Type", "application/json"));
+
+        assertThat(resource.getApiKey()).isNull();
+    }
+
+    @Test
+    void login_surfacesEnvelopeErrorAsApiException() throws Exception {
+        // A status>=400 envelope (even under HTTP 200/401) must raise ApiException with the code + message.
+        server.enqueue(new MockResponse().setResponseCode(401)
+                .setBody("{\"status\":401,\"data\":null,\"message\":\"Credenciais inválidas.\"}")
+                .setHeader("Content-Type", "application/json"));
+
+        assertThatThrownBy(() -> resource.login("me@example.com", "wrong"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
+                .hasMessageContaining("Credenciais inválidas.");
+    }
+
+    @Test
     void apiKeyMethodsUseDocumentedEndpoints() throws Exception {
         server.enqueue(okJson(Map.of("api_key", "masked")));
         server.enqueue(okJson(Map.of("api_key", "new-key")));

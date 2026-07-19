@@ -19,6 +19,7 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -109,6 +110,11 @@ public abstract class BaseResource {
     protected <T> T httpPut(String path, Object body, TypeReference<T> typeRef, Map<String, String> queryParams) {
         Request request = buildRequest("PUT", path, body, queryParams);
         return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
+    }
+
+    protected <T> T httpPatch(String path, Object body, Class<T> dataType) {
+        Request request = buildRequest("PATCH", path, body);
+        return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
     protected void httpDelete(String path) {
@@ -270,7 +276,7 @@ public abstract class BaseResource {
             } catch (Exception e) {
                 throw new ValidationException("Failed to serialize request body: " + e.getMessage());
             }
-        } else if ("POST".equals(method) || "PUT".equals(method)) {
+        } else if ("POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method)) {
             requestBody = RequestBody.create("", JSON);
         }
         return new Request.Builder()
@@ -299,17 +305,19 @@ public abstract class BaseResource {
 
     private void executeVoid(Request request) {
         try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                ResponseBody responseBody = response.body();
-                String json = responseBody != null ? responseBody.string() : "";
-                try {
-                    if (!json.isBlank()) {
-                        tryThrowEnvelopeError(json, response.code());
-                    }
-                    throw new ApiException(response.code());
-                } catch (ApiException e) {
-                    throw attachRetryAfter(e, response);
+            ResponseBody responseBody = response.body();
+            String json = responseBody != null ? responseBody.string() : "";
+            try {
+                // The API can return an error envelope (status >= 400) under an HTTP 2xx status, so the
+                // envelope must be inspected even on a "successful" HTTP response.
+                if (!json.isBlank()) {
+                    throwIfEnvelopeError(json, response.code());
                 }
+                if (!response.isSuccessful()) {
+                    throw new ApiException(response.code());
+                }
+            } catch (ApiException e) {
+                throw attachRetryAfter(e, response);
             }
         } catch (ApiException e) {
             throw e;
@@ -320,19 +328,30 @@ public abstract class BaseResource {
 
     private byte[] executeBinary(Request request) {
         try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                ResponseBody responseBody = response.body();
+            ResponseBody responseBody = response.body();
+            MediaType contentType = responseBody != null ? responseBody.contentType() : null;
+            boolean jsonBody = contentType != null
+                    && "application".equalsIgnoreCase(contentType.type())
+                    && "json".equalsIgnoreCase(contentType.subtype());
+
+            // A real binary artifact is never JSON. When the body is JSON (an error envelope returned under
+            // HTTP 200) or the HTTP status is an error, route through envelope inspection instead of returning
+            // the JSON as if it were the artifact.
+            if (!response.isSuccessful() || jsonBody) {
                 String json = responseBody != null ? responseBody.string() : "";
                 try {
                     if (!json.isBlank()) {
-                        tryThrowEnvelopeError(json, response.code());
+                        throwIfEnvelopeError(json, response.code());
                     }
-                    throw new ApiException(response.code());
+                    if (!response.isSuccessful()) {
+                        throw new ApiException(response.code());
+                    }
                 } catch (ApiException e) {
                     throw attachRetryAfter(e, response);
                 }
+                // Successful HTTP with a JSON body that is not an error envelope: return it verbatim.
+                return json.getBytes(StandardCharsets.UTF_8);
             }
-            ResponseBody responseBody = response.body();
             return responseBody != null ? responseBody.bytes() : new byte[0];
         } catch (ApiException e) {
             throw e;
@@ -361,11 +380,17 @@ public abstract class BaseResource {
     }
 
     /**
-     * Captures the server's retry hint into the exception so callers can back off on 429. Reads
-     * {@code Retry-After} first, then falls back to {@code X-Rate-Limit-Reset}. Only the delta-seconds form is
-     * surfaced; an HTTP-date {@code Retry-After} is ignored. Header lookup is case-insensitive (OkHttp).
+     * Captures the server's retry hint into the exception so callers can back off on a rate-limit/temporary
+     * error. Only attached for retryable statuses (HTTP 429 / 503): the {@code X-Rate-Limit-Reset} header is
+     * present on virtually every response (including successful ones and permanent 4xx errors), so attaching it
+     * unconditionally would wrongly signal that a permanent 400/401 is worth retrying. Reads {@code Retry-After}
+     * first, then falls back to {@code X-Rate-Limit-Reset}; only the delta-seconds form is surfaced (an
+     * HTTP-date {@code Retry-After} is ignored). Header lookup is case-insensitive (OkHttp).
      */
     private ApiException attachRetryAfter(ApiException e, Response response) {
+        if (e.getStatusCode() != 429 && e.getStatusCode() != 503) {
+            return e;
+        }
         Integer seconds = parseRetryAfterSeconds(response.header("Retry-After"));
         if (seconds == null) {
             seconds = parseRetryAfterSeconds(response.header("X-Rate-Limit-Reset"));
@@ -421,22 +446,31 @@ public abstract class BaseResource {
         }
     }
 
-    private void tryThrowEnvelopeError(String json, int httpStatus) {
+    /**
+     * Inspects a response body used by the void/binary paths and throws an {@link ApiException} when it
+     * represents an error — either an envelope whose {@code status >= 400} (even under an HTTP 2xx status) or a
+     * non-envelope body accompanied by an HTTP error status. Returns normally when the body is a successful
+     * envelope or non-error content, so callers can treat the response as a success.
+     */
+    private void throwIfEnvelopeError(String json, int httpStatus) {
+        Integer envelopeStatus = null;
+        String message = null;
         try {
             JsonNode root = MAPPER.readTree(json);
             if (root.has("status") && root.get("status").isNumber()) {
-                int status = root.get("status").asInt();
-                String message = root.has("message") ? root.get("message").asText(null) : null;
-                if (status >= 400) {
-                    throw new ApiException(status, message, json);
-                }
+                envelopeStatus = root.get("status").asInt();
             }
-            String message = root.has("message") ? root.get("message").asText(null) : null;
-            throw new ApiException(httpStatus, message, json);
-        } catch (ApiException e) {
-            throw e;
+            if (root.has("message")) {
+                message = root.get("message").asText(null);
+            }
         } catch (Exception ignored) {
-            throw new ApiException(httpStatus);
+            // Not JSON (e.g. a plain-text error) — fall through to the HTTP-status check below.
+        }
+        if (envelopeStatus != null && envelopeStatus >= 400) {
+            throw new ApiException(envelopeStatus, message, json);
+        }
+        if (httpStatus >= 400) {
+            throw new ApiException(httpStatus, message, json);
         }
     }
 

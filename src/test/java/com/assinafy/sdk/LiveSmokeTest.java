@@ -1,8 +1,10 @@
 package com.assinafy.sdk;
 
 import com.assinafy.sdk.models.Assignment;
+import com.assinafy.sdk.models.CostEstimate;
 import com.assinafy.sdk.models.CreateAssignmentPayload;
 import com.assinafy.sdk.models.CreateFieldPayload;
+import com.assinafy.sdk.models.DocumentVerification;
 import com.assinafy.sdk.models.CreateSignerPayload;
 import com.assinafy.sdk.models.CreateTagPayload;
 import com.assinafy.sdk.models.DocumentDetails;
@@ -284,11 +286,11 @@ class LiveSmokeTest {
         DocumentDetails doc = client.documents.upload(samplePdf(), "sdk-smoke-asg-" + shortId() + ".pdf");
         try {
             client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
-            Map<String, Object> cost = client.assignments.estimateCost(doc.getId(),
+            CostEstimate cost = client.assignments.estimateCost(doc.getId(),
                     new CreateAssignmentPayload().setSigners(List.of(
                             new SignerRef().setId(signer.getId()).setVerificationMethod("Email")
                                     .setNotificationMethods(List.of("Email")))));
-            assertThat(cost).containsKey("has_sufficient_resources");
+            assertThat(cost.getHasSufficientResources()).isNotNull();
         } finally {
             client.documents.delete(doc.getId());
         }
@@ -324,6 +326,53 @@ class LiveSmokeTest {
         } finally {
             client.documents.delete(doc.getId());
         }
+    }
+
+    @Test
+    @Order(17)
+    @DisplayName("Document rename: upload → PATCH rename → details reflect new name → delete")
+    void documentRename() throws Exception {
+        AssinafyClient client = client();
+        DocumentDetails doc = client.documents.upload(samplePdf(), "sdk-smoke-rename-" + shortId() + ".pdf");
+        try {
+            // Wait for metadata processing to finish before renaming/deleting (a document still in
+            // metadata_processing cannot be deleted).
+            client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
+            String newName = "sdk-smoke-renamed-" + shortId() + ".pdf";
+            DocumentDetails renamed = client.documents.rename(doc.getId(), newName);
+            assertThat(renamed.getName()).isEqualTo(newName);
+            assertThat(client.documents.details(doc.getId()).getName()).isEqualTo(newName);
+        } finally {
+            client.documents.delete(doc.getId());
+        }
+    }
+
+    @Test
+    @Order(18)
+    @DisplayName("Lightweight document search returns a paginated result")
+    void documentSearch() {
+        PaginatedResult<DocumentListItem> page = client().documents.search(Map.of("per_page", "5"));
+        assertThat(page).isNotNull();
+        assertThat(page.getData()).isNotNull();
+    }
+
+    @Test
+    @Order(19)
+    @DisplayName("Assignments list (camelCase accountId query) parses with pagination metadata")
+    void assignmentsList() {
+        PaginatedResult<Assignment> page = client().assignments.list();
+        assertThat(page).isNotNull();
+        assertThat(page.getData()).isNotNull();
+    }
+
+    @Test
+    @Order(20)
+    @DisplayName("Public document verify returns a typed result (invalid hash → isValid false)")
+    void verifyInvalidHash() {
+        DocumentVerification result = client().documents.verify("ZZAUDITDUMMYHASH000");
+        assertThat(result).isNotNull();
+        assertThat(result.getIsValid()).isFalse();
+        assertThat(result.getMessage()).isNotBlank();
     }
 
     private static Signer ensureTestSigner(AssinafyClient client) {

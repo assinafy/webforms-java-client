@@ -2,6 +2,9 @@ package com.assinafy.sdk.resources;
 
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.DocumentDetails;
+import com.assinafy.sdk.models.DocumentListItem;
+import com.assinafy.sdk.models.DocumentVerification;
+import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.TemplateSigner;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.OkHttpClient;
@@ -190,12 +193,11 @@ class DocumentResourceTest {
         var listed = resource.listTags("doc-1");
         var appended = resource.appendTags("doc-1", List.of("Urgent"));
         var replaced = resource.replaceTags("doc-1", List.of());
-        Map<String, Object> detached = resource.detachTag("doc-1", "tag-1");
+        resource.detachTag("doc-1", "tag-1");
 
         assertThat(listed.get(0).getName()).isEqualTo("Contracts");
         assertThat(appended.get(0).getName()).isEqualTo("Urgent");
         assertThat(replaced).isEmpty();
-        assertThat(detached).containsEntry("detached", true);
 
         assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/acc/documents/doc-1/tags");
         RecordedRequest append = server.takeRequest();
@@ -220,13 +222,76 @@ class DocumentResourceTest {
     }
 
     @Test
-    void verify_callsHashPath() throws Exception {
-        server.enqueue(okJson(Map.of("is_valid", true)));
+    void verify_callsHashPathAndParsesTypedResult() throws Exception {
+        server.enqueue(okJson(Map.of(
+                "hash", "hash-abc",
+                "status", "certificated",
+                "is_valid", true,
+                "page_count", "1",
+                "signer_count", "1",
+                "message", "")));
 
-        Map<String, Object> result = resource.verify("hash-abc");
+        DocumentVerification result = resource.verify("hash-abc");
 
         assertThat(server.takeRequest().getPath()).isEqualTo("/documents/hash-abc/verify");
-        assertThat(result).containsEntry("is_valid", true);
+        assertThat(result.getIsValid()).isTrue();
+        assertThat(result.getHash()).isEqualTo("hash-abc");
+        assertThat(result.getPageCount()).isEqualTo("1");
+    }
+
+    @Test
+    void rename_patchesDocumentName() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "name", "Renamed.pdf", "resource", "document")));
+
+        DocumentDetails d = resource.rename("doc-1", "Renamed.pdf");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PATCH");
+        assertThat(req.getPath()).isEqualTo("/documents/doc-1");
+        assertThat(req.getBody().readUtf8()).isEqualTo("{\"name\":\"Renamed.pdf\"}");
+        assertThat(d.getName()).isEqualTo("Renamed.pdf");
+    }
+
+    @Test
+    void rename_validatesName() {
+        assertThatThrownBy(() -> resource.rename("doc-1", " "))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.rename("doc-1", "x".repeat(256)))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void search_hitsSearchEndpointWithParams() throws Exception {
+        server.enqueue(okJson(List.of(Map.of("id", "doc-1", "name", "contract.pdf"))));
+
+        PaginatedResult<DocumentListItem> page = resource.search(Map.of("search", "contract"));
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getPath()).isEqualTo("/accounts/acc/documents/search?search=contract");
+        assertThat(page.getData().get(0).getName()).isEqualTo("contract.pdf");
+    }
+
+    @Test
+    void upload_postsMultipartFileToAccountDocuments() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "name", "sample.pdf", "status", "uploaded")));
+
+        resource.upload("%PDF-1.4 test".getBytes(), "sample.pdf");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath()).isEqualTo("/accounts/acc/documents");
+        assertThat(req.getHeader("Content-Type")).startsWith("multipart/form-data");
+        String body = req.getBody().readUtf8();
+        assertThat(body).contains("name=\"file\"");
+        assertThat(body).contains("filename=\"sample.pdf\"");
+    }
+
+    @Test
+    void upload_validatesInput() {
+        assertThatThrownBy(() -> resource.upload(new byte[0], "x.pdf"))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.upload("data".getBytes(), "notes.txt"))
+                .isInstanceOf(ValidationException.class);
     }
 
     @Test
@@ -273,6 +338,62 @@ class DocumentResourceTest {
             assertThat(e.getStatusCode()).isEqualTo(429);
             assertThat(e.getRetryAfterSeconds()).isEqualTo(30);
         }
+    }
+
+    @Test
+    void apiException_derivesRetryAfterFromRateLimitResetOn429() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(429)
+                .setBody("{\"status\":429,\"message\":\"Too Many Requests\"}")
+                .setHeader("Content-Type", "application/json")
+                .setHeader("X-Rate-Limit-Reset", "42"));
+
+        try {
+            resource.statuses();
+            throw new AssertionError("expected ApiException");
+        } catch (com.assinafy.sdk.exceptions.ApiException e) {
+            assertThat(e.getRetryAfterSeconds()).isEqualTo(42);
+        }
+    }
+
+    @Test
+    void apiException_doesNotPopulateRetryAfterOnPermanent400() throws Exception {
+        // TX-1 guard: X-Rate-Limit-Reset is present on non-retryable errors too; it must NOT become a retry hint.
+        server.enqueue(new MockResponse().setResponseCode(400)
+                .setBody("{\"status\":400,\"data\":null,\"message\":\"Bad request\"}")
+                .setHeader("Content-Type", "application/json")
+                .setHeader("X-Rate-Limit-Reset", "31"));
+
+        try {
+            resource.statuses();
+            throw new AssertionError("expected ApiException");
+        } catch (com.assinafy.sdk.exceptions.ApiException e) {
+            assertThat(e.getStatusCode()).isEqualTo(400);
+            assertThat(e.getRetryAfterSeconds()).isNull();
+        }
+    }
+
+    @Test
+    void delete_surfacesErrorEnvelopeUnderHttp200() throws Exception {
+        // TX-3 guard: an error envelope returned under HTTP 200 on the void path must not be swallowed.
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setBody("{\"status\":403,\"data\":null,\"message\":\"Forbidden\"}")
+                .setHeader("Content-Type", "application/json"));
+
+        assertThatThrownBy(() -> resource.delete("doc-1"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
+                .hasMessageContaining("Forbidden");
+    }
+
+    @Test
+    void download_surfacesErrorEnvelopeUnderHttp200() throws Exception {
+        // TX-3 guard: a JSON error envelope under HTTP 200 on the binary path must raise, not return bytes.
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setBody("{\"status\":404,\"data\":null,\"message\":\"Artefato não está disponível.\"}")
+                .setHeader("Content-Type", "application/json"));
+
+        assertThatThrownBy(() -> resource.download("doc-1", "certificated"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
+                .hasMessageContaining("Artefato não está disponível.");
     }
 
     @Test

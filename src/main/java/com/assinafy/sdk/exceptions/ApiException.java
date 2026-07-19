@@ -8,8 +8,10 @@ package com.assinafy.sdk.exceptions;
  * HTTP status. {@link #getMessage()} surfaces the server-provided {@code message} when available, and
  * {@link #getResponseBody()} carries the raw response body for diagnostics.</p>
  *
- * <p>On HTTP 429 (Too Many Requests) the server's {@code Retry-After} / {@code X-Rate-Limit-Reset} hint is
- * captured into {@link #getRetryAfterSeconds()} so callers can implement their own backoff.</p>
+ * <p>On a retryable status (HTTP 429 Too Many Requests or 503 Service Unavailable) the server's
+ * {@code Retry-After} / {@code X-Rate-Limit-Reset} hint is captured into {@link #getRetryAfterSeconds()} so
+ * callers can implement their own backoff. It is left {@code null} on permanent errors (e.g. 400/401) so a
+ * caller keying retries on its presence never backs off on a non-retryable failure.</p>
  */
 public class ApiException extends AssinafyException {
 
@@ -37,8 +39,8 @@ public class ApiException extends AssinafyException {
 
     /**
      * Number of seconds the caller should wait before retrying, derived from the {@code Retry-After} or
-     * {@code X-Rate-Limit-Reset} response header (typically populated on HTTP 429); {@code null} when the
-     * server provided no such hint.
+     * {@code X-Rate-Limit-Reset} response header. Populated only on retryable statuses (HTTP 429 / 503);
+     * {@code null} on permanent errors and when the server provided no such hint.
      */
     public Integer getRetryAfterSeconds() {
         return retryAfterSeconds;

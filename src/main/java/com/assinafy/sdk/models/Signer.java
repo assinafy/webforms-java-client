@@ -28,6 +28,9 @@ public final class Signer {
     @JsonProperty("has_initial")
     private Boolean hasInitial;
 
+    @JsonProperty("is_signature_reusable")
+    private Boolean signatureReusable;
+
     @JsonProperty("verification_method")
     private String verificationMethod;
 
@@ -105,6 +108,19 @@ public final class Signer {
 
     public void setHasInitial(Boolean hasInitial) {
         this.hasInitial = hasInitial;
+    }
+
+    /**
+     * Whether the signer's saved signature may be reused across documents (from {@code GET /signers/self}).
+     * When {@code false}, clients should not pre-render the saved signature and must have the signer draw a new
+     * one. Only populated on the signer-self response; {@code null} elsewhere.
+     */
+    public Boolean getSignatureReusable() {
+        return signatureReusable;
+    }
+
+    public void setSignatureReusable(Boolean signatureReusable) {
+        this.signatureReusable = signatureReusable;
     }
 
     public String getVerificationMethod() {

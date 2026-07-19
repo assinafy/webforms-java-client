@@ -54,8 +54,25 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
-     * {@code GET /accounts/{account_id}/webhooks/subscriptions} — fetch the current webhook subscription, or
-     * {@code null} when none is configured (the API's 404 is mapped to {@code null}).
+     * Alias for {@link #register(RegisterWebhookPayload, String)}. The subscription is a create-or-replace
+     * {@code PUT}, so registering and updating are the same operation (the spec names it "Update webhook
+     * subscription"); this alias aids discoverability for callers looking for an {@code update}.
+     */
+    public WebhookSubscription update(RegisterWebhookPayload payload, String accountId) {
+        return register(payload, accountId);
+    }
+
+    public WebhookSubscription update(RegisterWebhookPayload payload) {
+        return register(payload, null);
+    }
+
+    /**
+     * {@code GET /accounts/{account_id}/webhooks/subscriptions} — fetch the workspace's webhook subscription.
+     *
+     * <p>A valid account always returns the subscription object (with {@code is_active == false} when none has
+     * been configured). The API's 404 — which indicates the <em>account</em> was not found — is mapped to
+     * {@code null} here, so a {@code null} result means "account not found or no subscription". To stop
+     * deliveries on a configured subscription use {@link #inactivate}; there is no hard-delete endpoint.</p>
      */
     public WebhookSubscription getSubscription(String accountId) {
         String id = accountId(accountId);
@@ -64,19 +81,6 @@ public final class WebhookResource extends BaseResource {
 
     public WebhookSubscription getSubscription() {
         return getSubscription(null);
-    }
-
-    /**
-     * {@code DELETE /accounts/{account_id}/webhooks/subscriptions} — permanently delete the webhook
-     * subscription. To keep it but stop deliveries, use {@link #inactivate} instead.
-     */
-    public void deleteSubscription(String accountId) {
-        String id = accountId(accountId);
-        httpDelete("/accounts/" + id + "/webhooks/subscriptions");
-    }
-
-    public void deleteSubscription() {
-        deleteSubscription(null);
     }
 
     /**

@@ -160,6 +160,66 @@ class SignerResourceTest {
     }
 
     @Test
+    void create_recoversFromDuplicate400ByReturningExisting() throws Exception {
+        // Race: pre-check finds nothing, POST returns the live 400 duplicate, then recovery re-queries and
+        // returns the existing signer instead of throwing (this catch-block is the class's subtlest logic).
+        server.enqueue(okList(List.of()));
+        server.enqueue(new MockResponse().setResponseCode(400)
+                .setBody("{\"status\":400,\"data\":null,\"message\":\"Um signatário com este e-mail já existe.\"}")
+                .setHeader("Content-Type", "application/json"));
+        server.enqueue(okList(List.of(
+                Map.of("id", "existing", "full_name", "John", "email", "john@example.com"))));
+
+        Signer result = resource.create(new CreateSignerPayload("John", "john@example.com"));
+
+        assertThat(result.getId()).isEqualTo("existing");
+        assertThat(server.getRequestCount()).isEqualTo(3);
+    }
+
+    @Test
+    void create_rethrowsNonDuplicate400() throws Exception {
+        // A 400 that is NOT a duplicate (recovery lookup finds nothing) must surface the original error.
+        server.enqueue(okList(List.of()));
+        server.enqueue(new MockResponse().setResponseCode(400)
+                .setBody("{\"status\":400,\"data\":null,\"message\":\"Email inválido.\"}")
+                .setHeader("Content-Type", "application/json"));
+        server.enqueue(okList(List.of()));
+
+        assertThatThrownBy(() -> resource.create(new CreateSignerPayload("John", "john@example.com")))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
+                .hasMessageContaining("Email inválido.");
+    }
+
+    @Test
+    void get_hitsSignerEndpoint() throws Exception {
+        server.enqueue(okJson(Map.of("id", "s1", "full_name", "John", "email", "john@example.com")));
+
+        Signer signer = resource.get("s1");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("GET");
+        assertThat(req.getPath()).isEqualTo("/accounts/test-account/signers/s1");
+        assertThat(signer.getFullName()).isEqualTo("John");
+    }
+
+    @Test
+    void updateAndDelete_hitSignerEndpoints() throws Exception {
+        server.enqueue(okJson(Map.of("id", "s1", "full_name", "Johnny")));
+        server.enqueue(okJson(List.of()));
+
+        Signer updated = resource.update("s1", new UpdateSignerPayload().setFullName("Johnny"));
+        resource.delete("s1");
+
+        RecordedRequest put = server.takeRequest();
+        assertThat(put.getMethod()).isEqualTo("PUT");
+        assertThat(put.getPath()).isEqualTo("/accounts/test-account/signers/s1");
+        assertThat(updated.getFullName()).isEqualTo("Johnny");
+        RecordedRequest del = server.takeRequest();
+        assertThat(del.getMethod()).isEqualTo("DELETE");
+        assertThat(del.getPath()).isEqualTo("/accounts/test-account/signers/s1");
+    }
+
+    @Test
     void create_serialisesWhatsappPhoneNumber() throws Exception {
         server.enqueue(okList(List.of()));
         server.enqueue(okJson(Map.of("id", "123", "full_name", "John", "email", "john@example.com")));
