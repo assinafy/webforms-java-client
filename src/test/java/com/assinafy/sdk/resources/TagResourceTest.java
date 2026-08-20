@@ -88,22 +88,24 @@ class TagResourceTest {
     void delete_passesForceQueryWhenRequested() throws Exception {
         server.enqueue(okJson(Map.of("deleted", true)));
 
-        resource.delete("tag-1", true);
+        boolean deleted = resource.delete("tag-1", true);
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getMethod()).isEqualTo("DELETE");
         assertThat(req.getPath()).isEqualTo("/accounts/acc/tags/tag-1?force=true");
+        assertThat(deleted).isTrue();
     }
 
     @Test
     void delete_omitsForceQueryByDefault() throws Exception {
         server.enqueue(okJson(Map.of("deleted", true)));
 
-        resource.delete("tag-1");
+        boolean deleted = resource.delete("tag-1");
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getMethod()).isEqualTo("DELETE");
         assertThat(req.getPath()).isEqualTo("/accounts/acc/tags/tag-1");
+        assertThat(deleted).isTrue();
     }
 
     @Test

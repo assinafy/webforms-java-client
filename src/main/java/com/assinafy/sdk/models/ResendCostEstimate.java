@@ -28,16 +28,59 @@ public final class ResendCostEstimate {
     @JsonProperty("has_sufficient_credits")
     private Boolean hasSufficientCredits;
 
+    /** Creates an empty resend estimate model for JSON deserialization. */
+    public ResendCostEstimate() {}
+
+    /**
+     * Returns total credits required, or {@code null} when omitted.
+     *
+     * @return total credits required, or {@code null} when omitted
+     */
     public Double getTotal() { return total; }
+    /**
+     * Sets total credits required.
+     *
+     * @param total total credits required
+     */
     public void setTotal(Double total) { this.total = total; }
 
+    /**
+     * Returns compact resend-cost breakdown entries.
+     *
+     * @return compact resend-cost breakdown entries
+     */
     public List<CostEstimateBreakdownItem> getBreakdown() { return breakdown; }
+    /**
+     * Sets compact resend-cost breakdown entries.
+     *
+     * @param breakdown compact resend-cost breakdown entries
+     */
     public void setBreakdown(List<CostEstimateBreakdownItem> breakdown) { this.breakdown = breakdown; }
 
+    /**
+     * Returns wire {@code credit_balance}, or {@code null} when omitted.
+     *
+     * @return wire {@code credit_balance}, or {@code null} when omitted
+     */
     public Double getCreditBalance() { return creditBalance; }
+    /**
+     * Sets wire {@code credit_balance}.
+     *
+     * @param creditBalance wire {@code credit_balance}
+     */
     public void setCreditBalance(Double creditBalance) { this.creditBalance = creditBalance; }
 
+    /**
+     * Returns wire {@code has_sufficient_credits}, or {@code null} when omitted.
+     *
+     * @return wire {@code has_sufficient_credits}, or {@code null} when omitted
+     */
     public Boolean getHasSufficientCredits() { return hasSufficientCredits; }
+    /**
+     * Sets wire {@code has_sufficient_credits}.
+     *
+     * @param hasSufficientCredits wire {@code has_sufficient_credits}
+     */
     public void setHasSufficientCredits(Boolean hasSufficientCredits) {
         this.hasSufficientCredits = hasSufficientCredits;
     }

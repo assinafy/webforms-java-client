@@ -5,45 +5,90 @@ import com.assinafy.sdk.models.CreateTagPayload;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.Tag;
 import com.assinafy.sdk.models.UpdateTagPayload;
+import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.OkHttpClient;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/** Client for workspace tag creation, listing, update, and deletion. */
 public final class TagResource extends BaseResource {
 
     private static final int MAX_TAG_NAME_LENGTH = 64;
 
+    /**
+     * Creates an instance.
+     *
+     * @param httpClient shared HTTP client
+     * @param baseUrl API base URL
+     * @param defaultAccountId default account identifier, or {@code null}
+     */
     public TagResource(OkHttpClient httpClient, String baseUrl, String defaultAccountId) {
         super(httpClient, baseUrl, defaultAccountId);
     }
 
-    /** {@code GET /accounts/{account_id}/tags} - list workspace tags. */
+    /**
+     * {@code GET /accounts/{account_id}/tags}.
+     *
+     * @param params optional search and pagination values
+     * @param accountId account override, or {@code null} for the client default
+     * @return workspace tag page
+     */
     public PaginatedResult<Tag> list(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
         return httpGetList("/accounts/" + id + "/tags", params != null ? params : Map.of(), Tag.class);
     }
 
+    /**
+     * Returns default account's tag page.
+     *
+     * @param params optional search and pagination values
+     * @return default account's tag page
+     */
     public PaginatedResult<Tag> list(Map<String, String> params) {
         return list(params, null);
     }
 
+    /**
+     * Returns default account's first tag page.
+     *
+     * @return default account's first tag page
+     */
     public PaginatedResult<Tag> list() {
         return list(null, null);
     }
 
-    /** {@code POST /accounts/{account_id}/tags} - create a workspace tag. */
+    /**
+     * {@code POST /accounts/{account_id}/tags}.
+     *
+     * @param payload required tag fields
+     * @param accountId account override, or {@code null} for the client default
+     * @return created tag
+     */
     public Tag create(CreateTagPayload payload, String accountId) {
         validateCreatePayload(payload);
         String id = accountId(accountId);
         return httpPost("/accounts/" + id + "/tags", payload, Tag.class);
     }
 
+    /**
+     * Returns created tag in the default account.
+     *
+     * @param payload required tag fields
+     * @return created tag in the default account
+     */
     public Tag create(CreateTagPayload payload) {
         return create(payload, null);
     }
 
-    /** {@code PUT /accounts/{account_id}/tags/{tag_id}} - update a workspace tag. */
+    /**
+     * {@code PUT /accounts/{account_id}/tags/{tag_id}}.
+     *
+     * @param tagId required tag identifier
+     * @param payload required partial tag update
+     * @param accountId account override, or {@code null} for the client default
+     * @return updated tag
+     */
     public Tag update(String tagId, UpdateTagPayload payload, String accountId) {
         String id = accountId(accountId);
         String tid = requireId(tagId, "Tag ID");
@@ -51,6 +96,13 @@ public final class TagResource extends BaseResource {
         return httpPut("/accounts/" + id + "/tags/" + tid, body, Tag.class);
     }
 
+    /**
+     * Returns updated tag in the default account.
+     *
+     * @param tagId required tag identifier
+     * @param payload required partial tag update
+     * @return updated tag in the default account
+     */
     public Tag update(String tagId, UpdateTagPayload payload) {
         return update(tagId, payload, null);
     }
@@ -58,21 +110,42 @@ public final class TagResource extends BaseResource {
     /**
      * {@code DELETE /accounts/{account_id}/tags/{tag_id}} - delete a workspace tag. When {@code force} is
      * {@code true} the {@code ?force=true} query is sent, which also detaches the tag from any documents it is
-     * attached to; otherwise the delete fails if the tag is still in use.
+     * attached to; otherwise the delete fails if the tag is still in use. Returns the response's
+     * {@code deleted} flag.
+     *
+     * @param tagId required tag identifier
+     * @param force whether to detach the tag from documents before deletion
+     * @param accountId account override, or {@code null} for the client default
+     * @return response {@code deleted} flag
      */
-    public void delete(String tagId, boolean force, String accountId) {
+    public boolean delete(String tagId, boolean force, String accountId) {
         String id = accountId(accountId);
         String tid = requireId(tagId, "Tag ID");
         Map<String, String> query = force ? Map.of("force", "true") : Map.of();
-        httpDelete("/accounts/" + id + "/tags/" + tid, query);
+        Map<String, Boolean> result = httpDelete("/accounts/" + id + "/tags/" + tid,
+                new TypeReference<Map<String, Boolean>>() {}, query);
+        return result != null && Boolean.TRUE.equals(result.get("deleted"));
     }
 
-    public void delete(String tagId, boolean force) {
-        delete(tagId, force, null);
+    /**
+     * Returns response {@code deleted} flag in the default account.
+     *
+     * @param tagId required tag identifier
+     * @param force whether to detach the tag from documents before deletion
+     * @return response {@code deleted} flag in the default account
+     */
+    public boolean delete(String tagId, boolean force) {
+        return delete(tagId, force, null);
     }
 
-    public void delete(String tagId) {
-        delete(tagId, false, null);
+    /**
+     * Returns response {@code deleted} flag without forced detachment.
+     *
+     * @param tagId required tag identifier
+     * @return response {@code deleted} flag without forced detachment
+     */
+    public boolean delete(String tagId) {
+        return delete(tagId, false, null);
     }
 
     private void validateCreatePayload(CreateTagPayload payload) {

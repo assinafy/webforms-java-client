@@ -1,22 +1,24 @@
 # Examples
 
-Worked examples for every public method in the SDK, with the **request** body the SDK sends and the
-**response** payload it parses.
+Worked end-to-end examples for the SDK. The [API reference](API_REFERENCE.md) contains the complete
+89-operation matrix and centralized request/response payload definitions.
 
 ## Response envelope
 
-Every Assinafy API response is wrapped in a JSON envelope:
+Every JSON Assinafy API response is wrapped in a JSON envelope:
 
 ```json
 { "status": 200, "message": "", "data": { /* ... */ } }
 ```
 
-- `status` — the logical status (mirrors the HTTP status). A value `>= 400` is raised as an `ApiException`,
+- `status` — the logical status (normally mirrors the HTTP status). A value `>= 400` is raised as an `ApiException`,
   even when the HTTP status is 200.
 - `message` — a human-readable message (populated on errors).
 - `data` — the payload. The SDK unwraps `data` and returns it as the typed model; the examples below show the
   contents of `data` only. List endpoints additionally read `X-Pagination-*` response headers into
   `PaginatedResult.getMeta()`.
+- Logo, document artifact, thumbnail, page-image, and signature-image downloads are raw binary responses;
+  those methods return `byte[]` and do not parse an envelope.
 
 Error envelope example (raised as `ApiException`, `getStatusCode() == 401`):
 
@@ -40,7 +42,7 @@ AssinafyClient sandbox = new AssinafyClient(new AssinafyClientOptions()
     .setApiKey("k_sandbox")
     .setAccountId("acc_sandbox")
     .setBaseUrl("https://sandbox.assinafy.com.br/v1")
-    .setMaxRetries(2));     // optional: retry HTTP 429/503 honoring Retry-After
+    .setMaxRetries(2));     // optional: retry safe reads on HTTP 429/503; mutations are never replayed
 
 // Factory methods
 AssinafyClient c1 = AssinafyClient.create("api-key", "account-id");
@@ -50,6 +52,45 @@ AssinafyClient c3 = AssinafyClient.fromConfig(Map.of(
     "account_id", "acc_xxx"
 ));
 ```
+
+## Accounts and authenticated user
+
+```java
+List<WorkspaceAccount> accounts = client.accounts.list();                       // GET /accounts
+WorkspaceAccount account = client.accounts.get();                              // GET /accounts/{defaultId}
+WorkspaceAccount created = client.accounts.create(                             // POST /accounts
+    new AccountPayload("Legal Operations").setNotificationSenderType("Account"));
+WorkspaceAccount renamed = client.accounts.update(                             // PUT /accounts/{defaultId}
+    new AccountPayload().setName("Legal"));
+
+AccountTheme theme = client.accounts.getTheme();                               // GET .../theme
+client.accounts.uploadLogo(pngBytes, "logo.png");                             // POST .../logo
+byte[] logo = client.accounts.downloadLogo();                                  // GET .../logo
+client.accounts.deleteLogo();                                                  // DELETE .../logo
+
+List<DocumentStatsRow> monthly = client.accounts.stats(Map.of("granularity", "monthly"));
+List<DocumentStatsRow> daily = client.accounts.stats(
+    Map.of("granularity", "daily", "month", "2026-08"));
+
+User me = client.users.getSelf();                                              // GET /users/self
+NotificationPreferences current = client.users.getNotificationPreferences();
+NotificationPreferences updated = client.users.updateNotificationPreferences(
+    new NotificationPreferences().setDocumentCompleted(true).setSignerDeclined(true));
+List<DocumentStatsRow> crossAccount = client.users.stats(Map.of("granularity", "monthly"));
+
+// Permanent. The explicit ID avoids deleting the client's default workspace by mistake.
+client.accounts.delete(false, created.getId());
+```
+
+Account create/update sends `{"name": string?, "notification_sender_type": "User"|"Account"?}`. Account and
+user stats return `DocumentStatsRow[]`; each row contains `period`, `documents_uploaded`, `documents_sent`,
+`signature_requests`, the `_email`, `_whatsapp`, `_viewed`, and `_completed` request counts, and
+`documents_certified`. Daily stats require a `month` in `YYYY-MM` form.
+
+Notification preferences use these nine case-sensitive boolean JSON keys: `DocumentCompleted`,
+`SignerDeclined`, `DocumentCancelled`, `DocumentAboutToExpire`, `DocumentExpired`,
+`DocumentExpirationReset`, `DocumentProcessingFailed`, `TemplateProcessingFailed`, and
+`SignerWhatsappFailed`. A PUT merges non-null values and returns the complete map.
 
 ## Authentication
 
@@ -69,7 +110,8 @@ Response `data`:
 {
   "access_token": "eyJhbGciOiJIUzI1...",
   "user": { "id": "62d6...", "email": "user@example.com", "name": "User" },
-  "accounts": [ { "id": "acc_xxx", "name": "Workspace", "roles": ["owner"] } ]
+  "accounts": [ { "id": "acc_xxx", "name": "Workspace", "roles": ["owner"],
+                    "is_delete_allowed": false, "created_at": "2026-08-20T12:00:00Z" } ]
 }
 ```
 
@@ -82,20 +124,22 @@ client.auth.socialLogin(new SocialLoginPayload("google", googleToken, true));
 client.auth.linkSocialLogin("google", googleToken);
 // Request: { "provider": "google", "token": "<google-token>" }   (no has_accepted_terms, unlike social-login)
 
-// API keys. getApiKey() works with an API-key-only client (returns the masked key, or null when none exists).
-ApiKeyResponse masked  = client.auth.getApiKey();      // GET /users/api-keys     -> { "api_key": "k_****" }
-ApiKeyResponse created = client.auth.createApiKey("password"); // POST /users/api-keys -> { "api_key": "k_new" }
-client.auth.deleteApiKey();                            // DELETE /users/api-keys
+// Use the bearer session for key rotation so the client does not retain a key it just revoked.
+AssinafyClient tokenClient = new AssinafyClient(
+    new AssinafyClientOptions().setToken(session.getAccessToken()));
+ApiKeyResponse masked  = tokenClient.auth.getApiKey();      // GET /users/api-keys
+ApiKeyResponse created = tokenClient.auth.createApiKey("password"); // POST /users/api-keys
+tokenClient.auth.deleteApiKey();                            // DELETE /users/api-keys
 
-// Password flows (token is OPTIONAL on reset — omit it when supplied out-of-band)
-client.auth.changePassword("user@example.com", "old", "new"); // PUT /authentication/change-password
-client.auth.requestPasswordReset("user@example.com");         // PUT /authentication/request-password-reset
-client.auth.resetPassword("user@example.com", resetToken, "new"); // PUT /authentication/reset-password
-client.auth.resetPassword("user@example.com", null, "new");       // token omitted from the body
+// Authenticated change-password remains on the bearer client.
+tokenClient.auth.changePassword("user@example.com", "old", "new"); // PUT /authentication/change-password
+
+// Reset routes are public; token is OPTIONAL in resetPassword and omitted when supplied out-of-band.
+AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
+publicClient.auth.requestPasswordReset("user@example.com");         // PUT /authentication/request-password-reset
+publicClient.auth.resetPassword("user@example.com", resetToken, "new"); // PUT /authentication/reset-password
+publicClient.auth.resetPassword("user@example.com", null, "new");       // token omitted from the body
 ```
-
-> The browser-redirect OAuth flows (`GET /auth/authenticate`, `GET /login-callback`) are intentionally not
-> wrapped by this server-side SDK — they are front-end redirect endpoints, not JSON APIs.
 
 ## Documents
 
@@ -106,13 +150,14 @@ DocumentDetails doc = client.documents.upload(new File("contract.pdf"));
 DocumentDetails doc2 = client.documents.upload(pdfBytes, "contract.pdf");
 ```
 
-Request: `multipart/form-data` with a single `file` part (`application/pdf`, max 25 MB). Response `data`:
+Request: `multipart/form-data` with a single `file` part (`application/pdf`, max 25 MB and 2,000 pages).
+Response `data`:
 
 ```json
 {
   "resource": "document",
   "id": "1031ff796b7215922eac00acdcca",
-  "account_id": "102d25a489f34a275d31a16045fd",
+  "account_id": "account-id",
   "template_id": null,
   "name": "contract.pdf",
   "status": "uploaded",
@@ -160,7 +205,7 @@ Response `data` (once processed — note the populated `pages` and `assignment`)
 
 ```java
 PaginatedResult<DocumentListItem> page = client.documents.list(
-    Map.of("page", "1", "per_page", "20", "sort", "-created_at"));
+    Map.of("page", "1", "per_page", "20", "sort", "-updated_at"));
 System.out.println("Total: " + page.getMeta().getTotal());   // from X-Pagination-Total-Count header
 ```
 
@@ -202,12 +247,11 @@ Response `data`:
 
 ```java
 // GET /documents/{id}/download/{artifact_name}
-byte[] signed   = client.documents.download(doc.getId());             // defaults to "certificated"
+// After assignment completion/status=certificated: byte[] signed = client.documents.download(doc.getId());
 byte[] original = client.documents.download(doc.getId(), "original");
 byte[] thumb    = client.documents.thumbnail(doc.getId());            // GET /documents/{id}/thumbnail (JPEG)
 byte[] pageImg  = client.documents.downloadPage(doc.getId(), pageId); // GET /documents/{id}/pages/{pid}/download
 List<DocumentActivity> log = client.documents.activities(doc.getId());// GET /documents/{id}/activities
-client.documents.delete(doc.getId());                                 // DELETE /documents/{id}
 ```
 
 > `download(id)` requests the `"certificated"` (final signed) artifact, which is only available after the
@@ -260,7 +304,7 @@ client.documents.sendToken(documentId, "signer@example.com", "email");
 List<Tag> tags = client.documents.listTags(doc.getId());                       // GET .../{id}/tags
 client.documents.appendTags(doc.getId(), List.of("Urgent"));                   // POST .../{id}/tags
 client.documents.replaceTags(doc.getId(), List.of("Contracts", "2026-Q1"));    // PUT  .../{id}/tags
-client.documents.detachTag(doc.getId(), tagId);                                // DELETE .../{id}/tags/{tagId}
+boolean detached = client.documents.detachTag(doc.getId(), tagId);             // {"detached":true}
 // append/replace request body: { "tags": ["Urgent"] }; response data: [ { "id": "...", "name": "Urgent" } ]
 ```
 
@@ -271,6 +315,7 @@ boolean done = client.documents.isFullySigned(doc.getId());
 SigningProgress progress = client.documents.getSigningProgress(doc.getId());
 System.out.printf("Signed: %d/%d (%.1f%%)%n",
     progress.getSigned(), progress.getTotal(), progress.getPercentage());
+// Final cleanup after every later operation that uses doc: client.documents.delete(doc.getId());
 ```
 
 ## Signers
@@ -308,7 +353,9 @@ Response `data`:
 Signer existing = client.signers.findByEmail("john@example.com");            // GET .../signers?search=...
 Signer fetched  = client.signers.get(signer.getId());                        // GET .../signers/{id}
 PaginatedResult<Signer> list = client.signers.list(Map.of("search", "john"));// GET .../signers
-client.signers.update(signer.getId(), new UpdateSignerPayload().setFullName("Johnny Doe")); // PUT .../signers/{id}
+client.signers.update(signer.getId(), new UpdateSignerPayload()               // PUT .../signers/{id}
+    .setFullName("Johnny Doe")
+    .setGovernmentId("39053344705")); // CPF/CNPJ; normalized to digits by the API
 client.signers.delete(signer.getId());                                       // DELETE .../signers/{id}
 ```
 
@@ -348,14 +395,14 @@ Response `data` (abridged — note per-signer `step`, `notified`, `notification_
   "method": "virtual",
   "expires_at": "2026-12-31T23:59:00Z",
   "signers": [
-    { "id": "1030...", "full_name": "Bill M", "email": "billm@billm.org",
+    { "id": "1030...", "full_name": "Example Signer", "email": "signer@example.com",
       "completed": false, "verification_method": "Email", "notification_methods": ["Email"],
       "step": 1, "notified": true, "notification_history": [] }
   ],
   "items": [ { "id": "1031...", "page": null, "signer": { "id": "1030..." },
               "field": { "id": "102d...", "name": "Virtual", "type": "virtual" }, "completed": false } ],
   "summary": { "signer_count": 1, "completed_count": 0, "signers": [ { "id": "1030...", "completed": false } ] },
-  "signing_urls": [ { "signer_id": "1030...", "url": "https://app.../sign/...?email=billm%40billm.org" } ]
+  "signing_urls": [ { "signer_id": "1030...", "url": "https://app.../sign/...?email=signer%40example.com" } ]
 }
 ```
 
@@ -376,6 +423,25 @@ if (!cost.getHasSufficientResources()) {
     System.out.println("Blocked: " + cost.getBlockingReason());   // PendingPayment | InsufficientDocuments | InsufficientCredits
 }
 ```
+
+For a qualified ICP-Brasil signature, use `DigitalCertificate` after storing the signer's CPF/CNPJ in
+`government_id`. That signer must be alone in its signing step and the account must have the feature enabled:
+
+```java
+Signer certificateSigner = client.signers.update(signerId,
+    new UpdateSignerPayload().setGovernmentId("39053344705"));
+CostEstimate certificateCost = client.assignments.estimateCost(doc.getId(),
+    new CreateAssignmentPayload().setMethod("virtual").setSigners(List.of(
+        new SignerRef().setId(certificateSigner.getId())
+            .setVerificationMethod("DigitalCertificate")
+            .setNotificationMethods(List.of("Email"))
+            .setStep(1))));
+```
+
+The digital-certificate signature costs two credits per signer in addition to any notification cost. Valid
+artifact names are `original`, `certificated`, `certificate-page`, `pades`, and `bundle`.
+After creating the assignment and completing certificate signing, download the qualified artifact with
+`client.documents.download(doc.getId(), "pades")`; an estimate alone does not create that artifact.
 
 Response `data` (typed as `CostEstimate`):
 
@@ -413,11 +479,11 @@ List<WhatsappNotification> notifications = client.assignments.whatsappNotificati
 
 ```java
 // POST .../assignments/{asg}  — submit collect-method field values (entries is a JSON array)
-client.assignments.sign(documentId, assignmentId, signerAccessCode, List.of(
-    Map.of("itemId", "item-1", "fieldId", "field-1", "pageId", "page-1", "value", "John Doe")));
+client.assignments.signEntries(documentId, assignmentId, signerAccessCode, List.of(
+    new AssignmentSignEntry("item-1", "field-1", "page-1", "John Doe")));
 
-// PUT .../assignments/{asg}/reject  — { "decline_reason": "..." }
-client.assignments.decline(documentId, assignmentId, signerAccessCode, "Not happy with clause 3");
+// Mutually exclusive alternative (do not run after signEntries): PUT .../assignments/{asg}/reject
+// client.assignments.decline(documentId, assignmentId, signerAccessCode, "Not happy with clause 3");
 ```
 
 > To fetch the assignment as a signer, use `client.signerSelf.getSign(signerAccessCode)` (`GET /sign`), which
@@ -448,7 +514,7 @@ Response `data` (also returned by `getSubscription()`):
 
 ```json
 {
-  "events": ["document_ready", "signer_signed_document"],
+  "events": ["document_ready", "signer_signed_document", "document_processing_failed"],
   "is_active": true,
   "url": "https://example.com/webhooks/assinafy",
   "email": "admin@example.com",
@@ -457,14 +523,19 @@ Response `data` (also returned by `getSubscription()`):
 ```
 
 ```java
-WebhookSubscription current = client.webhooks.getSubscription();    // GET .../webhooks/subscriptions (null if none)
-client.webhooks.update(sub);                                        // alias for register() (PUT is create-or-replace)
+WebhookSubscription current = client.webhooks.getSubscription();    // inactive object if none is configured
+client.webhooks.update(new RegisterWebhookPayload(sub.getUrl(), sub.getEmail())
+    .setEvents(sub.getEvents()).setActive(sub.isActive()));          // PUT is create-or-replace
 client.webhooks.inactivate();                                       // PUT .../webhooks/inactivate (stop deliveries)
 List<WebhookEventTypeInfo> types = client.webhooks.listEventTypes();// GET /webhooks/event-types
 PaginatedResult<WebhookDispatch> dispatches = client.webhooks.listDispatches(   // GET /accounts/{id}/webhooks
     new ListDispatchesParams().setDelivered(false).setPerPage(20));
 client.webhooks.retryDispatch(dispatchId);                          // POST .../webhooks/{dispatchId}/retry
 ```
+
+The receiver gets a JSON `POST` with `{id, event, message, payload, origin, created_at, subject, object,
+account_id}`. See [Webhook deliveries](API_REFERENCE.md#webhook-deliveries) for all 18 event types and their
+event-specific payload keys.
 
 ## Tags
 
@@ -474,7 +545,7 @@ Tag created = client.tags.create(new CreateTagPayload("Contracts").setColor("ff8
 // Request: { "name": "Contracts", "color": "ff8800" }   (name max 64 chars)
 Tag updated = client.tags.update(created.getId(),                           // PUT .../tags/{tagId}
     new UpdateTagPayload().setName("Sales Contracts").clearColor());        // clearColor() sends "color": null
-client.tags.delete(updated.getId(), true);                                  // DELETE .../tags/{tagId}?force=true
+boolean deleted = client.tags.delete(updated.getId(), true);                 // {"deleted":true}
 ```
 
 ## Field Definitions
@@ -499,7 +570,6 @@ Response `data`:
 PaginatedResult<FieldDefinition> fields = client.fields.list(Map.of("include_standard", "true")); // GET .../fields
 FieldDefinition one = client.fields.get(field.getId());                  // GET .../fields/{id}
 client.fields.update(field.getId(), new UpdateFieldPayload().setName("Internal Reference")); // PUT .../fields/{id}
-client.fields.delete(field.getId());                                     // DELETE .../fields/{id}
 List<FieldTypeInfo> fieldTypes = client.fields.listTypes();              // GET /field-types
 ```
 
@@ -513,6 +583,7 @@ List<FieldValidationResult> results = client.fields.validateMultiple(List.of(
     new FieldValidationPayload(field.getId(), "ABC-123")));
 // Request: [ { "field_id": "<id>", "value": "ABC-123" } ]
 // Response data: [ { "field_id": "<id>", "type": "text", "success": true, "error_message": "" } ]
+client.fields.delete(field.getId()); // DELETE only after validation is complete
 ```
 
 ## Templates
@@ -528,7 +599,9 @@ DocumentDetails doc = client.documents.createFromTemplate(
     List.of(new TemplateSigner(firstRole.getId(), signerId)
         .setVerificationMethod("Email").setNotificationMethods(List.of("Email")).setStep(1)),
     new CreateDocumentFromTemplateOptions()
-        .setName("NDA - John Doe").setTags(List.of("Generated")));
+        .setName("NDA - John Doe")
+        .setTemplateEditorFields(List.of(new TemplateEditorField(editorFieldId, "John Doe")))
+        .setTags(List.of("Generated")));
 
 // Estimate cost — POST /accounts/{id}/templates/{tid}/documents/estimate-cost  (typed CostEstimate)
 CostEstimate cost = client.documents.estimateCostFromTemplate(
@@ -542,6 +615,7 @@ The `createFromTemplate` request body:
   "signers": [ { "role_id": "<role>", "id": "<signer>", "verification_method": "Email",
                  "notification_methods": ["Email"], "step": 1 } ],
   "name": "NDA - John Doe",
+  "editor_fields": [ { "field_id": "<editorField>", "value": "John Doe" } ],
   "tags": ["Generated"]
 }
 ```
@@ -565,7 +639,7 @@ Signer confirmed = client.signerSelf.confirmSignerData(documentId, signerAccessC
         .setFullName("John Doe").setEmail("signer@example.com").setGovernmentId("15774136604"));
 // Request: { "full_name": "John Doe", "email": "signer@example.com", "government_id": "15774136604" }
 
-// POST /signature — upload (PNG/JPEG auto-detected); returns void, throws on error envelope
+// POST /signature — upload (PNG is portable; JPEG is a compatibility path); returns void, throws on error envelope
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature", true); // ?reuse=true
 byte[] saved = client.signerSelf.downloadSignature(signerAccessCode, "signature"); // GET /signature/{type}
@@ -586,12 +660,17 @@ PaginatedResult<DocumentDetails> mine = client.signerSelf.listDocuments(
 PaginatedResult<DocumentDetails> found = client.signerSelf.searchDocuments(signerId, signerAccessCode, "invoice");
 
 // GET /signers/{id}/documents/{docId}/download/{artifact}
-byte[] copy = client.signerSelf.downloadDocument(signerId, documentId, "original", signerAccessCode);
+// This artifact route is public in the current API contract.
+byte[] copy = client.signerSelf.downloadDocument(signerId, documentId, "pades");
+// Compatibility overload: sends signer-access-code when integrating with an older deployment.
+byte[] legacyCopy = client.signerSelf.downloadDocument(
+    signerId, documentId, "original", signerAccessCode);
 
 // PUT /signers/documents/sign-multiple    — { "document_ids": ["..."] }
 client.signerSelf.signMultiple(signerAccessCode, List.of(doc1.getId(), doc2.getId()));
 // PUT /signers/documents/decline-multiple — { "document_ids": ["..."], "decline_reason": "..." }
-client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Reason");
+// Mutually exclusive alternative (do not run for doc1/doc2 after signMultiple):
+// client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Reason");
 ```
 
 ## High-level helper
@@ -623,15 +702,19 @@ import com.assinafy.sdk.exceptions.*;
 try {
     DocumentDetails doc = client.documents.upload(new File("contract.pdf"));
 } catch (ValidationException e) {
-    // Thrown ONLY by client-side pre-flight checks (invalid file type, missing account/id, etc.).
-    // Server-side validation failures come back as an ApiException with getStatusCode() == 400 and a message.
+    // Local input/configuration or workflow-state failure (invalid file, missing ID, poll timeout, etc.).
+    // Server validation failures come back as an ApiException with getStatusCode() == 400 and a message.
     System.err.println("Validation: " + e.getMessage());
 } catch (ApiException e) {
     // API returned an error (HTTP non-2xx or an error envelope) — includes server-side 400 validation errors
     System.err.println("API " + e.getStatusCode() + ": " + e.getMessage());
     System.err.println("Body: " + e.getResponseBody());
     if (e.getStatusCode() == 429 && e.getRetryAfterSeconds() != null) {
-        Thread.sleep(e.getRetryAfterSeconds() * 1000L);   // honor Retry-After, or set options.maxRetries
+        try {
+            Thread.sleep(e.getRetryAfterSeconds() * 1000L); // honor Retry-After, or set options.maxRetries
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 } catch (NetworkException e) {
     System.err.println("Network error: " + e.getMessage());

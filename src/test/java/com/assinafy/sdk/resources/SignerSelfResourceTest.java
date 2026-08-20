@@ -23,6 +23,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SignerSelfResourceTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final byte[] PNG = new byte[]{
+            (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
+    };
     private MockWebServer server;
     private SignerSelfResource resource;
 
@@ -132,7 +135,7 @@ class SignerSelfResourceTest {
     @Test
     void uploadSignature_sendsBinaryWithBothQueryParams() throws Exception {
         server.enqueue(okJson(List.of()));
-        byte[] png = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47};
+        byte[] png = PNG.clone();
 
         resource.uploadSignature("code-xyz", png, "signature");
 
@@ -149,7 +152,7 @@ class SignerSelfResourceTest {
     @Test
     void uploadSignature_includesReuseQueryWhenProvided() throws Exception {
         server.enqueue(okJson(List.of()));
-        byte[] png = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47};
+        byte[] png = PNG.clone();
 
         resource.uploadSignature("code-xyz", png, "signature", true);
 
@@ -163,7 +166,7 @@ class SignerSelfResourceTest {
     void uploadSignature_omitsReuseWhenNull() throws Exception {
         server.enqueue(okJson(List.of()));
 
-        resource.uploadSignature("code-xyz", new byte[]{(byte) 0x89, 0x50}, "signature");
+        resource.uploadSignature("code-xyz", PNG, "signature");
 
         assertThat(server.takeRequest().getPath()).doesNotContain("reuse=");
     }
@@ -204,9 +207,16 @@ class SignerSelfResourceTest {
         String body = MAPPER.writeValueAsString(Map.of("status", 422, "message", "Invalid image", "data", List.of()));
         server.enqueue(new MockResponse().setBody(body).setHeader("Content-Type", "application/json"));
 
-        assertThatThrownBy(() -> resource.uploadSignature("code-xyz", new byte[]{(byte) 0x89, 0x50}, "signature"))
+        assertThatThrownBy(() -> resource.uploadSignature("code-xyz", PNG, "signature"))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Invalid image");
+    }
+
+    @Test
+    void uploadSignature_rejectsTruncatedPngHeader() {
+        assertThatThrownBy(() -> resource.uploadSignature("code", new byte[]{(byte) 0x89, 0x50}, "signature"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("PNG or JPEG");
     }
 
     @Test
@@ -337,5 +347,32 @@ class SignerSelfResourceTest {
         assertThat(req.getPath())
                 .isEqualTo("/signers/signer-1/documents/doc-1/download/original?signer-access-code=code-1");
         assertThat(new String(bytes)).isEqualTo("PDF");
+    }
+
+    @Test
+    void downloadDocument_publicOverloadOmitsAccessCode() throws Exception {
+        server.enqueue(new MockResponse().setBody("PDF")
+                .setHeader("Content-Type", "application/pdf"));
+
+        byte[] bytes = resource.downloadDocument("signer-1", "doc-1", "original");
+
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getPath())
+                .isEqualTo("/signers/signer-1/documents/doc-1/download/original");
+        assertThat(new String(bytes)).isEqualTo("PDF");
+    }
+
+    @Test
+    void downloadDocument_rejectsUnsafePathSegments() {
+        assertThatThrownBy(() -> resource.downloadDocument("../signer", "doc-1", "original"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("URL-safe path segment");
+        assertThatThrownBy(() -> resource.downloadDocument("signer-1", "doc/1", "original"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("URL-safe path segment");
+        assertThatThrownBy(() -> resource.downloadDocument("signer-1", "doc-1", "../original"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("URL-safe path segment");
+        assertThat(server.getRequestCount()).isZero();
     }
 }

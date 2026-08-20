@@ -19,31 +19,37 @@ concurrency:
 jobs:
   publish:
     name: Publish to GitHub Packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
       - name: Check out repository
-        # actions/checkout@v7.0.0
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        # actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Set up JDK
-        # actions/setup-java@v5.6.0 — configures a settings.xml whose "github" server authenticates with the
+        # actions/setup-java@v5.7.0 — configures a settings.xml whose "github" server authenticates with the
         # workflow token granted by `packages: write` above.
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
           server-id: github
           server-username: GITHUB_ACTOR
           server-password: GITHUB_TOKEN
 
-      - name: Verify
-        run: mvn --batch-mode --no-transfer-progress verify
+      - name: Validate tag matches the POM version
+        shell: bash
+        run: |
+          version="$(./mvnw --quiet --no-transfer-progress help:evaluate -Dexpression=project.version -DforceStdout)"
+          test "${GITHUB_REF_TYPE}" = "tag"
+          test "${GITHUB_REF_NAME}" = "v${version}"
 
       - name: Deploy (sources + javadoc + jar)
-        run: mvn --batch-mode --no-transfer-progress -DskipTests -Prelease deploy
+        run: ./mvnw --batch-mode --no-transfer-progress -Prelease deploy
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -6,4 +6,5 @@ target/
 *.log
 .env
 .env.*
+.audit/
 .DS_Store

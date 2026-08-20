@@ -1,5 +1,6 @@
 package com.assinafy.sdk.resources;
 
+import com.assinafy.sdk.exceptions.ApiException;
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.RegisterWebhookPayload;
@@ -64,6 +65,27 @@ class WebhookResourceTest {
                 new RegisterWebhookPayload("https://example.com/webhook", "ops@example.com")))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("event");
+    }
+
+    @Test
+    void register_rejectsNullPayloadAsValidationError() {
+        assertThatThrownBy(() -> resource.register(null))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("payload");
+    }
+
+    @Test
+    void register_validatesUriEmailAndEventValuesBeforeRequest() {
+        assertThatThrownBy(() -> resource.register(new RegisterWebhookPayload("relative", "ops@example.com")
+                .setEvents(List.of("document_ready"))))
+                .isInstanceOf(ValidationException.class).hasMessageContaining("URL");
+        assertThatThrownBy(() -> resource.register(new RegisterWebhookPayload("https://example.com", "bad")
+                .setEvents(List.of("document_ready"))))
+                .isInstanceOf(ValidationException.class).hasMessageContaining("email");
+        assertThatThrownBy(() -> resource.register(new RegisterWebhookPayload("https://example.com", "a@b.com")
+                .setEvents(List.of(" "))))
+                .isInstanceOf(ValidationException.class).hasMessageContaining("event");
+        assertThat(server.getRequestCount()).isZero();
     }
 
     @Test
@@ -154,12 +176,14 @@ class WebhookResourceTest {
     }
 
     @Test
-    void getSubscription_returnsNullOn404() throws Exception {
+    void getSubscription_surfacesInvalidAccount404() throws Exception {
         server.enqueue(new MockResponse().setResponseCode(404)
                 .setBody(MAPPER.writeValueAsString(Map.of("status", 404, "message", "Conta não encontrada.")))
                 .setHeader("Content-Type", "application/json"));
 
-        assertThat(resource.getSubscription()).isNull();
+        assertThatThrownBy(() -> resource.getSubscription())
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Conta não encontrada");
     }
 
     @Test

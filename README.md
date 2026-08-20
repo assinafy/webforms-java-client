@@ -2,12 +2,14 @@
 
 Java client SDK for the [Assinafy Webforms API](https://api.assinafy.com.br/v1/docs).
 
-Covers the documented authentication, document, signer, assignment, field definition, webhook, template, tag, and high-level `uploadAndRequestSignatures` flows.
+Covers all 89 operations in the published API contract: accounts, users, authentication, documents, signers,
+assignments, fields, templates, tags, webhooks, signer-facing flows, and the high-level
+`uploadAndRequestSignatures` workflow.
 
 ## Requirements
 
-- Java 21+ (the SDK is compiled to Java 21 bytecode; CI verifies it on JDK 21 and 25)
-- Maven 3.8+ (or Gradle 7+)
+- Java 25+ (the SDK is compiled and verified on the current Java 25 LTS)
+- Maven 3.9+; for Gradle builds, use a Gradle release that supports JDK 25
 
 ## Installation
 
@@ -17,14 +19,14 @@ Covers the documented authentication, document, signer, assignment, field defini
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.0.0</version>
+    <version>2.0.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.0.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.0.1'
 ```
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full setup instructions.
@@ -56,13 +58,15 @@ UploadAndRequestSignaturesResult result = client.uploadAndRequestSignatures(
 System.out.println("Document ID: " + result.getDocument().getId());
 ```
 
-> **Full request/response payloads** for every method are in [docs/EXAMPLES.md](docs/EXAMPLES.md).
+See the [complete API reference](docs/API_REFERENCE.md) for the 89-operation matrix, request/response schemas,
+status codes, and webhook payload contract. [Worked examples](docs/EXAMPLES.md) cover the common end-to-end flows.
 
 ## Response envelope
 
-Every response is wrapped as `{ "status": <int>, "message": "<string>", "data": <payload> }`. The SDK unwraps
-`data` into the typed model and raises an `ApiException` whenever `status >= 400` (even under an HTTP 200).
-List endpoints also read the `X-Pagination-*` response headers into `PaginatedResult.getMeta()`.
+JSON responses are wrapped as `{ "status": <int>, "message": "<string>", "data": <payload> }`. The SDK unwraps
+`data` into the typed model and raises an `ApiException` for a non-success HTTP status or `status >= 400` in the
+envelope. Binary download endpoints return their raw bytes and are not JSON envelopes. List endpoints also read
+the `X-Pagination-*` response headers into `PaginatedResult.getMeta()`.
 
 ## Authentication
 
@@ -90,19 +94,21 @@ String accessToken = session.getAccessToken();
 AuthenticationResult googleSession = client.auth.socialLogin(
     new SocialLoginPayload("google", googleToken, true));
 
-// API-key management. getApiKey() works with an API-key-only client (returns the masked key, or null if none
-// has been generated). createApiKey/deleteApiKey rotate the caller's key and are typically driven from a
-// token-authenticated session.
-ApiKeyResponse masked = client.auth.getApiKey();
-ApiKeyResponse created = client.auth.createApiKey("password");
-client.auth.deleteApiKey();
-
-client.auth.changePassword("user@example.com", "old-password", "new-password");
-client.auth.requestPasswordReset("user@example.com");
-client.auth.resetPassword("user@example.com", resetToken, "new-password");
+// Use the bearer session for key rotation so the client does not retain a key it just revoked.
+AssinafyClient tokenClient = new AssinafyClient(
+    new AssinafyClientOptions().setToken(accessToken));
+ApiKeyResponse masked = tokenClient.auth.getApiKey();
+ApiKeyResponse created = tokenClient.auth.createApiKey("password");
+tokenClient.auth.deleteApiKey();
 
 // Link a social-login provider (e.g. Google) to the authenticated user.
-client.auth.linkSocialLogin("google", googleToken);
+tokenClient.auth.linkSocialLogin("google", googleToken);
+tokenClient.auth.changePassword("user@example.com", "old-password", "new-password");
+
+// Password reset routes are public and do not reuse a rotated/revoked key.
+AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
+publicClient.auth.requestPasswordReset("user@example.com");
+publicClient.auth.resetPassword("user@example.com", resetToken, "new-password");
 ```
 
 ## Configuration
@@ -112,25 +118,50 @@ client.auth.linkSocialLogin("google", googleToken);
 | `apiKey`         | String  | —                                  | Preferred credential (`X-Api-Key` header) |
 | `token`          | String  | —                                  | Legacy access token (`Bearer` header)     |
 | `accountId`      | String  | —                                  | Default account/workspace ID              |
-| `baseUrl`        | String  | `https://api.assinafy.com.br/v1`   | API base URL (sandbox or production)      |
+| `baseUrl`        | String  | `https://api.assinafy.com.br/v1`   | HTTPS API base URL (loopback HTTP is test-only) |
 | `timeoutMs`      | int     | `30000`                            | Request timeout in milliseconds           |
-| `maxRetries`     | int     | `0`                                | Auto-retries on HTTP 429/503 (honors `Retry-After`) |
+| `maxRetries`     | int     | `0`                                | Retries safe reads only on HTTP 429/503; mutating requests are never replayed |
 
 ### Factory Methods
 
 ```java
 // Positional factory
-AssinafyClient client = AssinafyClient.create("api-key", "account-id",
+AssinafyClient configured = AssinafyClient.create("api-key", "account-id",
     opts -> opts.setTimeoutMs(60_000));
 
 // From a map (snake_case or camelCase keys)
-AssinafyClient client = AssinafyClient.fromConfig(Map.of(
+AssinafyClient fromMap = AssinafyClient.fromConfig(Map.of(
     "api_key", System.getenv("ASSINAFY_API_KEY"),
     "account_id", System.getenv("ASSINAFY_ACCOUNT_ID")
 ));
 ```
 
 ## Resources
+
+### Accounts and Users
+
+```java
+List<WorkspaceAccount> workspaces = client.accounts.list();
+WorkspaceAccount workspace = client.accounts.get();
+WorkspaceAccount created = client.accounts.create(new AccountPayload("Legal Operations")
+    .setNotificationSenderType("Account"));
+client.accounts.update(new AccountPayload().setName("Legal"));
+
+AccountTheme theme = client.accounts.getTheme();
+byte[] logo = client.accounts.downloadLogo();
+client.accounts.uploadLogo(pngBytes, "logo.png");
+client.accounts.deleteLogo();
+List<DocumentStatsRow> accountStats = client.accounts.stats(Map.of("granularity", "monthly"));
+
+User me = client.users.getSelf();
+NotificationPreferences preferences = client.users.getNotificationPreferences();
+client.users.updateNotificationPreferences(
+    new NotificationPreferences().setDocumentCompleted(true).setSignerDeclined(true));
+List<DocumentStatsRow> allAccountStats = client.users.stats(Map.of("granularity", "monthly"));
+
+// Permanent; force=true also cancels an active paid subscription.
+client.accounts.delete(false, created.getId());
+```
 
 ### Documents
 
@@ -139,7 +170,7 @@ AssinafyClient client = AssinafyClient.fromConfig(Map.of(
 DocumentDetails doc = client.documents.upload(new File("contract.pdf"));
 
 // Upload from bytes
-DocumentDetails doc = client.documents.upload(pdfBytes, "contract.pdf");
+DocumentDetails uploadedBytes = client.documents.upload(pdfBytes, "contract.pdf");
 
 // List documents
 PaginatedResult<DocumentListItem> page = client.documents.list(Map.of("page", "1", "per_page", "20"));
@@ -160,8 +191,8 @@ boolean valid = verification.getIsValid();
 // Wait until ready for signing
 DocumentDetails ready = client.documents.waitUntilReady(doc.getId());
 
-// Download the final signed PDF (defaults to the "certificated" artifact; 404s until certificated)
-byte[] pdf = client.documents.download(doc.getId());
+// After an assignment is completed and status is certificated, download the final signed PDF:
+// byte[] pdf = client.documents.download(doc.getId());
 byte[] original = client.documents.download(doc.getId(), "original");
 byte[] thumbnail = client.documents.thumbnail(doc.getId());
 byte[] pageImage = client.documents.downloadPage(doc.getId(), pageId);
@@ -173,18 +204,19 @@ List<DocumentActivity> activities = client.documents.activities(doc.getId());
 boolean done = client.documents.isFullySigned(doc.getId());
 SigningProgress progress = client.documents.getSigningProgress(doc.getId());
 
-// Delete
-client.documents.delete(doc.getId());
-
 // Public (unauthenticated) — minimal info for signer landing pages
 DocumentDetails publicInfo = client.documents.getPublic(doc.getId());
-client.documents.sendToken(doc.getId(), "signer@example.com", "email");
+// After an assignment puts the document in pending_signature:
+// client.documents.sendToken(doc.getId(), "signer@example.com", "email");
 
 // Document tags
 List<Tag> tags = client.documents.listTags(doc.getId());
 client.documents.appendTags(doc.getId(), List.of("Urgent"));
 client.documents.replaceTags(doc.getId(), List.of("Contracts", "2026-Q1"));
-client.documents.detachTag(doc.getId(), tagId);
+boolean detached = client.documents.detachTag(doc.getId(), tagId);
+
+// Final cleanup after every operation below that uses doc:
+// client.documents.delete(doc.getId());
 ```
 
 ### Signers
@@ -200,7 +232,9 @@ Signer existing = client.signers.findByEmail("john@example.com");
 
 Signer fetched = client.signers.get(signer.getId());
 PaginatedResult<Signer> list = client.signers.list(Map.of("search", "john"));
-client.signers.update(signer.getId(), new UpdateSignerPayload().setFullName("Johnny Doe"));
+client.signers.update(signer.getId(), new UpdateSignerPayload()
+    .setFullName("Johnny Doe")
+    .setGovernmentId("39053344705"));
 client.signers.delete(signer.getId());
 ```
 
@@ -212,7 +246,7 @@ Assignment assignment = client.assignments.create(doc.getId(),
         .setMethod("virtual")
         .setSignerStrings(signer1.getId(), signer2.getId())
         .setMessage("Please review and sign")
-        .setExpiresAt("2024-12-31T23:59:00Z"));
+        .setExpiresAt("2030-12-31T23:59:00Z"));
 
 // List assignments across the account (the SDK sends the account context as the accountId query param)
 PaginatedResult<Assignment> assignments = client.assignments.list(Map.of("per_page", "20"));
@@ -229,6 +263,11 @@ ResendCostEstimate resendCost = client.assignments.estimateResendCost(doc.getId(
 client.assignments.whatsappNotifications(doc.getId(), assignment.getId());
 ```
 
+`SignerRef.verificationMethod` accepts `Email`, `Whatsapp`, or `DigitalCertificate`. Digital-certificate
+signers need a CPF/CNPJ in `government_id`, the account feature enabled, and a signing step containing no
+other signer. The API charges two credits per digital-certificate signer in addition to notification cost.
+Download the resulting qualified PAdES PDF with `client.documents.download(documentId, "pades")`.
+
 ### Assignments (signer-facing)
 
 Endpoints authorised via a short-lived `signer-access-code`. These are typically called from a
@@ -240,17 +279,12 @@ signer landing page rather than from the account-holder's server.
 DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
 
 // Submit collect-method field values
-client.assignments.sign(doc.getId(), assignmentId, signerAccessCode, List.of(
-    Map.of(
-        "itemId", "item-1",
-        "fieldId", "field-1",
-        "pageId", "page-1",
-        "value", "John Doe"
-    )
+client.assignments.signEntries(doc.getId(), assignmentId, signerAccessCode, List.of(
+    new AssignmentSignEntry("item-1", "field-1", "page-1", "John Doe")
 ));
 
-// Decline the assignment
-client.assignments.decline(doc.getId(), assignmentId, signerAccessCode, "Not happy with clause 3");
+// Mutually exclusive alternative (do not run after signEntries):
+// client.assignments.decline(doc.getId(), assignmentId, signerAccessCode, "Not happy with clause 3");
 ```
 
 ### Signer Self-Service
@@ -266,8 +300,8 @@ Signer confirmed = client.signerSelf.confirmSignerData(doc.getId(), signerAccess
     new ConfirmSignerDataPayload().setFullName("John Doe").setEmail("a@b.com")
         .setGovernmentId("15774136604"));
 
-// Signature image upload (image type auto-detected as PNG or JPEG). Pass reuse=true to allow the saved
-// signature to be reused across documents (sets is_signature_reusable).
+// Signature image upload (PNG is the published contract; JPEG detection is retained for compatibility).
+// Pass reuse=true to allow the saved signature to be reused across documents (sets is_signature_reusable).
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature", true);
 byte[] saved = client.signerSelf.downloadSignature(signerAccessCode, "signature");
@@ -278,9 +312,13 @@ DocumentDetails current = client.signerSelf.getCurrentDocument(signerId, signerA
 PaginatedResult<DocumentDetails> mine = client.signerSelf.listDocuments(
     signerId, signerAccessCode, Map.of("page", "1", "per_page", "20"));
 PaginatedResult<DocumentDetails> found = client.signerSelf.searchDocuments(signerId, signerAccessCode, "invoice");
-byte[] signerCopy = client.signerSelf.downloadDocument(signerId, doc.getId(), "original", signerAccessCode);
+// The artifact route is public in the current API contract. The access-code overload remains for compatibility.
+byte[] signerCopy = client.signerSelf.downloadDocument(signerId, doc.getId(), "pades");
+byte[] legacyCopy = client.signerSelf.downloadDocument(
+    signerId, doc.getId(), "original", signerAccessCode);
 client.signerSelf.signMultiple(signerAccessCode, List.of(doc1.getId(), doc2.getId()));
-client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Not interested");
+// Mutually exclusive alternative (do not run for doc1/doc2 after signMultiple):
+// client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Not interested");
 ```
 
 ### Webhooks
@@ -289,10 +327,12 @@ client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Not 
 WebhookSubscription sub = client.webhooks.register(
     new RegisterWebhookPayload("https://example.com/webhooks", "admin@example.com")
         .setEvents(List.of("document_ready", "signer_signed_document"))
+        .setActive(true)
 );
 
 client.webhooks.getSubscription();
-client.webhooks.update(sub);          // alias for register(); PUT is create-or-replace
+client.webhooks.update(new RegisterWebhookPayload(sub.getUrl(), sub.getEmail())
+    .setEvents(sub.getEvents()).setActive(sub.isActive())); // PUT is create-or-replace
 client.webhooks.inactivate();         // stop deliveries but keep the subscription (there is no hard-delete endpoint)
 client.webhooks.listEventTypes();
 client.webhooks.listDispatches();
@@ -306,7 +346,7 @@ PaginatedResult<Tag> tags = client.tags.list(Map.of("search", "contract"));
 Tag created = client.tags.create(new CreateTagPayload("Contracts").setColor("ff8800"));
 Tag updated = client.tags.update(created.getId(),
     new UpdateTagPayload().setName("Sales Contracts").clearColor());
-client.tags.delete(updated.getId(), true);
+boolean deleted = client.tags.delete(updated.getId(), true);
 ```
 
 ### Field Definitions
@@ -320,10 +360,10 @@ PaginatedResult<FieldDefinition> fields = client.fields.list(
 
 FieldDefinition one = client.fields.get(field.getId());
 client.fields.update(field.getId(), new UpdateFieldPayload().setName("Internal Reference"));
-client.fields.delete(field.getId());
 
 FieldValidationResult validation = client.fields.validate(field.getId(), "ABC-123");
 List<FieldTypeInfo> fieldTypes = client.fields.listTypes();
+client.fields.delete(field.getId());
 ```
 
 ### Templates
@@ -368,16 +408,23 @@ try {
 # Run tests in Docker (recommended)
 docker compose run --rm test
 
-# Or run locally with the Maven Wrapper (requires JDK 21+)
+# Or run locally with the Maven Wrapper (requires JDK 25+)
 ./mvnw test
 
 # Live smoke tests against the sandbox (skipped unless credentials are set; defaults to the sandbox base URL)
 ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ./mvnw test -Dtest=LiveSmokeTest
+
+# Explicit opt-in for the test that dispatches real signing-request email
+ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ASSINAFY_LIVE_EMAILS=true \
+  ASSINAFY_TEST_EMAIL=... ASSINAFY_SECOND_TEST_EMAIL=... ./mvnw test -Dtest=LiveSmokeTest
 ```
 
-CI runs `mvn verify` on a JDK 21 + 25 matrix (GitHub Actions, mirrored to `.gitlab-ci.yml`). Releases publish
-to GitHub Packages on a `v*` tag via the `release` profile (`-Prelease`, which also builds `-sources` and
-`-javadoc` jars).
+`LiveSmokeTest` refuses non-sandbox base URLs. Keep live credentials in environment/CI secrets, never Maven
+properties or source files.
+
+CI runs `./mvnw verify` on the current JDK 25 LTS. GitLab is the source of truth and mirrors to GitHub, where
+the equivalent Actions workflows run. Releases publish to GitHub Packages on a `v*` tag via the `release` profile
+(`-Prelease`, which also builds `-sources` and `-javadoc` jars).
 
 ## License
 

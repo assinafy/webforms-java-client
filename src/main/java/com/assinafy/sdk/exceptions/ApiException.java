@@ -15,24 +15,51 @@ package com.assinafy.sdk.exceptions;
  */
 public class ApiException extends AssinafyException {
 
+    private static final long serialVersionUID = 1L;
+
+    /** HTTP or response-envelope status code. */
     private final int statusCode;
+    /** Raw response body, or {@code null}. */
     private final String responseBody;
+    /** Server-suggested retry delay in seconds, or {@code null}. */
     private Integer retryAfterSeconds;
 
+    /**
+     * Creates an API failure with its parsed message and raw response body.
+     *
+     * @param statusCode HTTP or response-envelope status code
+     * @param apiMessage server-provided error message, or {@code null}
+     * @param responseBody raw response body, or {@code null}
+     */
     public ApiException(int statusCode, String apiMessage, String responseBody) {
         super(buildMessage(statusCode, apiMessage));
         this.statusCode = statusCode;
         this.responseBody = responseBody;
     }
 
+    /**
+     * Creates an API failure containing only a status code.
+     *
+     * @param statusCode HTTP or response-envelope status code
+     */
     public ApiException(int statusCode) {
         this(statusCode, null, null);
     }
 
+    /**
+     * Returns HTTP or response-envelope status code.
+     *
+     * @return HTTP or response-envelope status code
+     */
     public int getStatusCode() {
         return statusCode;
     }
 
+    /**
+     * Returns raw response body, or {@code null}.
+     *
+     * @return raw response body, or {@code null}
+     */
     public String getResponseBody() {
         return responseBody;
     }
@@ -41,12 +68,19 @@ public class ApiException extends AssinafyException {
      * Number of seconds the caller should wait before retrying, derived from the {@code Retry-After} or
      * {@code X-Rate-Limit-Reset} response header. Populated only on retryable statuses (HTTP 429 / 503);
      * {@code null} on permanent errors and when the server provided no such hint.
+     *
+     * @return suggested retry delay in seconds, or {@code null}
      */
     public Integer getRetryAfterSeconds() {
         return retryAfterSeconds;
     }
 
-    /** Attaches a retry-after hint (in seconds) and returns {@code this} for fluent throw-site usage. */
+    /**
+     * Attaches a retry-after hint for fluent throw-site usage.
+     *
+     * @param retryAfterSeconds suggested retry delay in seconds, or {@code null}
+     * @return this exception
+     */
     public ApiException withRetryAfterSeconds(Integer retryAfterSeconds) {
         this.retryAfterSeconds = retryAfterSeconds;
         return this;

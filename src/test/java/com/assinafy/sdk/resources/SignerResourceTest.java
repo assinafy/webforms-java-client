@@ -220,6 +220,27 @@ class SignerResourceTest {
     }
 
     @Test
+    void update_serializesAndParsesGovernmentId() throws Exception {
+        server.enqueue(okJson(Map.of("id", "s1", "government_id", "15774136604")));
+
+        Signer updated = resource.update("s1",
+                new UpdateSignerPayload().setGovernmentId("15774136604"));
+
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getBody().readUtf8())
+                .isEqualTo("{\"government_id\":\"15774136604\"}");
+        assertThat(updated.getGovernmentId()).isEqualTo("15774136604");
+    }
+
+    @Test
+    void update_rejectsEmptyPayloadWithoutSendingRequest() {
+        assertThatThrownBy(() -> resource.update("s1", new UpdateSignerPayload()))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("At least one signer attribute");
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
     void create_serialisesWhatsappPhoneNumber() throws Exception {
         server.enqueue(okList(List.of()));
         server.enqueue(okJson(Map.of("id", "123", "full_name", "John", "email", "john@example.com")));

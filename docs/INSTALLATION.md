@@ -2,8 +2,11 @@
 
 ## Requirements
 
-- Java 21 or later (the artifact is compiled to Java 21 bytecode)
-- Maven 3.8+ or Gradle 7+ (a Maven Wrapper, `./mvnw`, is included for contributors)
+- Java 25 or later (the artifact is compiled to Java 25 bytecode)
+- Maven 3.9+; use a Gradle release compatible with JDK 25 when building with Gradle
+
+The artifact runs on Java 25 and every later compatible JDK. The included wrapper pins Maven 3.9.16, and CI
+compiles, tests, and packages the release artifacts on the current JDK 25 LTS.
 
 ## Maven
 
@@ -13,7 +16,7 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.0.0</version>
+    <version>2.0.1</version>
 </dependency>
 ```
 
@@ -27,7 +30,7 @@ mvn install
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:2.0.0'
+    implementation 'com.assinafy:webforms-java-client-sdk:2.0.1'
 }
 ```
 
@@ -35,7 +38,7 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:2.0.0")
+    implementation("com.assinafy:webforms-java-client-sdk:2.0.1")
 }
 ```
 
@@ -47,7 +50,7 @@ To install from GitHub Packages, add the repository to your `pom.xml`:
 <repositories>
     <repository>
         <id>github</id>
-        <url>https://maven.pkg.github.com/assinafy/webforms-java-client-sdk</url>
+        <url>https://maven.pkg.github.com/assinafy/webforms-java-client</url>
     </repository>
 </repositories>
 ```
@@ -59,19 +62,43 @@ And configure authentication in `~/.m2/settings.xml`:
     <server>
         <id>github</id>
         <username>YOUR_GITHUB_USERNAME</username>
-        <password>${GITHUB_TOKEN}</password>
+        <password>${env.GITHUB_TOKEN}</password>
     </server>
 </servers>
 ```
 
+For local installs, `GITHUB_TOKEN` must be a GitHub personal access token (classic) with `read:packages` and
+access to the repository. `GITHUB_TOKEN` supplied to GitHub Actions is repository-scoped; do not put a token in
+`pom.xml` or commit `settings.xml`.
+
+For Gradle, declare the same authenticated repository:
+
+```groovy
+repositories {
+    maven {
+        url = uri("https://maven.pkg.github.com/assinafy/webforms-java-client")
+        credentials {
+            username = System.getenv("GITHUB_ACTOR") ?: System.getenv("GITHUB_USERNAME")
+            password = System.getenv("GITHUB_TOKEN")
+        }
+    }
+}
+```
+
+Set `GITHUB_USERNAME` for local Gradle builds; GitHub Actions supplies `GITHUB_ACTOR`. In both environments,
+`GITHUB_TOKEN` must have access to the package.
+
 ## Environment Variables
 
-Create a `.env` file or set these variables in your environment:
+Set these variables in your shell or deployment secret manager:
 
 ```bash
 export ASSINAFY_API_KEY=k_your_api_key
 export ASSINAFY_ACCOUNT_ID=your_account_id
 ```
+
+The SDK does not load `.env` files itself; pass values explicitly through `AssinafyClientOptions`. Do not
+commit local environment or Maven settings files containing credentials.
 
 ## Transitive Dependencies
 
@@ -79,5 +106,5 @@ The SDK pulls in:
 
 | Dependency                       | Version   | Purpose              |
 |----------------------------------|-----------|----------------------|
-| `com.squareup.okhttp3:okhttp`    | 4.12.0    | HTTP client          |
-| `com.fasterxml.jackson.core:jackson-databind` | 2.22.0 | JSON serialization |
+| `com.squareup.okhttp3:okhttp-jvm` | 5.5.0   | HTTP client          |
+| `com.fasterxml.jackson.core:jackson-databind` | 2.22.2 | JSON serialization |

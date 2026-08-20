@@ -15,29 +15,27 @@ concurrency:
 
 jobs:
   test:
-    name: Maven tests (JDK ${{ matrix.java }})
-    runs-on: ubuntu-latest
+    name: Maven tests and release artifacts (JDK 25 LTS)
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
-
-    strategy:
-      fail-fast: false
-      matrix:
-        # The SDK compiles to Java 21 bytecode (the floor consumers must run); verify the test suite on the
-        # supported floor (21) and the latest LTS (25). Add new LTS releases here as they ship.
-        java: ["21", "25"]
 
     steps:
       - name: Check out repository
-        # actions/checkout@v7.0.0 pinned to a commit SHA for supply-chain safety.
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        # actions/checkout@v7.0.1 pinned to a commit SHA for supply-chain safety.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
-      - name: Set up JDK ${{ matrix.java }}
-        # actions/setup-java@v5.6.0 pinned to a commit SHA.
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+      - name: Set up JDK 25 LTS
+        # actions/setup-java@v5.7.0 pinned to a commit SHA.
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
         with:
           distribution: temurin
-          java-version: ${{ matrix.java }}
+          java-version: "25"
           cache: maven
 
       - name: Run tests
-        run: mvn --batch-mode --no-transfer-progress verify
+        run: ./mvnw --batch-mode --no-transfer-progress verify
+
+      - name: Verify release artifacts and Javadoc
+        run: ./mvnw --batch-mode --no-transfer-progress -DskipTests -Prelease package

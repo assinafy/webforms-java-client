@@ -3,8 +3,12 @@ package com.assinafy.sdk.models;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+/** One event in a document's account-visible activity log. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public final class DocumentActivity {
+
+    /** Creates an empty response model for deserialization. */
+    public DocumentActivity() {}
 
     private long id;
     private String event;
@@ -15,21 +19,87 @@ public final class DocumentActivity {
     @JsonProperty("created_at")
     private String createdAt;
 
+    /**
+     * Returns the numeric activity identifier.
+     *
+     * @return the numeric activity identifier
+     */
     public long getId() { return id; }
+
+    /**
+     * Sets numeric activity identifier.
+     *
+     * @param id numeric activity identifier
+     */
     public void setId(long id) { this.id = id; }
 
+    /**
+     * Returns the event type code, such as {@code assignment_created}.
+     *
+     * @return the event type code, such as {@code assignment_created}
+     */
     public String getEvent() { return event; }
+
+    /**
+     * Sets event type code.
+     *
+     * @param event event type code
+     */
     public void setEvent(String event) { this.event = event; }
 
+    /**
+     * Returns the human-readable activity message.
+     *
+     * @return the human-readable activity message
+     */
     public String getMessage() { return message; }
+
+    /**
+     * Sets human-readable activity message.
+     *
+     * @param message human-readable activity message
+     */
     public void setMessage(String message) { this.message = message; }
 
+    /**
+     * Returns the event-specific payload snapshot, or {@code null}.
+     *
+     * @return the event-specific payload snapshot, or {@code null}
+     */
     public Object getPayload() { return payload; }
+
+    /**
+     * Sets event-specific payload snapshot.
+     *
+     * @param payload event-specific payload snapshot
+     */
     public void setPayload(Object payload) { this.payload = payload; }
 
+    /**
+     * Returns request-origin metadata such as IP and user agent, or {@code null}.
+     *
+     * @return request-origin metadata such as IP and user agent, or {@code null}
+     */
     public Object getOrigin() { return origin; }
+
+    /**
+     * Sets request-origin metadata.
+     *
+     * @param origin request-origin metadata
+     */
     public void setOrigin(Object origin) { this.origin = origin; }
 
+    /**
+     * Returns ISO 8601 {@code created_at} timestamp.
+     *
+     * @return ISO 8601 {@code created_at} timestamp
+     */
     public String getCreatedAt() { return createdAt; }
+
+    /**
+     * Sets value of {@code created_at}.
+     *
+     * @param createdAt value of {@code created_at}
+     */
     public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
 }

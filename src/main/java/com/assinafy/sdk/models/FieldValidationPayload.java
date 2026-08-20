@@ -17,11 +17,28 @@ public final class FieldValidationPayload {
 
     private final Object value;
 
+    /**
+     * Creates a field-validation entry.
+     *
+     * @param fieldId field definition identifier serialized as {@code field_id}
+     * @param value value to validate; {@code null} is serialized explicitly
+     */
     public FieldValidationPayload(String fieldId, Object value) {
         this.fieldId = fieldId;
         this.value = value;
     }
 
+    /**
+     * Returns the field definition identifier serialized as {@code field_id}.
+     *
+     * @return the field definition identifier serialized as {@code field_id}
+     */
     public String getFieldId() { return fieldId; }
+
+    /**
+     * Returns the value to validate, which may be {@code null}.
+     *
+     * @return the value to validate, which may be {@code null}
+     */
     public Object getValue() { return value; }
 }

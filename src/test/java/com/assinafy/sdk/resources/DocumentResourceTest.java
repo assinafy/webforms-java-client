@@ -5,7 +5,9 @@ import com.assinafy.sdk.models.DocumentDetails;
 import com.assinafy.sdk.models.DocumentListItem;
 import com.assinafy.sdk.models.DocumentVerification;
 import com.assinafy.sdk.models.PaginatedResult;
+import com.assinafy.sdk.models.SigningProgress;
 import com.assinafy.sdk.models.TemplateSigner;
+import com.assinafy.sdk.models.TemplateEditorField;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
@@ -61,7 +63,9 @@ class DocumentResourceTest {
                 "id", "doc-1",
                 "name", "x.pdf",
                 "status", "metadata_ready",
-                "artifacts", Map.of("original", "https://example/x.pdf")
+                "artifacts", Map.of(
+                        "original", "https://example/x.pdf",
+                        "pades", "https://example/x-pades.pdf")
         )));
 
         DocumentDetails d = resource.details("doc-1");
@@ -70,6 +74,57 @@ class DocumentResourceTest {
         assertThat(d.getId()).isEqualTo("doc-1");
         assertThat(d.getStatus()).isEqualTo("metadata_ready");
         assertThat(d.getArtifacts().getOriginal()).isEqualTo("https://example/x.pdf");
+        assertThat(d.getArtifacts().getPades()).isEqualTo("https://example/x-pades.pdf");
+    }
+
+    @Test
+    void signingProgressCountsCompletedSignersWhenSummaryIsAbsent() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "assignment", Map.of("signers", List.of(
+                Map.of("id", "signer-1", "completed", true),
+                Map.of("id", "signer-2", "completed", false),
+                Map.of("id", "signer-3", "completed", true))))));
+
+        SigningProgress progress = resource.getSigningProgress("doc-1");
+
+        assertThat(progress.getSigned()).isEqualTo(2);
+        assertThat(progress.getTotal()).isEqualTo(3);
+        assertThat(progress.getPending()).isEqualTo(1);
+        assertThat(progress.getPercentage()).isEqualTo(66.67);
+    }
+
+    @Test
+    void fullySignedUsesCompletedSignersWhenSummaryIsAbsent() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "assignment", Map.of("signers", List.of(
+                Map.of("id", "signer-1", "completed", true),
+                Map.of("id", "signer-2", "completed", true))))));
+
+        assertThat(resource.isFullySigned("doc-1")).isTrue();
+    }
+
+    @Test
+    void waitUntilReady_validatesPollingArguments() {
+        assertThatThrownBy(() -> resource.waitUntilReady("doc-1", 0, 1))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Maximum wait");
+        assertThatThrownBy(() -> resource.waitUntilReady("doc-1", 1, 0))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Poll interval");
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void waitUntilReady_capsSleepAtRemainingTimeout() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "status", "processing")));
+        long started = System.nanoTime();
+
+        assertThatThrownBy(() -> resource.waitUntilReady("doc-1", 20, 1_000))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Timeout");
+
+        long elapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS
+                .toMillis(System.nanoTime() - started);
+        assertThat(elapsedMs).isLessThan(500);
+        assertThat(server.getRequestCount()).isEqualTo(1);
     }
 
     @Test
@@ -104,6 +159,25 @@ class DocumentResourceTest {
 
         assertThat(server.takeRequest().getPath())
                 .isEqualTo("/documents/doc-1/download/original");
+    }
+
+    @Test
+    void artifactEndpointsRejectUnsafePathSegments() {
+        assertThatThrownBy(() -> resource.download("../doc-1", "original"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("URL-safe path segment");
+        assertThatThrownBy(() -> resource.download("doc-1", "../original"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("URL-safe path segment");
+        assertThatThrownBy(() -> resource.downloadPage("doc-1", "page/1"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("URL-safe path segment");
+        for (String unsafe : List.of(".", "..", "page?x=1", "page#fragment", "page%2Fchild")) {
+            assertThatThrownBy(() -> resource.downloadPage("doc-1", unsafe))
+                    .isInstanceOf(ValidationException.class)
+                    .hasMessageContaining("URL-safe path segment");
+        }
+        assertThat(server.getRequestCount()).isZero();
     }
 
     @Test
@@ -184,6 +258,49 @@ class DocumentResourceTest {
     }
 
     @Test
+    void createFromTemplate_serializesTypedEditorFields() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "name", "x.pdf")));
+
+        resource.createFromTemplate("template-1", List.of(new TemplateSigner("role-1", "signer-1")),
+                new com.assinafy.sdk.models.CreateDocumentFromTemplateOptions()
+                        .setEditorFields(List.of(new TemplateEditorField("field-1", "Approved"))));
+
+        assertThat(server.takeRequest().getBody().readUtf8())
+                .contains("\"editor_fields\":[{\"field_id\":\"field-1\",\"value\":\"Approved\"}]");
+    }
+
+    @Test
+    void templateEditorFieldValidatesRequiredValues() {
+        assertThatThrownBy(() -> new TemplateEditorField("", "value"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new TemplateEditorField("field-1", null))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+    }
+
+    @Test
+    void createFromTemplate_requiresSignerId() {
+        assertThatThrownBy(() -> resource.createFromTemplate("template-1",
+                List.of(new TemplateSigner("role-1"))))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("signer ID");
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void estimateTemplateCost_acceptsRoleWithoutSignerId() throws Exception {
+        server.enqueue(okJson(Map.of("has_sufficient_resources", true, "total", 1)));
+
+        resource.estimateCostFromTemplate("template-1", List.of(new TemplateSigner("role-1")));
+
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getPath())
+                .isEqualTo("/accounts/acc/templates/template-1/documents/estimate-cost");
+        assertThat(request.getBody().readUtf8())
+                .contains("\"role_id\":\"role-1\"")
+                .doesNotContain("\"id\"");
+    }
+
+    @Test
     void documentTagMethodsUseDocumentedEndpoints() throws Exception {
         server.enqueue(okJson(List.of(Map.of("id", "tag-1", "name", "Contracts"))));
         server.enqueue(okJson(List.of(Map.of("id", "tag-2", "name", "Urgent"))));
@@ -193,11 +310,12 @@ class DocumentResourceTest {
         var listed = resource.listTags("doc-1");
         var appended = resource.appendTags("doc-1", List.of("Urgent"));
         var replaced = resource.replaceTags("doc-1", List.of());
-        resource.detachTag("doc-1", "tag-1");
+        boolean detached = resource.detachTag("doc-1", "tag-1");
 
         assertThat(listed.get(0).getName()).isEqualTo("Contracts");
         assertThat(appended.get(0).getName()).isEqualTo("Urgent");
         assertThat(replaced).isEmpty();
+        assertThat(detached).isTrue();
 
         assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/acc/documents/doc-1/tags");
         RecordedRequest append = server.takeRequest();
@@ -373,6 +491,46 @@ class DocumentResourceTest {
     }
 
     @Test
+    void httpErrorWinsOverSuccessfulEnvelopeStatus() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(500)
+                .setBody("{\"status\":200,\"data\":[],\"message\":\"Backend failed\"}")
+                .setHeader("Content-Type", "application/json"));
+
+        try {
+            resource.statuses();
+            throw new AssertionError("expected ApiException");
+        } catch (com.assinafy.sdk.exceptions.ApiException e) {
+            assertThat(e.getStatusCode()).isEqualTo(500);
+            assertThat(e.getMessage()).isEqualTo("Backend failed");
+        }
+    }
+
+    @Test
+    void plainTextHttpErrorRemainsApiException() {
+        server.enqueue(new MockResponse().setResponseCode(503).setBody("Service unavailable"));
+
+        try {
+            resource.statuses();
+            throw new AssertionError("expected ApiException");
+        } catch (com.assinafy.sdk.exceptions.ApiException e) {
+            assertThat(e.getStatusCode()).isEqualTo(503);
+        }
+    }
+
+    @Test
+    void unresolvedRedirectRemainsApiException() {
+        server.enqueue(new MockResponse().setResponseCode(302)
+                .setBody("{\"status\":200,\"data\":[]}"));
+
+        try {
+            resource.statuses();
+            throw new AssertionError("expected ApiException");
+        } catch (com.assinafy.sdk.exceptions.ApiException e) {
+            assertThat(e.getStatusCode()).isEqualTo(302);
+        }
+    }
+
+    @Test
     void delete_surfacesErrorEnvelopeUnderHttp200() throws Exception {
         // TX-3 guard: an error envelope returned under HTTP 200 on the void path must not be swallowed.
         server.enqueue(new MockResponse().setResponseCode(200)
@@ -394,6 +552,17 @@ class DocumentResourceTest {
         assertThatThrownBy(() -> resource.download("doc-1", "certificated"))
                 .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
                 .hasMessageContaining("Artefato não está disponível.");
+    }
+
+    @Test
+    void downloadRejectsSuccessfulJsonAndStructuredJsonMediaTypes() {
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setBody("{\"status\":200,\"data\":{}}")
+                .setHeader("Content-Type", "application/problem+json"));
+
+        assertThatThrownBy(() -> resource.download("doc-1", "certificated"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.NetworkException.class)
+                .hasMessageContaining("Expected a binary response");
     }
 
     @Test

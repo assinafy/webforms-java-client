@@ -85,6 +85,19 @@ class FieldResourceTest {
     }
 
     @Test
+    void updateCanExplicitlyClearRegexAndRejectsEmptyPayload() throws Exception {
+        server.enqueue(okJson(Map.of("id", "field-1", "name", "Field", "type", "text")));
+
+        resource.update("field-1", new UpdateFieldPayload().clearRegex());
+
+        assertThat(server.takeRequest().getBody().readUtf8()).isEqualTo("{\"regex\":null}");
+        assertThatThrownBy(() -> resource.update("field-1", new UpdateFieldPayload()))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("At least one");
+        assertThat(server.getRequestCount()).isEqualTo(1);
+    }
+
+    @Test
     void validate_addsSignerAccessCodeWhenProvided() throws Exception {
         server.enqueue(okJson(Map.of("type", "cpf", "success", true, "error_message", "")));
 

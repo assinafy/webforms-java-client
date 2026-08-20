@@ -2,8 +2,12 @@ package com.assinafy.sdk.resources;
 
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.Assignment;
+import com.assinafy.sdk.models.AssignmentSignEntry;
+import com.assinafy.sdk.models.CollectAssignmentEntry;
+import com.assinafy.sdk.models.CollectFieldPlacement;
 import com.assinafy.sdk.models.CostEstimate;
 import com.assinafy.sdk.models.CreateAssignmentPayload;
+import com.assinafy.sdk.models.DisplaySettings;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.ResendCostEstimate;
 import com.assinafy.sdk.models.ResendResult;
@@ -212,6 +216,55 @@ class AssignmentResourceTest {
     }
 
     @Test
+    void estimateCost_acceptsCollectEntriesWithoutSigners() throws Exception {
+        server.enqueue(okJson(Map.of("total_credits", 0)));
+
+        resource.estimateCost("doc-1", new CreateAssignmentPayload()
+                .setMethod("collect")
+                .setEntries(List.of(new CollectAssignmentEntry("p1", List.of(
+                        new CollectFieldPlacement("s1", "f1",
+                                new DisplaySettings(10, 20, 100, 30, 12, "Arial", "#D5EBFF")))))));
+
+        String body = server.takeRequest().getBody().readUtf8();
+        assertThat(body)
+                .contains("\"method\":\"collect\"")
+                .contains("\"page_id\":\"p1\"")
+                .contains("\"signer_id\":\"s1\"")
+                .contains("\"field_id\":\"f1\"")
+                .contains("\"fontSize\":12.0")
+                .contains("\"backgroundColor\":\"#D5EBFF\"");
+        assertThat(body).doesNotContain("\"signers\"");
+    }
+
+    @Test
+    void estimateCost_omitsCreateOnlyFields() throws Exception {
+        server.enqueue(okJson(Map.of("total_credits", 0)));
+
+        resource.estimateCost("doc-1", new CreateAssignmentPayload()
+                .setSignerStrings("s1")
+                .setMessage("not part of estimate")
+                .setExpiresAt("2027-01-01T00:00:00Z")
+                .setCopyReceivers(List.of("copy-1")));
+
+        assertThat(server.takeRequest().getBody().readUtf8())
+                .contains("\"method\":\"virtual\"", "\"signers\"")
+                .doesNotContain("message", "expires_at", "copy_receivers");
+    }
+
+    @Test
+    void signerSetterFormsReplaceRatherThanMixState() throws Exception {
+        server.enqueue(okJson(Map.of("id", "a1")));
+
+        resource.create("doc-1", new CreateAssignmentPayload()
+                .setSignerStrings("old")
+                .setSignerIds(List.of("new")));
+
+        assertThat(server.takeRequest().getBody().readUtf8())
+                .contains("\"id\":\"new\"")
+                .doesNotContain("old");
+    }
+
+    @Test
     void estimateCost_requiresDocumentId() {
         assertThatThrownBy(() -> resource.estimateCost("",
                 new CreateAssignmentPayload().setSignerStrings("s1")))
@@ -223,28 +276,67 @@ class AssignmentResourceTest {
         server.enqueue(okJson(List.of()));
 
         resource.sign("doc-1", "a1", "code", List.of(
-                Map.of(
-                        "itemId", "item-1",
-                        "fieldId", "field-1",
-                        "pageId", "page-1",
-                        "value", "John Doe"
-                )
-        ));
+                new AssignmentSignEntry("item-1", "field-1", "page-1", "John Doe")));
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getMethod()).isEqualTo("POST");
         assertThat(req.getPath())
                 .isEqualTo("/documents/doc-1/assignments/a1?signer-access-code=code");
         String body = req.getBody().readUtf8();
-        assertThat(body).startsWith("[");
-        assertThat(body).contains("\"itemId\":\"item-1\"");
-        assertThat(body).contains("\"value\":\"John Doe\"");
+        assertThat(body).startsWith("[")
+                .contains("\"itemId\":\"item-1\"", "\"fieldId\":\"field-1\"",
+                        "\"pageId\":\"page-1\"", "\"value\":\"John Doe\"");
     }
 
     @Test
     void sign_rejectsEmptyEntries() {
         assertThatThrownBy(() -> resource.sign("doc-1", "a1", "code", List.of()))
                 .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void createCollectRequiresEntriesAndMethodIsValidated() {
+        assertThatThrownBy(() -> resource.create("doc-1", new CreateAssignmentPayload()
+                .setMethod("collect").setSignerStrings("s1")))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("collect entry");
+        assertThatThrownBy(() -> resource.create("doc-1", new CreateAssignmentPayload()
+                .setMethod("paper").setSignerStrings("s1")))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("method");
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void typedEntryModelsValidateRequiredGeometryAndIdentifiers() {
+        assertThatThrownBy(() -> new AssignmentSignEntry("", "f", "p", "value"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new AssignmentSignEntry("i", "", "p", "value"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new AssignmentSignEntry("i", "f", "", "value"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new AssignmentSignEntry("i", "f", "p", null))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new DisplaySettings(0, 0, 0, 10, 12))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new DisplaySettings(Double.NaN, 0, 10, 10, 12))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new DisplaySettings(0, -1, 10, 10, 12))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new CollectFieldPlacement("", "f", new DisplaySettings(0, 0, 10, 10, 12)))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new CollectFieldPlacement("s", "", new DisplaySettings(0, 0, 10, 10, 12)))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new CollectFieldPlacement("s", "f", null))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new CollectAssignmentEntry("", List.of(
+                new CollectFieldPlacement("s", "f", new DisplaySettings(0, 0, 10, 10, 12)))))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new CollectAssignmentEntry("p", List.of()))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
+        assertThatThrownBy(() -> new CollectAssignmentEntry("p",
+                java.util.Collections.singletonList(null)))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class);
     }
 
     @Test

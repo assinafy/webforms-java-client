@@ -19,20 +19,28 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
+/** Shared HTTP transport, JSON-envelope parsing, validation, and pagination support for endpoint resources. */
 public abstract class BaseResource {
 
+    private static final Pattern PATH_SEGMENT = Pattern.compile("[A-Za-z0-9._~-]+");
+
+    /** JSON request-body media type used by resource methods. */
     protected static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
+    /** Shared HTTP client configured by {@link com.assinafy.sdk.AssinafyClient}. */
     protected final OkHttpClient httpClient;
+
+    /** Normalized API base URL without a trailing slash. */
     protected final String baseUrl;
     private final String defaultAccountId;
 
+    /** Shared, thread-safe JSON mapper configured to tolerate unknown response properties. */
     protected static final ObjectMapper MAPPER = createObjectMapper();
 
     private static ObjectMapper createObjectMapper() {
@@ -41,141 +49,403 @@ public abstract class BaseResource {
         return mapper;
     }
 
+    /**
+     * Creates transport support for one endpoint resource.
+     *
+     * @param httpClient required shared HTTP client
+     * @param baseUrl required HTTPS API base URL, or a loopback HTTP URL for local tests
+     * @param defaultAccountId default account identifier, or {@code null}
+     * @throws ValidationException when the client or base URL is invalid
+     */
     protected BaseResource(OkHttpClient httpClient, String baseUrl, String defaultAccountId) {
+        if (httpClient == null) {
+            throw new ValidationException("HTTP client is required");
+        }
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new ValidationException("Base URL is required");
+        }
+        HttpUrl parsedBaseUrl;
+        try {
+            parsedBaseUrl = HttpUrl.get(baseUrl);
+        } catch (IllegalArgumentException e) {
+            throw new ValidationException("Base URL must be a valid HTTP or HTTPS URL");
+        }
+        if (!parsedBaseUrl.username().isEmpty() || !parsedBaseUrl.password().isEmpty()
+                || parsedBaseUrl.query() != null || parsedBaseUrl.fragment() != null) {
+            throw new ValidationException("Base URL must not contain user information, a query, or a fragment");
+        }
+        if (!"https".equals(parsedBaseUrl.scheme()) && !isLoopbackHost(parsedBaseUrl.host())) {
+            throw new ValidationException("Base URL must use HTTPS except for loopback HTTP in local tests");
+        }
         this.httpClient = httpClient;
-        this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String normalizedBaseUrl = parsedBaseUrl.toString();
+        this.baseUrl = normalizedBaseUrl.endsWith("/")
+                ? normalizedBaseUrl.substring(0, normalizedBaseUrl.length() - 1)
+                : normalizedBaseUrl;
         this.defaultAccountId = defaultAccountId;
     }
 
+    private static boolean isLoopbackHost(String host) {
+        return "localhost".equalsIgnoreCase(host) || "::1".equals(host) || "127.0.0.1".equals(host);
+    }
+
+    /**
+     * Resolves and validates an explicit account identifier or the configured default.
+     *
+     * @param explicit explicit account identifier, or {@code null} for the default
+     * @return validated account identifier
+     * @throws ValidationException when neither a valid explicit nor default identifier is available
+     */
     protected String accountId(String explicit) {
         String id = explicit != null ? explicit : defaultAccountId;
         if (id == null || id.isBlank()) {
             throw new ValidationException(
                     "Account ID is required. Provide it as a parameter or set a default in the client.");
         }
-        return id;
+        return requireId(id, "Account ID");
     }
 
+    /**
+     * Validates a value before inserting it into a URL path segment.
+     *
+     * @param value identifier to validate
+     * @param name human-readable field name used in validation messages
+     * @return the validated identifier
+     * @throws ValidationException when the value is blank or not URL-unreserved
+     */
     protected String requireId(String value, String name) {
         if (value == null || value.isBlank()) {
             throw new ValidationException(name + " is required");
         }
+        if (".".equals(value) || "..".equals(value) || !PATH_SEGMENT.matcher(value).matches()) {
+            throw new ValidationException(name + " must be a URL-safe path segment");
+        }
         return value;
     }
 
+    /**
+     * Executes a GET request without query parameters and unwraps its JSON {@code data}.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param dataType response model class
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpGet(String path, Class<T> dataType) {
         return httpGet(path, Collections.emptyMap(), dataType);
     }
 
+    /**
+     * Executes a GET request and unwraps its JSON {@code data}.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @param dataType response model class
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpGet(String path, Map<String, String> queryParams, Class<T> dataType) {
         Request request = buildGetRequest(path, queryParams);
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    /**
+     * Executes a GET request for a generic response type without query parameters.
+     *
+     * @param <T> response type
+     * @param path API path beginning with {@code /}
+     * @param typeRef generic response type reference
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpGet(String path, TypeReference<T> typeRef) {
         Request request = buildGetRequest(path, Collections.emptyMap());
         return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
     }
 
+    /**
+     * Executes a GET request for a generic response type.
+     *
+     * @param <T> response type
+     * @param path API path beginning with {@code /}
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @param typeRef generic response type reference
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpGet(String path, Map<String, String> queryParams, TypeReference<T> typeRef) {
         Request request = buildGetRequest(path, queryParams);
         return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
     }
 
+    /**
+     * Executes a JSON POST without query parameters.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     * @param dataType response model class
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpPost(String path, Object body, Class<T> dataType) {
         Request request = buildRequest("POST", path, body);
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    /**
+     * Executes a JSON POST with query parameters.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     * @param dataType response model class
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpPost(String path, Object body, Class<T> dataType, Map<String, String> queryParams) {
         Request request = buildRequest("POST", path, body, queryParams);
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    /**
+     * Executes a JSON POST for a generic response type.
+     *
+     * @param <T> response type
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     * @param typeRef generic response type reference
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpPost(String path, Object body, TypeReference<T> typeRef, Map<String, String> queryParams) {
         Request request = buildRequest("POST", path, body, queryParams);
         return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
     }
 
+    /**
+     * Executes a JSON PUT without query parameters.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     * @param dataType response model class
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpPut(String path, Object body, Class<T> dataType) {
         Request request = buildRequest("PUT", path, body);
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    /**
+     * Executes a JSON PUT with query parameters.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     * @param dataType response model class
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpPut(String path, Object body, Class<T> dataType, Map<String, String> queryParams) {
         Request request = buildRequest("PUT", path, body, queryParams);
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    /**
+     * Executes a JSON PUT for a generic response type.
+     *
+     * @param <T> response type
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     * @param typeRef generic response type reference
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpPut(String path, Object body, TypeReference<T> typeRef, Map<String, String> queryParams) {
         Request request = buildRequest("PUT", path, body, queryParams);
         return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
     }
 
+    /**
+     * Executes a JSON PATCH without query parameters.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     * @param dataType response model class
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpPatch(String path, Object body, Class<T> dataType) {
         Request request = buildRequest("PATCH", path, body);
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    /**
+     * Executes a DELETE without query parameters and validates its success response.
+     *
+     * @param path API path beginning with {@code /}
+     */
     protected void httpDelete(String path) {
         Request request = buildRequest("DELETE", path, null);
         executeVoid(request);
     }
 
+    /**
+     * Executes a DELETE with query parameters and validates its success response.
+     *
+     * @param path API path beginning with {@code /}
+     * @param queryParams query parameters; {@code null} values are omitted
+     */
     protected void httpDelete(String path, Map<String, String> queryParams) {
         Request request = buildRequest("DELETE", path, null, queryParams);
         executeVoid(request);
     }
 
+    /**
+     * Executes a DELETE carrying a JSON request body.
+     *
+     * @param path API path beginning with {@code /}
+     * @param body request body
+     */
+    protected void httpDeleteBody(String path, Object body) {
+        executeVoid(buildRequest("DELETE", path, body));
+    }
+
+    /**
+     * Executes a DELETE and unwraps a typed JSON response.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param dataType response model class
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpDelete(String path, Class<T> dataType) {
         Request request = buildRequest("DELETE", path, null);
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    /**
+     * Executes a DELETE with query parameters and unwraps a typed JSON response.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param dataType response model class
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpDelete(String path, Class<T> dataType, Map<String, String> queryParams) {
         Request request = buildRequest("DELETE", path, null, queryParams);
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    /**
+     * Executes a DELETE and unwraps a generic JSON response.
+     *
+     * @param <T> response type
+     * @param path API path beginning with {@code /}
+     * @param typeRef generic response type reference
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpDelete(String path, TypeReference<T> typeRef) {
         Request request = buildRequest("DELETE", path, null);
         return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
     }
 
+    /**
+     * Executes a DELETE with query parameters and unwraps a generic JSON response.
+     *
+     * @param <T> response type
+     * @param path API path beginning with {@code /}
+     * @param typeRef generic response type reference
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpDelete(String path, TypeReference<T> typeRef, Map<String, String> queryParams) {
         Request request = buildRequest("DELETE", path, null, queryParams);
         return execute(request, MAPPER.getTypeFactory().constructType(typeRef));
     }
 
+    /**
+     * Executes a JSON POST without query parameters and validates its success response.
+     *
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     */
     protected void httpPostVoid(String path, Object body) {
         executeVoid(buildRequest("POST", path, body));
     }
 
+    /**
+     * Executes a JSON POST with query parameters and validates its success response.
+     *
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     * @param queryParams query parameters; {@code null} values are omitted
+     */
     protected void httpPostVoid(String path, Object body, Map<String, String> queryParams) {
         executeVoid(buildRequest("POST", path, body, queryParams));
     }
 
+    /**
+     * Executes a JSON PUT without query parameters and validates its success response.
+     *
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     */
     protected void httpPutVoid(String path, Object body) {
         executeVoid(buildRequest("PUT", path, body));
     }
 
+    /**
+     * Executes a JSON PUT with query parameters and validates its success response.
+     *
+     * @param path API path beginning with {@code /}
+     * @param body request body, or {@code null} for an empty body
+     * @param queryParams query parameters; {@code null} values are omitted
+     */
     protected void httpPutVoid(String path, Object body, Map<String, String> queryParams) {
         executeVoid(buildRequest("PUT", path, body, queryParams));
     }
 
+    /**
+     * Executes a binary GET without query parameters.
+     *
+     * @param path API path beginning with {@code /}
+     * @return raw response bytes, never {@code null}
+     */
     protected byte[] httpGetBinary(String path) {
         return httpGetBinary(path, Collections.emptyMap());
     }
 
+    /**
+     * Executes a binary GET with query parameters.
+     *
+     * @param path API path beginning with {@code /}
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @return raw response bytes, never {@code null}
+     */
     protected byte[] httpGetBinary(String path, Map<String, String> queryParams) {
         Request request = buildGetRequest(path, queryParams);
         return executeBinary(request);
     }
 
+    /**
+     * Executes a binary POST without query parameters and returns binary response data.
+     *
+     * @param path API path beginning with {@code /}
+     * @param body binary request body
+     * @return raw response bytes, never {@code null}
+     */
     protected byte[] httpPostBinary(String path, RequestBody body) {
         return httpPostBinary(path, Collections.emptyMap(), body);
     }
 
+    /**
+     * Executes a binary POST with query parameters and returns binary response data.
+     *
+     * @param path API path beginning with {@code /}
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @param body binary request body
+     * @return raw response bytes, never {@code null}
+     */
     protected byte[] httpPostBinary(String path, Map<String, String> queryParams, RequestBody body) {
         HttpUrl url = buildUrl(path, queryParams);
         Request request = new Request.Builder().url(url).post(body).build();
@@ -186,12 +456,25 @@ public abstract class BaseResource {
      * POST a binary (e.g. image) request body to an endpoint that responds with a JSON envelope rather than a
      * binary artifact. The envelope is parsed so envelope-level errors ({@code status >= 400}) surface as
      * {@link ApiException}; the success payload is discarded.
+     *
+     * @param path API path beginning with {@code /}
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @param body binary request body
      */
     protected void httpPostBinaryEnvelope(String path, Map<String, String> queryParams, RequestBody body) {
         Request request = new Request.Builder().url(buildUrl(path, queryParams)).post(body).build();
         execute(request, MAPPER.getTypeFactory().constructType(Object.class));
     }
 
+    /**
+     * Executes a multipart POST and unwraps a typed JSON response.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param multipartBody multipart request body
+     * @param dataType response model class
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
     protected <T> T httpPostMultipart(String path, RequestBody multipartBody, Class<T> dataType) {
         Request request = new Request.Builder()
                 .url(buildUrl(path, Collections.emptyMap()))
@@ -200,25 +483,31 @@ public abstract class BaseResource {
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
+    /**
+     * Executes a paginated GET without query parameters.
+     *
+     * @param <T> list item model type
+     * @param path API path beginning with {@code /}
+     * @param itemType list item model class
+     * @return page data and parsed pagination headers
+     */
     protected <T> PaginatedResult<T> httpGetList(String path, Class<T> itemType) {
         return httpGetList(path, Collections.emptyMap(), itemType);
     }
 
+    /**
+     * Executes a paginated GET with query parameters.
+     *
+     * @param <T> list item model type
+     * @param path API path beginning with {@code /}
+     * @param queryParams query parameters; {@code null} values are omitted
+     * @param itemType list item model class
+     * @return page data and parsed pagination headers
+     */
     protected <T> PaginatedResult<T> httpGetList(String path, Map<String, String> queryParams, Class<T> itemType) {
         Request request = buildGetRequest(path, queryParams);
         JavaType listType = MAPPER.getTypeFactory().constructCollectionType(List.class, itemType);
         return executeList(request, listType);
-    }
-
-    protected <T> T httpGetOptional(String path, Class<T> dataType) {
-        try {
-            return httpGet(path, dataType);
-        } catch (ApiException e) {
-            if (e.getStatusCode() == 404) {
-                return null;
-            }
-            throw e;
-        }
     }
 
     private Request buildGetRequest(String path, Map<String, String> queryParams) {
@@ -274,7 +563,7 @@ public abstract class BaseResource {
                 String json = MAPPER.writeValueAsString(body);
                 requestBody = RequestBody.create(json, JSON);
             } catch (Exception e) {
-                throw new ValidationException("Failed to serialize request body: " + e.getMessage());
+                throw new ValidationException("Failed to serialize request body: " + e.getMessage(), e);
             }
         } else if ("POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method)) {
             requestBody = RequestBody.create("", JSON);
@@ -332,7 +621,8 @@ public abstract class BaseResource {
             MediaType contentType = responseBody != null ? responseBody.contentType() : null;
             boolean jsonBody = contentType != null
                     && "application".equalsIgnoreCase(contentType.type())
-                    && "json".equalsIgnoreCase(contentType.subtype());
+                    && ("json".equalsIgnoreCase(contentType.subtype())
+                    || contentType.subtype().toLowerCase(java.util.Locale.ROOT).endsWith("+json"));
 
             // A real binary artifact is never JSON. When the body is JSON (an error envelope returned under
             // HTTP 200) or the HTTP status is an error, route through envelope inspection instead of returning
@@ -349,8 +639,7 @@ public abstract class BaseResource {
                 } catch (ApiException e) {
                     throw attachRetryAfter(e, response);
                 }
-                // Successful HTTP with a JSON body that is not an error envelope: return it verbatim.
-                return json.getBytes(StandardCharsets.UTF_8);
+                throw new NetworkException("Expected a binary response but received JSON");
             }
             return responseBody != null ? responseBody.bytes() : new byte[0];
         } catch (ApiException e) {
@@ -412,7 +701,7 @@ public abstract class BaseResource {
     @SuppressWarnings("unchecked")
     private <T> T parseEnvelope(String json, int httpStatus, JavaType dataType) {
         if (json == null || json.isBlank()) {
-            if (httpStatus >= 400) {
+            if (httpStatus < 200 || httpStatus >= 300) {
                 throw new ApiException(httpStatus);
             }
             return null;
@@ -425,6 +714,9 @@ public abstract class BaseResource {
                 if (envelopeStatus >= 400) {
                     throw new ApiException(envelopeStatus, message, json);
                 }
+                if (httpStatus < 200 || httpStatus >= 300) {
+                    throw new ApiException(httpStatus, message, json);
+                }
                 if (root.has("data")) {
                     JsonNode dataNode = root.get("data");
                     if (dataNode.isNull()) {
@@ -434,7 +726,7 @@ public abstract class BaseResource {
                 }
                 return null;
             }
-            if (httpStatus >= 400) {
+            if (httpStatus < 200 || httpStatus >= 300) {
                 String message = root.has("message") ? root.get("message").asText(null) : null;
                 throw new ApiException(httpStatus, message, json);
             }
@@ -442,6 +734,9 @@ public abstract class BaseResource {
         } catch (ApiException e) {
             throw e;
         } catch (Exception e) {
+            if (httpStatus < 200 || httpStatus >= 300) {
+                throw new ApiException(httpStatus, null, json);
+            }
             throw new NetworkException("Failed to parse response: " + e.getMessage(), e);
         }
     }
@@ -469,7 +764,7 @@ public abstract class BaseResource {
         if (envelopeStatus != null && envelopeStatus >= 400) {
             throw new ApiException(envelopeStatus, message, json);
         }
-        if (httpStatus >= 400) {
+        if (httpStatus < 200 || httpStatus >= 300) {
             throw new ApiException(httpStatus, message, json);
         }
     }
@@ -500,6 +795,14 @@ public abstract class BaseResource {
         }
     }
 
+    /**
+     * Builds string query parameters from alternating keys and values, omitting null values.
+     *
+     * @param keyValues alternating {@link String} keys and arbitrary values
+     * @return mutable query-parameter map
+     * @throws IllegalArgumentException when an odd number of arguments is supplied
+     * @throws ClassCastException when a key is not a {@link String}
+     */
     protected Map<String, String> queryParams(Object... keyValues) {
         if (keyValues.length % 2 != 0) {
             throw new IllegalArgumentException("Key-value pairs must be even");

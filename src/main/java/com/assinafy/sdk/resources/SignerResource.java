@@ -12,10 +12,18 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+/** Account-owner client for signer creation, lookup, update, deletion, and search. */
 public final class SignerResource extends BaseResource {
 
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
+    /**
+     * Creates an instance.
+     *
+     * @param httpClient shared HTTP client
+     * @param baseUrl API base URL
+     * @param defaultAccountId default account identifier, or {@code null}
+     */
     public SignerResource(OkHttpClient httpClient, String baseUrl, String defaultAccountId) {
         super(httpClient, baseUrl, defaultAccountId);
     }
@@ -28,7 +36,11 @@ public final class SignerResource extends BaseResource {
      * for a race, a duplicate-email error from the API (the live API reports this as HTTP 400, historically 409)
      * is recovered by re-querying and returning the existing signer. Because of this, {@code create} will not
      * apply changed {@code full_name}/{@code whatsapp_phone_number} values to an already-existing signer — use
-     * {@link #update} to modify an existing signer.</p>
+     * {@link #update(String, UpdateSignerPayload)} to modify an existing signer.</p>
+     *
+     * @param payload required signer fields
+     * @param accountId account override, or {@code null} for the client default
+     * @return created or existing signer
      */
     public Signer create(CreateSignerPayload payload, String accountId) {
         validateCreatePayload(payload);
@@ -57,17 +69,35 @@ public final class SignerResource extends BaseResource {
         }
     }
 
+    /**
+     * Returns created or existing signer in the default account.
+     *
+     * @param payload required signer fields
+     * @return created or existing signer in the default account
+     */
     public Signer create(CreateSignerPayload payload) {
         return create(payload, null);
     }
 
-    /** {@code GET /accounts/{account_id}/signers/{signer_id}} — retrieve a signer's information. */
+    /**
+     * {@code GET /accounts/{account_id}/signers/{signer_id}}.
+     *
+     * @param signerId required signer identifier
+     * @param accountId account override, or {@code null} for the client default
+     * @return signer details
+     */
     public Signer get(String signerId, String accountId) {
         String id = accountId(accountId);
         String sid = requireId(signerId, "Signer ID");
         return httpGet("/accounts/" + id + "/signers/" + sid, Signer.class);
     }
 
+    /**
+     * Returns signer details in the default account.
+     *
+     * @param signerId required signer identifier
+     * @return signer details in the default account
+     */
     public Signer get(String signerId) {
         return get(signerId, null);
     }
@@ -75,6 +105,10 @@ public final class SignerResource extends BaseResource {
     /**
      * {@code GET /accounts/{account_id}/signers} — list signers of the workspace. Supports the documented
      * {@code search} query parameter (filters by {@code full_name} or {@code email}) plus pagination params.
+     *
+     * @param params optional search and pagination values
+     * @param accountId account override, or {@code null} for the client default
+     * @return signer page and response-header pagination metadata
      */
     public PaginatedResult<Signer> list(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
@@ -82,15 +116,34 @@ public final class SignerResource extends BaseResource {
                 params != null ? params : Map.of(), Signer.class);
     }
 
+    /**
+     * Returns default account's signer page.
+     *
+     * @param params optional search and pagination values
+     * @return default account's signer page
+     */
     public PaginatedResult<Signer> list(Map<String, String> params) {
         return list(params, null);
     }
 
+    /**
+     * Returns default account's first signer page.
+     *
+     * @return default account's first signer page
+     */
     public PaginatedResult<Signer> list() {
         return list(null, null);
     }
 
-    /** {@code PUT /accounts/{account_id}/signers/{signer_id}} — update a signer's information. */
+    /**
+     * {@code PUT /accounts/{account_id}/signers/{signer_id}} — update any supplied {@code full_name},
+     * {@code email}, {@code whatsapp_phone_number}, or {@code government_id} field and return the signer.
+     *
+     * @param signerId required signer identifier
+     * @param payload required partial signer update
+     * @param accountId account override, or {@code null} for the client default
+     * @return updated signer
+     */
     public Signer update(String signerId, UpdateSignerPayload payload, String accountId) {
         String id = accountId(accountId);
         String sid = requireId(signerId, "Signer ID");
@@ -103,17 +156,34 @@ public final class SignerResource extends BaseResource {
         return httpPut("/accounts/" + id + "/signers/" + sid, normaliseUpdatePayload(payload), Signer.class);
     }
 
+    /**
+     * Returns updated signer in the default account.
+     *
+     * @param signerId required signer identifier
+     * @param payload required partial signer update
+     * @return updated signer in the default account
+     */
     public Signer update(String signerId, UpdateSignerPayload payload) {
         return update(signerId, payload, null);
     }
 
-    /** {@code DELETE /accounts/{account_id}/signers/{signer_id}} — delete a signer. */
+    /**
+     * {@code DELETE /accounts/{account_id}/signers/{signer_id}}.
+     *
+     * @param signerId required signer identifier
+     * @param accountId account override, or {@code null} for the client default
+     */
     public void delete(String signerId, String accountId) {
         String id = accountId(accountId);
         String sid = requireId(signerId, "Signer ID");
         httpDelete("/accounts/" + id + "/signers/" + sid);
     }
 
+    /**
+     * Deletes the selected resource.
+     *
+     * @param signerId required signer identifier in the default account
+     */
     public void delete(String signerId) {
         delete(signerId, null);
     }
@@ -122,25 +192,27 @@ public final class SignerResource extends BaseResource {
      * Finds a signer by exact email using {@code GET /accounts/{account_id}/signers?search=...} and matching
      * case-insensitively on the email. Returns {@code null} when no signer matches. Note the lookup pages
      * through up to 100 search results, so it may miss a match if the workspace has many same-prefix emails.
+     *
+     * @param email required email address
+     * @param accountId account override, or {@code null} for the client default
+     * @return matching signer, or {@code null}
      */
     public Signer findByEmail(String email, String accountId) {
         assertEmail(email);
         String id = accountId(accountId);
-        try {
-            PaginatedResult<Signer> result = list(
-                    queryParams("search", email, "per_page", "100"), id);
-            return result.getData().stream()
-                    .filter(s -> s.getEmail() != null && s.getEmail().equalsIgnoreCase(email))
-                    .findFirst()
-                    .orElse(null);
-        } catch (ApiException e) {
-            if (e.getStatusCode() == 404) {
-                return null;
-            }
-            throw e;
-        }
+        PaginatedResult<Signer> result = list(queryParams("search", email, "per_page", "100"), id);
+        return result.getData().stream()
+                .filter(s -> s.getEmail() != null && s.getEmail().equalsIgnoreCase(email))
+                .findFirst()
+                .orElse(null);
     }
 
+    /**
+     * Returns matching signer in the default account, or {@code null}.
+     *
+     * @param email required email address
+     * @return matching signer in the default account, or {@code null}
+     */
     public Signer findByEmail(String email) {
         return findByEmail(email, null);
     }
@@ -181,6 +253,10 @@ public final class SignerResource extends BaseResource {
         if (payload.getEmail() != null && !payload.getEmail().isBlank()) body.put("email", payload.getEmail());
         if (payload.getWhatsappPhoneNumber() != null) {
             body.put("whatsapp_phone_number", payload.getWhatsappPhoneNumber());
+        }
+        if (payload.getGovernmentId() != null) body.put("government_id", payload.getGovernmentId());
+        if (body.isEmpty()) {
+            throw new ValidationException("At least one signer attribute is required");
         }
         return body;
     }

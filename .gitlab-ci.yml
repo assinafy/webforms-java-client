@@ -1,5 +1,5 @@
 # GitLab CI mirror of .github/workflows/ci.yml. This repository's source of truth is GitLab; GitHub is a
-# downstream mirror. Keep this file and the GitHub Actions workflow in sync (same Java matrix, same `mvn verify`).
+# downstream mirror. Keep this file and the GitHub Actions workflow in sync (same Java runtime and verification).
 
 stages:
   - test
@@ -17,16 +17,17 @@ cache:
 .test-template: &test-template
   stage: test
   script:
+    # The image pins Maven itself; use it directly because the minimal image has no unzip for the wrapper ZIP.
     - mvn $MAVEN_CLI_OPTS verify
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
 
-# Compile target is Java 21; verify on the supported floor (21) and the latest LTS (25).
-test:jdk21:
-  <<: *test-template
-  image: maven:3.9-eclipse-temurin-21
-
+# Compile and verify on the current Java LTS bytecode baseline.
 test:jdk25:
   <<: *test-template
-  image: maven:3.9-eclipse-temurin-25
+  image: maven:3.9.16-eclipse-temurin-25@sha256:dde1fa3cdee15fc123221a5b325b30eb30d74c9a3433305704cdcbc1ce67b111
+  script:
+    - mvn $MAVEN_CLI_OPTS verify
+    - mvn $MAVEN_CLI_OPTS -DskipTests -Prelease package

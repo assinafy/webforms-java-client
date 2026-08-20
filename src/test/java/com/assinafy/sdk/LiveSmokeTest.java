@@ -1,6 +1,7 @@
 package com.assinafy.sdk;
 
 import com.assinafy.sdk.models.Assignment;
+import com.assinafy.sdk.models.AccountPayload;
 import com.assinafy.sdk.models.CostEstimate;
 import com.assinafy.sdk.models.CreateAssignmentPayload;
 import com.assinafy.sdk.models.CreateFieldPayload;
@@ -14,26 +15,38 @@ import com.assinafy.sdk.models.FieldDefinition;
 import com.assinafy.sdk.models.FieldTypeInfo;
 import com.assinafy.sdk.models.FieldValidationResult;
 import com.assinafy.sdk.models.PaginatedResult;
+import com.assinafy.sdk.models.NotificationPreferences;
+import com.assinafy.sdk.models.RegisterWebhookPayload;
 import com.assinafy.sdk.models.Signer;
 import com.assinafy.sdk.models.SignerRef;
 import com.assinafy.sdk.models.Tag;
 import com.assinafy.sdk.models.TemplateListItem;
+import com.assinafy.sdk.models.TemplateDetails;
+import com.assinafy.sdk.models.TemplateSigner;
+import com.assinafy.sdk.models.CreateDocumentFromTemplateOptions;
+import com.assinafy.sdk.models.CollectAssignmentEntry;
+import com.assinafy.sdk.models.CollectFieldPlacement;
+import com.assinafy.sdk.models.DisplaySettings;
 import com.assinafy.sdk.models.UpdateFieldPayload;
 import com.assinafy.sdk.models.UpdateSignerPayload;
 import com.assinafy.sdk.models.UpdateTagPayload;
 import com.assinafy.sdk.models.WebhookEventTypeInfo;
 import com.assinafy.sdk.models.WebhookSubscription;
+import com.assinafy.sdk.exceptions.ApiException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.io.InputStream;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,16 +55,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Smoke test that exercises the SDK against the live Assinafy API.
  *
  * <p>This test is skipped unless both {@code ASSINAFY_API_KEY} and {@code ASSINAFY_ACCOUNT_ID}
- * environment variables are set. It targets the <strong>sandbox</strong> base URL by default; override with
- * {@code ASSINAFY_BASE_URL} to point elsewhere. Run with:</p>
+ * environment variables are set. It only runs against the exact Assinafy sandbox base URL; the optional
+ * {@code ASSINAFY_BASE_URL} value may only add/remove trailing slashes. Run with:</p>
  *
  * <pre>{@code
  * ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... mvn test -Dtest=LiveSmokeTest
  * }</pre>
  *
- * <p>The test exercises read-only endpoints plus tag and signer create/update/delete round-trips. Because it
- * performs destructive operations, it defaults to the sandbox base URL and must never be pointed at a
- * production workspace.</p>
+ * <p>The test exercises read-only endpoints plus isolated create/update/delete round-trips. Because it performs
+ * destructive operations, a hard runtime guard rejects every non-sandbox URL.</p>
  */
 @EnabledIfEnvironmentVariable(named = "ASSINAFY_API_KEY", matches = ".+")
 @EnabledIfEnvironmentVariable(named = "ASSINAFY_ACCOUNT_ID", matches = ".+")
@@ -64,6 +76,9 @@ class LiveSmokeTest {
 
     private static AssinafyClient client() {
         String baseUrl = System.getenv().getOrDefault("ASSINAFY_BASE_URL", DEFAULT_SANDBOX_BASE_URL);
+        if (!DEFAULT_SANDBOX_BASE_URL.equals(baseUrl.replaceFirst("/+$", ""))) {
+            throw new IllegalStateException("LiveSmokeTest only runs against the Assinafy sandbox");
+        }
         return AssinafyClient.create(API_KEY, ACCOUNT_ID, opts -> opts.setBaseUrl(baseUrl));
     }
 
@@ -131,9 +146,8 @@ class LiveSmokeTest {
     @DisplayName("Webhook subscription endpoint returns the current configuration object")
     void getWebhookSubscription() {
         WebhookSubscription sub = client().webhooks.getSubscription();
-        if (sub != null) {
-            assertThat(sub.getEvents()).isNotNull();
-        }
+        assertThat(sub).isNotNull();
+        assertThat(sub.getEvents()).isNotNull();
     }
 
     @Test
@@ -170,7 +184,7 @@ class LiveSmokeTest {
                     new UpdateTagPayload().setName(tagName + "-updated").clearColor());
             assertThat(updated.getName()).isEqualTo(tagName + "-updated");
         } finally {
-            client.tags.delete(created.getId(), true);
+            assertThat(client.tags.delete(created.getId(), true)).isTrue();
         }
     }
 
@@ -240,6 +254,9 @@ class LiveSmokeTest {
             String pageId = ready.getPages().get(0).getId();
             byte[] page = client.documents.downloadPage(uploaded.getId(), pageId);
             assertThat(page).isNotEmpty();
+            assertThat(client.documents.activities(uploaded.getId())).isNotEmpty();
+            assertThat(client.documents.isFullySigned(uploaded.getId())).isFalse();
+            assertThat(client.documents.getSigningProgress(uploaded.getId()).getTotal()).isZero();
 
             // download() defaults to the certificated artifact, which is unavailable for an unsigned document:
             // the binary path must now surface the server's error message, not a generic status string.
@@ -323,6 +340,15 @@ class LiveSmokeTest {
 
             Assignment cleared = client.assignments.clearExpiration(doc.getId(), assignment.getId());
             assertThat(cleared.getExpiresAt()).isNull();
+
+            assertThat(client.assignments.estimateResendCost(
+                    doc.getId(), assignment.getId(), signer.getId()).getTotal()).isNotNull();
+            assertThat(client.assignments.whatsappNotifications(doc.getId(), assignment.getId())).isEmpty();
+            assertThat(client.assignments.resendNotification(
+                    doc.getId(), assignment.getId(), signer.getId()).getSent()).isTrue();
+            assertThat(client.documents.getPublic(doc.getId()).getId()).isEqualTo(doc.getId());
+            client.documents.sendToken(doc.getId(), signer.getEmail(), "email");
+            assertThat(client.documents.activities(doc.getId())).isNotEmpty();
         } finally {
             client.documents.delete(doc.getId());
         }
@@ -375,9 +401,316 @@ class LiveSmokeTest {
         assertThat(result.getMessage()).isNotBlank();
     }
 
+    @Test
+    @Order(21)
+    @DisplayName("Accounts, current user, and API-key read endpoints return typed payloads")
+    void accountAndUserReads() {
+        AssinafyClient client = client();
+
+        assertThat(client.accounts.list()).anyMatch(account -> ACCOUNT_ID.equals(account.getId()));
+        assertThat(client.accounts.get().getId()).isEqualTo(ACCOUNT_ID);
+        assertThat(client.accounts.getTheme().getAccountName()).isNotBlank();
+        assertThat(client.users.getSelf().getEmail()).isNotBlank();
+        assertThat(client.auth.getApiKey()).isNotNull();
+    }
+
+    @Test
+    @Order(22)
+    @DisplayName("Published account-stats route is exercised when deployed to the sandbox")
+    void accountStats() {
+        assertThat(publishedSandboxRoute(() -> client().accounts.stats())).isNotNull();
+    }
+
+    @Test
+    @Order(23)
+    @DisplayName("Published user-stats route is exercised when deployed to the sandbox")
+    void userStats() {
+        assertThat(publishedSandboxRoute(() -> client().users.stats())).isNotNull();
+    }
+
+    @Test
+    @Order(24)
+    @DisplayName("Both approved test-email signers can be created or reused without notification")
+    void approvedTestEmails() {
+        AssinafyClient client = client();
+        for (String email : List.of(testEmail(), secondTestEmail())) {
+            Signer signer = client.signers.create(new CreateSignerPayload("Assinafy SDK Test", email));
+            assertThat(signer.getId()).isNotBlank();
+            assertThat(signer.getEmail()).isEqualToIgnoringCase(email);
+        }
+    }
+
+    @Test
+    @Order(25)
+    @DisplayName("Notification preferences update and restore against the sandbox")
+    void notificationPreferenceRoundTrip() {
+        AssinafyClient client = client();
+        NotificationPreferences original = publishedSandboxRoute(client.users::getNotificationPreferences);
+        Boolean originalValue = original.getDocumentCompleted();
+        assertThat(originalValue).isNotNull();
+
+        try {
+            NotificationPreferences updated = client.users.updateNotificationPreferences(
+                    new NotificationPreferences().setDocumentCompleted(!originalValue));
+            assertThat(updated.getDocumentCompleted()).isEqualTo(!originalValue);
+        } finally {
+            client.users.updateNotificationPreferences(
+                    new NotificationPreferences().setDocumentCompleted(originalValue));
+        }
+    }
+
+    @Test
+    @Order(26)
+    @DisplayName("Disposable account covers account, logo, and webhook mutations")
+    void disposableAccountRoundTrip() {
+        AssinafyClient client = client();
+        String accountId = null;
+        try {
+            // The sandbox deployment currently predates the documented optional notification_sender_type
+            // create field; its exact wire contract remains covered by AccountResourceTest.
+            var created = client.accounts.create(new AccountPayload("SDK Smoke " + shortId()));
+            accountId = created.getId();
+            assertThat(accountId).isNotBlank();
+
+            var updated = client.accounts.update(new AccountPayload().setName("SDK Smoke Updated " + shortId()),
+                    accountId);
+            assertThat(updated.getName()).startsWith("SDK Smoke Updated");
+            assertThat(client.accounts.get(accountId).getId()).isEqualTo(accountId);
+            assertThat(client.accounts.getTheme(accountId).getAccountName()).isNotBlank();
+            byte[] logo = Base64.getDecoder().decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+            client.accounts.uploadLogo(logo, "sdk-smoke.png", accountId);
+            assertThat(client.accounts.downloadLogo(accountId)).isNotEmpty();
+            client.accounts.deleteLogo(accountId);
+
+            String event = client.webhooks.listEventTypes().get(0).getId();
+            RegisterWebhookPayload webhook = new RegisterWebhookPayload(
+                    "https://example.com/assinafy-sdk-smoke", testEmail())
+                    .setEvents(List.of(event)).setActive(true);
+            assertThat(client.webhooks.register(webhook, accountId).isActive()).isTrue();
+            assertThat(client.webhooks.update(webhook, accountId).getUrl())
+                    .isEqualTo("https://example.com/assinafy-sdk-smoke");
+            assertThat(client.webhooks.getSubscription(accountId).getEvents()).contains(event);
+            assertThat(client.webhooks.listDispatches(null, accountId).getData()).isNotNull();
+            assertThat(client.webhooks.inactivate(accountId).isActive()).isFalse();
+        } finally {
+            if (accountId != null) {
+                client.accounts.delete(false, accountId);
+            }
+        }
+    }
+
+    @Test
+    @Order(27)
+    @DisplayName("Document tag replace, append, list, detach, and cleanup round-trip")
+    void documentTagRoundTrip() throws Exception {
+        AssinafyClient client = client();
+        Tag first = client.tags.create(new CreateTagPayload("sdk-doc-tag-a-" + shortId()));
+        Tag second = client.tags.create(new CreateTagPayload("sdk-doc-tag-b-" + shortId()));
+        DocumentDetails doc = null;
+        try {
+            doc = client.documents.upload(samplePdf(), "sdk-smoke-tags-" + shortId() + ".pdf");
+            client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
+
+            assertThat(client.documents.replaceTags(doc.getId(), List.of(first.getName())))
+                    .extracting(Tag::getId).containsExactly(first.getId());
+            assertThat(client.documents.appendTags(doc.getId(), List.of(second.getName())))
+                    .extracting(Tag::getId).contains(first.getId(), second.getId());
+            assertThat(client.documents.listTags(doc.getId()))
+                    .extracting(Tag::getId).contains(first.getId(), second.getId());
+            assertThat(client.documents.detachTag(doc.getId(), first.getId())).isTrue();
+            assertThat(client.documents.replaceTags(doc.getId(), List.of())).isEmpty();
+        } finally {
+            if (doc != null) client.documents.delete(doc.getId());
+            assertThat(client.tags.delete(first.getId(), true)).isTrue();
+            assertThat(client.tags.delete(second.getId(), true)).isTrue();
+        }
+    }
+
+    @Test
+    @Order(28)
+    @EnabledIfEnvironmentVariable(named = "ASSINAFY_LIVE_EMAILS", matches = "(?i)true")
+    @DisplayName("Template detail, estimate, and document creation round-trip")
+    void templateDocumentRoundTrip() {
+        AssinafyClient client = client();
+        TemplateListItem template = client.templates.list().getData().stream()
+                .filter(item -> item.getRoles() != null && !item.getRoles().isEmpty())
+                .findFirst().orElseThrow(() -> new AssertionError("A template with roles is required"));
+        TemplateDetails details = client.templates.get(template.getId());
+        assertThat(details.getRoles()).isNotEmpty();
+
+        List<TemplateSigner> estimateSigners = details.getRoles().stream()
+                .map(role -> new TemplateSigner(role.getId()))
+                .toList();
+        assertThat(client.documents.estimateCostFromTemplate(template.getId(), estimateSigners))
+                .isNotNull();
+
+        Signer signer = ensureTestSigner(client);
+        List<TemplateSigner> createSigners = details.getRoles().stream()
+                .map(role -> new TemplateSigner(role.getId(), signer.getId())
+                        .setVerificationMethod("Email").setNotificationMethods(List.of("Email")))
+                .toList();
+        DocumentDetails created = client.documents.createFromTemplate(template.getId(), createSigners,
+                new CreateDocumentFromTemplateOptions().setName("sdk-template-" + shortId() + ".pdf"));
+        try {
+            assertThat(client.documents.waitUntilReady(created.getId(), 60_000, 2_000).getId())
+                    .isEqualTo(created.getId());
+        } finally {
+            client.documents.delete(created.getId());
+        }
+    }
+
+    @Test
+    @Order(29)
+    @DisplayName("Published signer government_id update is exercised when deployed to the sandbox")
+    void signerGovernmentIdUpdate() {
+        AssinafyClient client = client();
+        String email = "sdk-government-id+" + shortId() + "@example.com";
+        Signer signer = client.signers.create(new CreateSignerPayload("SDK Government ID", email));
+        try {
+            Signer updated = client.signers.update(signer.getId(),
+                    new UpdateSignerPayload().setGovernmentId("52998224725"));
+            if (updated.getGovernmentId() == null) {
+                Assumptions.assumeTrue(false,
+                        "Published signer government_id update is not deployed to the current sandbox version");
+            }
+            assertThat(updated.getGovernmentId()).isEqualTo("52998224725");
+        } finally {
+            client.signers.delete(signer.getId());
+        }
+    }
+
+    @Test
+    @Order(30)
+    @EnabledIfEnvironmentVariable(named = "ASSINAFY_LIVE_EMAILS", matches = "(?i)true")
+    @DisplayName("Password-reset request returns the approved test email")
+    void passwordResetRequest() {
+        String email = secondTestEmail();
+        assertThat(client().auth.requestPasswordReset(email).getEmail()).isEqualToIgnoringCase(email);
+    }
+
+    @Test
+    @Order(31)
+    @EnabledIfEnvironmentVariable(named = "ASSINAFY_LIVE_EMAILS", matches = "(?i)true")
+    @DisplayName("Collect assignment estimate and create with typed entries")
+    void collectAssignmentRoundTrip() throws Exception {
+        AssinafyClient client = client();
+        String accountId = null;
+        try {
+            accountId = client.accounts.create(new AccountPayload("SDK Collect Account " + shortId())).getId();
+            FieldDefinition field = client.fields.create(
+                    new CreateFieldPayload("text", "SDK Collect " + shortId()).setRequired(true), accountId);
+            Signer signer = client.signers.create(
+                    new CreateSignerPayload("SDK Collect Signer", testEmail()), accountId);
+            DocumentDetails doc = client.documents.upload(
+                    samplePdf(), "sdk-collect-" + shortId() + ".pdf", accountId);
+            DocumentDetails ready = client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
+            CollectAssignmentEntry entry = new CollectAssignmentEntry(ready.getPages().get(0).getId(), List.of(
+                    new CollectFieldPlacement(signer.getId(), field.getId(),
+                            new DisplaySettings(10, 10, 100, 30, 12))));
+
+            CostEstimate estimate = client.assignments.estimateCost(doc.getId(),
+                    new CreateAssignmentPayload().setMethod("collect")
+                            .setSignerStrings(signer.getId())
+                            .setCollectEntries(List.of(entry)));
+            assertThat(estimate.getHasSufficientResources()).isNotNull();
+
+            Assignment created = client.assignments.create(doc.getId(), new CreateAssignmentPayload()
+                    .setMethod("collect")
+                    .setSignerStrings(signer.getId())
+                    .setCollectEntries(List.of(entry)));
+            assertThat(created.getId()).isNotBlank();
+        } finally {
+            if (accountId != null) client.accounts.delete(false, accountId);
+        }
+    }
+
+    @Test
+    @Order(32)
+    @DisplayName("Published collect estimate without signers is exercised when deployed to the sandbox")
+    void collectEstimateWithoutSigners() throws Exception {
+        AssinafyClient client = client();
+        String accountId = null;
+        try {
+            accountId = client.accounts.create(
+                    new AccountPayload("SDK Collect Estimate Account " + shortId())).getId();
+            FieldDefinition field = client.fields.create(
+                    new CreateFieldPayload("text", "SDK Collect Estimate " + shortId()), accountId);
+            Signer signer = client.signers.create(
+                    new CreateSignerPayload("SDK Collect Estimate Signer", testEmail()), accountId);
+            DocumentDetails doc = client.documents.upload(
+                    samplePdf(), "sdk-collect-estimate-" + shortId() + ".pdf", accountId);
+            DocumentDetails ready = client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
+            CollectAssignmentEntry entry = new CollectAssignmentEntry(ready.getPages().get(0).getId(), List.of(
+                    new CollectFieldPlacement(signer.getId(), field.getId(),
+                            new DisplaySettings(10, 10, 100, 30, 12))));
+
+            try {
+                assertThat(client.assignments.estimateCost(doc.getId(), new CreateAssignmentPayload()
+                        .setMethod("collect").setCollectEntries(List.of(entry)))).isNotNull();
+            } catch (ApiException e) {
+                if (e.getStatusCode() == 400 && e.getMessage() != null
+                        && e.getMessage().contains("signatários")) {
+                    Assumptions.assumeTrue(false,
+                            "Published signer-free collect estimate is not deployed to the current sandbox");
+                }
+                throw e;
+            }
+        } finally {
+            if (accountId != null) client.accounts.delete(false, accountId);
+        }
+    }
+
+    @Test
+    @Order(33)
+    @DisplayName("Published account notification_sender_type create field is exercised when deployed")
+    void accountNotificationSenderType() {
+        AssinafyClient client = client();
+        String accountId = null;
+        try {
+            accountId = client.accounts.create(new AccountPayload("SDK Sender Type " + shortId())
+                    .setNotificationSenderType("Account")).getId();
+            assertThat(client.accounts.get(accountId).getNotificationSenderType()).isEqualTo("Account");
+        } catch (ApiException e) {
+            if (e.getStatusCode() == 400 && e.getMessage() != null
+                    && e.getMessage().contains("notification_sender_type")) {
+                Assumptions.assumeTrue(false,
+                        "Published notification_sender_type create field is not deployed to the current sandbox");
+            }
+            throw e;
+        } finally {
+            if (accountId != null) client.accounts.delete(false, accountId);
+        }
+    }
+
     private static Signer ensureTestSigner(AssinafyClient client) {
-        String email = System.getenv().getOrDefault("ASSINAFY_TEST_EMAIL", "billm@billm.org");
-        return client.signers.create(new CreateSignerPayload("SDK Smoke Signer", email));
+        return client.signers.create(new CreateSignerPayload("SDK Smoke Signer", testEmail()));
+    }
+
+    private static String testEmail() {
+        return requiredEnvironment("ASSINAFY_TEST_EMAIL");
+    }
+
+    private static String secondTestEmail() {
+        return requiredEnvironment("ASSINAFY_SECOND_TEST_EMAIL");
+    }
+
+    private static String requiredEnvironment(String name) {
+        String value = System.getenv(name);
+        Assumptions.assumeTrue(value != null && !value.isBlank(), name + " is required for this live test");
+        return value;
+    }
+
+    private static <T> T publishedSandboxRoute(Supplier<T> call) {
+        try {
+            return call.get();
+        } catch (ApiException e) {
+            if (e.getStatusCode() == 404 && "Página não encontrada.".equals(e.getMessage())) {
+                Assumptions.assumeTrue(false,
+                        "Published production route is not deployed to the current sandbox version");
+            }
+            throw e;
+        }
     }
 
     private static String shortId() {
