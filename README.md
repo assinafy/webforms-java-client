@@ -19,14 +19,14 @@ assignments, fields, templates, tags, webhooks, signer-facing flows, and the hig
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.0.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.0.2'
 ```
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full setup instructions.

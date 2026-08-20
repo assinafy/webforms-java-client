@@ -16,7 +16,7 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -30,7 +30,7 @@ mvn install
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:2.0.1'
+    implementation 'com.assinafy:webforms-java-client-sdk:2.0.2'
 }
 ```
 
@@ -38,7 +38,7 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:2.0.1")
+    implementation("com.assinafy:webforms-java-client-sdk:2.0.2")
 }
 ```
 

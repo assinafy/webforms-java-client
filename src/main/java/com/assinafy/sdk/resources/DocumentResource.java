@@ -283,8 +283,9 @@ public final class DocumentResource extends BaseResource {
             try {
                 long remainingNanos = maxWaitNanos - (System.nanoTime() - start);
                 if (remainingNanos <= 0) break;
-                long remainingMs = Math.max(1, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
-                Thread.sleep(Math.min(pollIntervalMs, remainingMs));
+                long sleepNanos = Math.min(TimeUnit.MILLISECONDS.toNanos(pollIntervalMs), remainingNanos);
+                TimeUnit.NANOSECONDS.sleep(sleepNanos);
+                if (sleepNanos == remainingNanos) break;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new ValidationException("Interrupted while waiting for document to be ready", e);
