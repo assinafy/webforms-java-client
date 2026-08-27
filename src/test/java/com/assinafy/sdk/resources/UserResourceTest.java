@@ -64,7 +64,7 @@ class UserResourceTest {
     }
 
     @Test
-    void getSelfAlsoAcceptsLegacySandboxWrapper() throws Exception {
+    void getSelfAlsoAcceptsNestedUserEnvelope() throws Exception {
         server.enqueue(okJson(Map.of(
                 "user", Map.of("id", "u1", "email", "bill@example.com"),
                 "accounts", List.of(Map.of("id", "a1")))));

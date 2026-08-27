@@ -8,7 +8,6 @@ import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
-import okio.Buffer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -114,11 +113,29 @@ class SignerSelfResourceTest {
     }
 
     @Test
+    void verifyEmailTreatsVerificationCodeAsBodyData() throws Exception {
+        server.enqueue(okJson(Map.of("verified", true)));
+
+        resource.verifyEmail("code +/=", "code-123");
+
+        assertThat(server.takeRequest().getBody().readUtf8())
+                .contains("\"verification-code\":\"code +/=\"");
+    }
+
+    @Test
+    void verifyEmailRejectsBlankCodeWithoutRequest() {
+        assertThatThrownBy(() -> resource.verifyEmail(" ", "code-123"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Verification code");
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
     void confirmSignerData_putsSpecFieldsAndReturnsSigner() throws Exception {
-        server.enqueue(okJson(Map.of("id", "signer-1", "full_name", "Jane Doe", "email", "a@b.com")));
+        server.enqueue(okJson(Map.of("id", "signer-1", "full_name", "Jane Doe", "email", "signer@example.com")));
 
         var signer = resource.confirmSignerData("doc-1", "code-abc",
-                new ConfirmSignerDataPayload().setFullName("Jane Doe").setEmail("a@b.com")
+                new ConfirmSignerDataPayload().setFullName("Jane Doe").setEmail("signer@example.com")
                         .setGovernmentId("15774136604"));
 
         RecordedRequest req = server.takeRequest();
@@ -127,7 +144,7 @@ class SignerSelfResourceTest {
                 .isEqualTo("/documents/doc-1/signers/confirm-data?signer-access-code=code-abc");
         String body = req.getBody().readUtf8();
         assertThat(body).contains("\"full_name\":\"Jane Doe\"");
-        assertThat(body).contains("\"email\":\"a@b.com\"");
+        assertThat(body).contains("\"email\":\"signer@example.com\"");
         assertThat(body).contains("\"government_id\":\"15774136604\"");
         assertThat(signer.getId()).isEqualTo("signer-1");
     }
@@ -145,7 +162,7 @@ class SignerSelfResourceTest {
         assertThat(req.getPath()).contains("signer-access-code=code-xyz");
         assertThat(req.getPath()).contains("type=signature");
         assertThat(req.getHeader("Content-Type")).contains("image/png");
-        Buffer body = req.getBody();
+        var body = req.getBody();
         assertThat(body.readByteArray()).isEqualTo(png);
     }
 
@@ -203,7 +220,7 @@ class SignerSelfResourceTest {
 
     @Test
     void uploadSignature_surfacesEnvelopeError() throws Exception {
-        // HTTP 200 carrying an error envelope must still raise an ApiException (the old binary path swallowed it).
+        // HTTP 200 carrying an error envelope must still raise an ApiException.
         String body = MAPPER.writeValueAsString(Map.of("status", 422, "message", "Invalid image", "data", List.of()));
         server.enqueue(new MockResponse().setBody(body).setHeader("Content-Type", "application/json"));
 
@@ -282,7 +299,7 @@ class SignerSelfResourceTest {
     }
 
     @Test
-    void listDocuments_acceptsDocumentedFilters() throws Exception {
+    void listDocuments_acceptsAdditionalFilters() throws Exception {
         server.enqueue(okJson(List.of()));
 
         resource.listDocuments("signer-1", "code-1", Map.of("status", "pending_signature",
@@ -312,6 +329,8 @@ class SignerSelfResourceTest {
     @Test
     void signMultiple_rejectsEmptyList() {
         assertThatThrownBy(() -> resource.signMultiple("code", List.of()))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.signMultiple("code", List.of("../doc")))
                 .isInstanceOf(ValidationException.class);
     }
 

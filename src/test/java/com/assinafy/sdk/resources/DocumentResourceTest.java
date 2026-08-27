@@ -47,6 +47,22 @@ class DocumentResourceTest {
         return new MockResponse().setBody(body).setHeader("Content-Type", "application/json");
     }
 
+    /** A {@code "data": null} envelope must not become an NPE inside the derived-status helpers. */
+    @Test
+    void derivedHelpers_tolerateAnEnvelopeWithNoDocumentData() throws Exception {
+        MockResponse nullData = new MockResponse()
+                .setBody("{\"status\":200,\"message\":\"\",\"data\":null}")
+                .setHeader("Content-Type", "application/json");
+        server.enqueue(nullData);
+        server.enqueue(nullData);
+
+        assertThat(resource.isFullySigned("doc-1")).isFalse();
+
+        SigningProgress progress = resource.getSigningProgress("doc-1");
+        assertThat(progress.getTotal()).isZero();
+        assertThat(progress.getPercentage()).isZero();
+    }
+
     @Test
     void list_hitsAccountScopedPath() throws Exception {
         server.enqueue(okJson(List.of()));
@@ -567,15 +583,15 @@ class DocumentResourceTest {
 
     @Test
     void sendToken_putsBody() throws Exception {
-        server.enqueue(okJson(Map.of("channel", "email", "recipient", "a@b.com")));
+        server.enqueue(okJson(Map.of("channel", "email", "recipient", "signer@example.com")));
 
-        resource.sendToken("doc-1", "a@b.com", "email");
+        resource.sendToken("doc-1", "signer@example.com", "email");
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getMethod()).isEqualTo("PUT");
         assertThat(req.getPath()).isEqualTo("/public/documents/doc-1/send-token");
         String body = req.getBody().readUtf8();
-        assertThat(body).contains("\"recipient\":\"a@b.com\"");
+        assertThat(body).contains("\"recipient\":\"signer@example.com\"");
         assertThat(body).contains("\"channel\":\"email\"");
     }
 
@@ -583,7 +599,9 @@ class DocumentResourceTest {
     void sendToken_validatesArguments() {
         assertThatThrownBy(() -> resource.sendToken("doc-1", null, "email"))
                 .isInstanceOf(ValidationException.class);
-        assertThatThrownBy(() -> resource.sendToken("doc-1", "a@b.com", ""))
+        assertThatThrownBy(() -> resource.sendToken("doc-1", "signer@example.com", ""))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.sendToken("doc-1", "signer@example.com", "sms"))
                 .isInstanceOf(ValidationException.class);
     }
 

@@ -29,6 +29,7 @@ import java.util.regex.Pattern;
 public abstract class BaseResource {
 
     private static final Pattern PATH_SEGMENT = Pattern.compile("[A-Za-z0-9._~-]+");
+    private static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
     /** JSON request-body media type used by resource methods. */
     protected static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
@@ -61,32 +62,46 @@ public abstract class BaseResource {
         if (httpClient == null) {
             throw new ValidationException("HTTP client is required");
         }
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new ValidationException("Base URL is required");
-        }
-        HttpUrl parsedBaseUrl;
-        try {
-            parsedBaseUrl = HttpUrl.get(baseUrl);
-        } catch (IllegalArgumentException e) {
-            throw new ValidationException("Base URL must be a valid HTTP or HTTPS URL");
-        }
-        if (!parsedBaseUrl.username().isEmpty() || !parsedBaseUrl.password().isEmpty()
-                || parsedBaseUrl.query() != null || parsedBaseUrl.fragment() != null) {
-            throw new ValidationException("Base URL must not contain user information, a query, or a fragment");
-        }
-        if (!"https".equals(parsedBaseUrl.scheme()) && !isLoopbackHost(parsedBaseUrl.host())) {
-            throw new ValidationException("Base URL must use HTTPS except for loopback HTTP in local tests");
-        }
         this.httpClient = httpClient;
-        String normalizedBaseUrl = parsedBaseUrl.toString();
-        this.baseUrl = normalizedBaseUrl.endsWith("/")
-                ? normalizedBaseUrl.substring(0, normalizedBaseUrl.length() - 1)
-                : normalizedBaseUrl;
+        this.baseUrl = normalizeBaseUrl(baseUrl);
         this.defaultAccountId = defaultAccountId;
     }
 
-    private static boolean isLoopbackHost(String host) {
-        return "localhost".equalsIgnoreCase(host) || "::1".equals(host) || "127.0.0.1".equals(host);
+    /**
+     * Validates an API base URL and returns it without a trailing slash. HTTPS is required except for a
+     * loopback host, which keeps local tests able to use a plain-HTTP mock server. Credentials, a query, and a
+     * fragment are rejected because they would leak into, or be silently dropped from, every request URL.
+     *
+     * <p>This is the single definition used both by {@link com.assinafy.sdk.AssinafyClient} and by every
+     * resource, so the client and its resources can never disagree about what a valid base URL is.</p>
+     *
+     * @param baseUrl candidate API base URL
+     * @return the normalized URL, with any trailing slash removed
+     * @throws ValidationException when the URL is blank, unparseable, non-HTTPS, or carries extra URL parts
+     */
+    public static String normalizeBaseUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            throw new ValidationException("Base URL is required");
+        }
+        HttpUrl parsed;
+        try {
+            parsed = HttpUrl.get(baseUrl);
+        } catch (IllegalArgumentException e) {
+            throw new ValidationException("Base URL must be a valid HTTP or HTTPS URL", e);
+        }
+        if (!parsed.username().isEmpty() || !parsed.password().isEmpty()
+                || parsed.query() != null || parsed.fragment() != null) {
+            throw new ValidationException("Base URL must not contain user information, a query, or a fragment");
+        }
+        String host = parsed.host();
+        boolean loopback = "localhost".equalsIgnoreCase(host) || "::1".equals(host) || "127.0.0.1".equals(host);
+        if (!"https".equals(parsed.scheme()) && !loopback) {
+            throw new ValidationException("Base URL must use HTTPS except for loopback HTTP in local tests");
+        }
+        String normalized = parsed.toString();
+        return normalized.endsWith("/")
+                ? normalized.substring(0, normalized.length() - 1)
+                : normalized;
     }
 
     /**
@@ -119,6 +134,21 @@ public abstract class BaseResource {
         }
         if (".".equals(value) || "..".equals(value) || !PATH_SEGMENT.matcher(value).matches()) {
             throw new ValidationException(name + " must be a URL-safe path segment");
+        }
+        return value;
+    }
+
+    /**
+     * Validates an email address used at an API request boundary.
+     *
+     * @param value email address to validate
+     * @param name human-readable field name used in validation messages
+     * @return the validated email address
+     * @throws ValidationException when the value is not a basic email address
+     */
+    protected String requireEmail(String value, String name) {
+        if (value == null || !EMAIL.matcher(value).matches()) {
+            throw new ValidationException(name + " must be a valid email address");
         }
         return value;
     }
@@ -289,17 +319,6 @@ public abstract class BaseResource {
     }
 
     /**
-     * Executes a DELETE with query parameters and validates its success response.
-     *
-     * @param path API path beginning with {@code /}
-     * @param queryParams query parameters; {@code null} values are omitted
-     */
-    protected void httpDelete(String path, Map<String, String> queryParams) {
-        Request request = buildRequest("DELETE", path, null, queryParams);
-        executeVoid(request);
-    }
-
-    /**
      * Executes a DELETE carrying a JSON request body.
      *
      * @param path API path beginning with {@code /}
@@ -307,33 +326,6 @@ public abstract class BaseResource {
      */
     protected void httpDeleteBody(String path, Object body) {
         executeVoid(buildRequest("DELETE", path, body));
-    }
-
-    /**
-     * Executes a DELETE and unwraps a typed JSON response.
-     *
-     * @param <T> response model type
-     * @param path API path beginning with {@code /}
-     * @param dataType response model class
-     * @return unwrapped response data, or {@code null} for null/empty data
-     */
-    protected <T> T httpDelete(String path, Class<T> dataType) {
-        Request request = buildRequest("DELETE", path, null);
-        return execute(request, MAPPER.getTypeFactory().constructType(dataType));
-    }
-
-    /**
-     * Executes a DELETE with query parameters and unwraps a typed JSON response.
-     *
-     * @param <T> response model type
-     * @param path API path beginning with {@code /}
-     * @param dataType response model class
-     * @param queryParams query parameters; {@code null} values are omitted
-     * @return unwrapped response data, or {@code null} for null/empty data
-     */
-    protected <T> T httpDelete(String path, Class<T> dataType, Map<String, String> queryParams) {
-        Request request = buildRequest("DELETE", path, null, queryParams);
-        return execute(request, MAPPER.getTypeFactory().constructType(dataType));
     }
 
     /**
@@ -385,16 +377,6 @@ public abstract class BaseResource {
     }
 
     /**
-     * Executes a JSON PUT without query parameters and validates its success response.
-     *
-     * @param path API path beginning with {@code /}
-     * @param body request body, or {@code null} for an empty body
-     */
-    protected void httpPutVoid(String path, Object body) {
-        executeVoid(buildRequest("PUT", path, body));
-    }
-
-    /**
      * Executes a JSON PUT with query parameters and validates its success response.
      *
      * @param path API path beginning with {@code /}
@@ -428,31 +410,6 @@ public abstract class BaseResource {
     }
 
     /**
-     * Executes a binary POST without query parameters and returns binary response data.
-     *
-     * @param path API path beginning with {@code /}
-     * @param body binary request body
-     * @return raw response bytes, never {@code null}
-     */
-    protected byte[] httpPostBinary(String path, RequestBody body) {
-        return httpPostBinary(path, Collections.emptyMap(), body);
-    }
-
-    /**
-     * Executes a binary POST with query parameters and returns binary response data.
-     *
-     * @param path API path beginning with {@code /}
-     * @param queryParams query parameters; {@code null} values are omitted
-     * @param body binary request body
-     * @return raw response bytes, never {@code null}
-     */
-    protected byte[] httpPostBinary(String path, Map<String, String> queryParams, RequestBody body) {
-        HttpUrl url = buildUrl(path, queryParams);
-        Request request = new Request.Builder().url(url).post(body).build();
-        return executeBinary(request);
-    }
-
-    /**
      * POST a binary (e.g. image) request body to an endpoint that responds with a JSON envelope rather than a
      * binary artifact. The envelope is parsed so envelope-level errors ({@code status >= 400}) surface as
      * {@link ApiException}; the success payload is discarded.
@@ -481,18 +438,6 @@ public abstract class BaseResource {
                 .post(multipartBody)
                 .build();
         return execute(request, MAPPER.getTypeFactory().constructType(dataType));
-    }
-
-    /**
-     * Executes a paginated GET without query parameters.
-     *
-     * @param <T> list item model type
-     * @param path API path beginning with {@code /}
-     * @param itemType list item model class
-     * @return page data and parsed pagination headers
-     */
-    protected <T> PaginatedResult<T> httpGetList(String path, Class<T> itemType) {
-        return httpGetList(path, Collections.emptyMap(), itemType);
     }
 
     /**

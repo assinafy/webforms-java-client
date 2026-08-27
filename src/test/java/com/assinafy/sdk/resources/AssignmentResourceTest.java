@@ -429,6 +429,18 @@ class AssignmentResourceTest {
     }
 
     @Test
+    void listSendsPaginationAlongsideTheAccountContext() throws Exception {
+        server.enqueue(okJson(List.of(Map.of("id", "a1", "method", "virtual"))));
+
+        PaginatedResult<Assignment> page = resource.list(Map.of("page", "2", "per_page", "5"));
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getPath()).startsWith("/assignments?")
+                .contains("page=2", "per-page=5", "accountId=acc");
+        assertThat(page.getData().get(0).getId()).isEqualTo("a1");
+    }
+
+    @Test
     void estimateCost_parsesTypedCostEstimate() throws Exception {
         server.enqueue(okJson(Map.of(
                 "documents", 1,
@@ -476,7 +488,41 @@ class AssignmentResourceTest {
         assertThat(req.getMethod()).isEqualTo("POST");
         assertThat(req.getPath())
                 .isEqualTo("/documents/doc-1/assignments/a1/signers/s1/estimate-resend-cost");
+        assertThat(cost.getTotal()).isZero();
+        assertThat(cost.getTotalCredits()).isZero();
         assertThat(cost.getHasSufficientCredits()).isTrue();
+        assertThat(cost.getHasSufficientResources()).isTrue();
         assertThat(cost.getBreakdown().get(0).getCode()).isEqualTo("NotificationEmailResend");
+    }
+
+    @Test
+    void estimateResendCost_parsesCompleteShape() throws Exception {
+        server.enqueue(okJson(Map.of(
+                "total_credits", 2.5,
+                "credit_balance", 7.0,
+                "has_sufficient_resources", true,
+                "documents", 1)));
+
+        ResendCostEstimate cost = resource.estimateResendCost("doc-1", "a1", "s1");
+
+        assertThat(cost.getTotal()).isEqualTo(2.5);
+        assertThat(cost.getTotalCredits()).isEqualTo(2.5);
+        assertThat(cost.getHasSufficientCredits()).isTrue();
+        assertThat(cost.getDocuments()).isEqualTo(1);
+    }
+
+    @Test
+    void resendCompactSettersKeepAliasesSynchronized() {
+        ResendCostEstimate cost = new ResendCostEstimate();
+        cost.setTotal(2.5);
+        cost.setHasSufficientCredits(true);
+
+        cost.setTotal(null);
+        cost.setHasSufficientCredits(null);
+
+        assertThat(cost.getTotal()).isNull();
+        assertThat(cost.getTotalCredits()).isNull();
+        assertThat(cost.getHasSufficientCredits()).isNull();
+        assertThat(cost.getHasSufficientResources()).isNull();
     }
 }

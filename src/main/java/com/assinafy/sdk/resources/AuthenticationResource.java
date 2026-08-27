@@ -31,7 +31,7 @@ public final class AuthenticationResource extends BaseResource {
      * @return authenticated user and access token
      */
     public AuthenticationResult login(String email, String password) {
-        requireEmail(email);
+        requireEmail(email, "Email");
         requireValue(password, "Password");
         return httpPost("/login", Map.of("email", email, "password", password), AuthenticationResult.class);
     }
@@ -111,7 +111,7 @@ public final class AuthenticationResource extends BaseResource {
      * @return server confirmation message
      */
     public EmailResponse changePassword(String email, String password, String newPassword) {
-        requireEmail(email);
+        requireEmail(email, "Email");
         requireValue(password, "Current password");
         requireValue(newPassword, "New password");
         Map<String, Object> body = new LinkedHashMap<>();
@@ -128,16 +128,15 @@ public final class AuthenticationResource extends BaseResource {
      * @return server confirmation message
      */
     public EmailResponse requestPasswordReset(String email) {
-        requireEmail(email);
+        requireEmail(email, "Email");
         return httpPut("/authentication/request-password-reset", Map.of("email", email), EmailResponse.class);
     }
 
     /**
      * {@code PUT /authentication/reset-password} - reset a password using an emailed reset token.
      *
-     * <p>Per the API, {@code email} and {@code newPassword} are required; {@code token} is optional (the docs
-     * mark it {@code false}) because it may be supplied out-of-band as a URL parameter rather than in the body.
-     * When {@code token} is {@code null}/blank it is simply omitted from the request body.</p>
+     * <p>{@code email} and {@code newPassword} are required. {@code token} is optional and is omitted from the
+     * request body when it is {@code null} or blank.</p>
      *
      * @param email required user email
      * @param token optional emailed reset token
@@ -145,7 +144,7 @@ public final class AuthenticationResource extends BaseResource {
      * @return server confirmation message
      */
     public EmailResponse resetPassword(String email, String token, String newPassword) {
-        requireEmail(email);
+        requireEmail(email, "Email");
         requireValue(newPassword, "New password");
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("email", email);
@@ -154,10 +153,6 @@ public final class AuthenticationResource extends BaseResource {
         }
         body.put("new_password", newPassword);
         return httpPut("/authentication/reset-password", body, EmailResponse.class);
-    }
-
-    private void requireEmail(String email) {
-        requireValue(email, "Email");
     }
 
     private void requireValue(String value, String name) {

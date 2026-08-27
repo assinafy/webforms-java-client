@@ -151,6 +151,14 @@ class FieldResourceTest {
     }
 
     @Test
+    void validateMultiple_rejectsMissingFieldId() {
+        assertThatThrownBy(() -> resource.validateMultiple(List.of(new FieldValidationPayload("", "value"))))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("field ID");
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
     void get_hitsFieldEndpoint() throws Exception {
         server.enqueue(okJson(Map.of("id", "field-1", "name", "CPF", "type", "cpf")));
 

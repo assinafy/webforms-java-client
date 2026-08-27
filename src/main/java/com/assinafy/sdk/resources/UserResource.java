@@ -26,8 +26,8 @@ public final class UserResource extends BaseResource {
     }
 
     /**
-     * {@code GET /users/self} — return the authenticated user's full profile. Accepts both the current
-     * documented direct-user payload and the sandbox's legacy {@code {user, accounts}} payload.
+     * {@code GET /users/self} — return the authenticated user's full profile. Accepts a direct-user payload
+     * and the supported {@code {user, accounts}} envelope.
      *
      * @return authenticated user, or {@code null} for an empty response
      */

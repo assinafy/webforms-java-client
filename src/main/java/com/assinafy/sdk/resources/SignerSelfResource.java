@@ -79,7 +79,7 @@ public final class SignerSelfResource extends BaseResource {
      * sent as the required query parameter (the endpoint takes no request body).
      *
      * @param signerAccessCode required signer access code
-     * @return terms-acceptance result
+     * @return terms-acceptance result, or {@code null} when the response envelope has no data
      */
     public AcceptTermsResponse acceptTerms(String signerAccessCode) {
         return httpPut("/signers/accept-terms", null, AcceptTermsResponse.class,
@@ -93,10 +93,13 @@ public final class SignerSelfResource extends BaseResource {
      *
      * @param verificationCode required one-time verification code
      * @param signerAccessCode required signer access code
-     * @return verification confirmation and optional access token
+     * @return verification confirmation and optional access token, or {@code null} when the response envelope
+     *         has no data
      */
     public VerifyEmailResponse verifyEmail(String verificationCode, String signerAccessCode) {
-        requireId(verificationCode, "Verification code");
+        if (verificationCode == null || verificationCode.isBlank()) {
+            throw new ValidationException("Verification code is required");
+        }
         Map<String, Object> body = Map.of("verification-code", verificationCode);
         return httpPost("/verify", body, VerifyEmailResponse.class, accessCodeQuery(signerAccessCode));
     }
@@ -123,13 +126,13 @@ public final class SignerSelfResource extends BaseResource {
     /**
      * {@code POST /signature} — upload the signer's signature or initial image.
      *
-     * <p>The image is sent as the raw request body. PNG is the current published contract; JPEG header
-     * detection is retained for compatibility with older/deployed versions. The API responds with a JSON envelope
-     * ({@code {"status":200,"message":"","data":[]}}), so this method returns {@code void} and raises an
+     * <p>The image is sent as the raw request body. PNG is the portable API format; the SDK also accepts JPEG
+     * input. The API responds with a JSON envelope ({@code {"status":200,"message":"","data":[]}}), so this
+     * method returns {@code void} and raises an
      * {@link com.assinafy.sdk.exceptions.ApiException} on an error envelope or non-2xx status.</p>
      *
      * @param signerAccessCode access code for the signer
-     * @param imageBytes raw PNG bytes, or JPEG bytes for compatibility
+     * @param imageBytes raw PNG or JPEG bytes
      * @param type either {@code "signature"} or {@code "initial"}; defaults to {@code "signature"}
      * @param reuse when non-{@code null}, sets the {@code reuse} query parameter, which controls whether the
      *              signer's saved signature may be reused across documents ({@code is_signature_reusable})
@@ -149,7 +152,7 @@ public final class SignerSelfResource extends BaseResource {
      * {@code POST /signature} without a reuse choice.
      *
      * @param signerAccessCode required signer access code
-     * @param imageBytes required PNG bytes, or JPEG bytes for compatibility
+     * @param imageBytes required PNG or JPEG bytes
      * @param type {@code signature}, {@code initial}, or {@code null} for {@code signature}
      */
     public void uploadSignature(String signerAccessCode, byte[] imageBytes, String type) {
@@ -188,9 +191,7 @@ public final class SignerSelfResource extends BaseResource {
      * @return first page of documents waiting for the signer
      */
     public PaginatedResult<DocumentDetails> listDocuments(String signerId, String signerAccessCode) {
-        String sid = requireId(signerId, "Signer ID");
-        return httpGetList("/signers/" + sid + "/documents",
-                accessCodeQuery(signerAccessCode), DocumentDetails.class);
+        return listDocuments(signerId, signerAccessCode, null);
     }
 
     /**
@@ -238,9 +239,7 @@ public final class SignerSelfResource extends BaseResource {
      * @param documentIds one or more document identifiers
      */
     public void signMultiple(String signerAccessCode, List<String> documentIds) {
-        if (documentIds == null || documentIds.isEmpty()) {
-            throw new ValidationException("At least one document ID is required");
-        }
+        requireDocumentIds(documentIds);
         httpPutVoid("/signers/documents/sign-multiple", Map.of("document_ids", documentIds),
                 accessCodeQuery(signerAccessCode));
     }
@@ -253,9 +252,7 @@ public final class SignerSelfResource extends BaseResource {
      * @param declineReason required decline reason
      */
     public void declineMultiple(String signerAccessCode, List<String> documentIds, String declineReason) {
-        if (documentIds == null || documentIds.isEmpty()) {
-            throw new ValidationException("At least one document ID is required");
-        }
+        requireDocumentIds(documentIds);
         if (declineReason == null || declineReason.isBlank()) {
             throw new ValidationException("Decline reason is required");
         }
@@ -277,16 +274,12 @@ public final class SignerSelfResource extends BaseResource {
      */
     public byte[] downloadDocument(String signerId, String documentId, String artifactName,
             String signerAccessCode) {
-        String sid = requireId(signerId, "Signer ID");
-        String docId = requireId(documentId, "Document ID");
-        String artifact = requireId(artifactName != null ? artifactName : "original", "Artifact name");
-        return httpGetBinary("/signers/" + sid + "/documents/" + docId + "/download/" + artifact,
+        return httpGetBinary(artifactPath(signerId, documentId, artifactName),
                 accessCodeQuery(signerAccessCode));
     }
 
     /**
-     * Public {@code GET /signers/{signerId}/documents/{documentId}/download/{artifactName}} overload. The
-     * documented route requires no signer access code; the authenticated overload remains for compatibility.
+     * Public {@code GET /signers/{signerId}/documents/{documentId}/download/{artifactName}} overload.
      *
      * @param signerId required signer identifier
      * @param documentId required document identifier
@@ -294,10 +287,14 @@ public final class SignerSelfResource extends BaseResource {
      * @return artifact bytes
      */
     public byte[] downloadDocument(String signerId, String documentId, String artifactName) {
+        return httpGetBinary(artifactPath(signerId, documentId, artifactName));
+    }
+
+    private String artifactPath(String signerId, String documentId, String artifactName) {
         String sid = requireId(signerId, "Signer ID");
         String docId = requireId(documentId, "Document ID");
         String artifact = requireId(artifactName != null ? artifactName : "original", "Artifact name");
-        return httpGetBinary("/signers/" + sid + "/documents/" + docId + "/download/" + artifact);
+        return "/signers/" + sid + "/documents/" + docId + "/download/" + artifact;
     }
 
     private Map<String, String> accessCodeQuery(String signerAccessCode) {
@@ -343,5 +340,14 @@ public final class SignerSelfResource extends BaseResource {
             throw new ValidationException("Signer access code is required");
         }
         return code;
+    }
+
+    private void requireDocumentIds(List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            throw new ValidationException("At least one document ID is required");
+        }
+        for (String documentId : documentIds) {
+            requireId(documentId, "Document ID");
+        }
     }
 }

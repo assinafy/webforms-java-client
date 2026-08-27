@@ -38,9 +38,9 @@ public final class CreateAssignmentPayload {
     public CreateAssignmentPayload setMethod(String method) { this.method = method; return this; }
 
     /**
-     * Returns structured signer references, or {@code null} when legacy signer IDs are set.
+     * Returns structured signer references, or {@code null} when plain signer IDs are set.
      *
-     * @return structured signer references, or {@code null} when legacy signer IDs are set
+     * @return structured signer references, or {@code null} when plain signer IDs are set
      */
     public List<SignerRef> getSigners() { return signers; }
 
@@ -77,14 +77,14 @@ public final class CreateAssignmentPayload {
     }
 
     /**
-     * Returns legacy signer IDs, or {@code null} when structured signer references are set.
+     * Returns plain signer IDs, or {@code null} when structured signer references are set.
      *
-     * @return legacy signer IDs, or {@code null} when structured signer references are set
+     * @return plain signer IDs, or {@code null} when structured signer references are set
      */
     public List<String> getSignerIds() { return signerIds; }
 
     /**
-     * Sets legacy signer IDs and clears values set through {@link #setSigners(List)}.
+     * Sets plain signer IDs and clears values set through {@link #setSigners(List)}.
      *
      * @param signerIds signer identifiers
      * @return this payload
@@ -166,7 +166,7 @@ public final class CreateAssignmentPayload {
     }
 
     /**
-     * Resolves either structured references or legacy signer IDs into the wire-ready signer list.
+     * Resolves either structured references or plain signer IDs into the wire-ready signer list.
      *
      * @return signer references, or an empty list when none are configured
      */

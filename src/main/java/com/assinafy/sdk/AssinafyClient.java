@@ -10,6 +10,7 @@ import com.assinafy.sdk.models.UploadAndRequestSignaturesOptions;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesResult;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesSigner;
 import com.assinafy.sdk.resources.AssignmentResource;
+import com.assinafy.sdk.resources.BaseResource;
 import com.assinafy.sdk.resources.AccountResource;
 import com.assinafy.sdk.resources.AuthenticationResource;
 import com.assinafy.sdk.resources.DocumentResource;
@@ -77,32 +78,18 @@ public final class AssinafyClient {
         if (options.getTimeoutMs() <= 0) {
             throw new ValidationException("Request timeout must be greater than zero");
         }
+        if (options.getMaxRetries() < 0) {
+            throw new ValidationException("Maximum retries must be non-negative");
+        }
 
-        String rawBaseUrl = options.getBaseUrl() != null
+        // BaseResource owns the one definition of a valid base URL, so the client and the resources it builds
+        // can never disagree about it.
+        this.baseUrl = BaseResource.normalizeBaseUrl(options.getBaseUrl() != null
                 ? options.getBaseUrl()
-                : "https://api.assinafy.com.br/v1";
-        if (rawBaseUrl.isBlank()) {
-            throw new ValidationException("Base URL is required");
-        }
-        final HttpUrl apiOrigin;
-        try {
-            apiOrigin = HttpUrl.get(rawBaseUrl);
-        } catch (IllegalArgumentException e) {
-            throw new ValidationException("Base URL must be a valid HTTP or HTTPS URL", e);
-        }
-        if (!apiOrigin.username().isEmpty() || !apiOrigin.password().isEmpty()
-                || apiOrigin.query() != null || apiOrigin.fragment() != null) {
-            throw new ValidationException("Base URL must not contain user information, a query, or a fragment");
-        }
-        if (!"https".equals(apiOrigin.scheme()) && !isLoopbackHost(apiOrigin.host())) {
-            throw new ValidationException("Base URL must use HTTPS except for loopback HTTP in local tests");
-        }
-        String normalizedBaseUrl = apiOrigin.toString();
-        this.baseUrl = normalizedBaseUrl.endsWith("/")
-                ? normalizedBaseUrl.substring(0, normalizedBaseUrl.length() - 1)
-                : normalizedBaseUrl;
+                : AssinafyClientOptions.DEFAULT_BASE_URL);
+        final HttpUrl apiOrigin = HttpUrl.get(baseUrl);
 
-        final int maxRetries = Math.max(0, options.getMaxRetries());
+        final int maxRetries = options.getMaxRetries();
         final String apiKey = options.getApiKey();
         final String token = options.getToken();
         this.httpClient = new OkHttpClient.Builder()
@@ -228,7 +215,9 @@ public final class AssinafyClient {
     /**
      * High-level virtual-signature workflow: upload one PDF, optionally wait for processing, create or reuse
      * every signer by email, then create the assignment. Returns the ready document, assignment, and signer IDs.
-     * Each successful stage is persistent; the API has no transaction spanning these calls.
+     * The API has no transaction spanning these calls. If a later stage fails, the client makes a best-effort
+     * attempt to delete the uploaded document. Account-level signers remain reusable, and cleanup failures are
+     * attached to the original exception as suppressed exceptions.
      *
      * @param options required upload, signer, assignment, and account options
      * @return resources produced by the workflow
@@ -248,34 +237,65 @@ public final class AssinafyClient {
             }
         }
 
-        DocumentDetails document;
-        if (options.getFile() != null) {
-            document = documents.upload(options.getFile(), options.getAccountId());
-        } else {
-            document = documents.upload(options.getFileBytes(), options.getFileName(), options.getAccountId());
-        }
-
-        if (!Boolean.FALSE.equals(options.getWaitForReady())) {
-            document = documents.waitUntilReady(document.getId());
-        }
-
+        DocumentDetails document = null;
+        String uploadedDocumentId = null;
         List<String> signerIds = new ArrayList<>();
-        for (UploadAndRequestSignaturesSigner s : options.getSigners()) {
-            CreateSignerPayload payload = new CreateSignerPayload(s.getName(), s.getEmail());
-            if (s.getWhatsappPhoneNumber() != null) payload.setWhatsappPhoneNumber(s.getWhatsappPhoneNumber());
-            Signer created = signers.create(payload, options.getAccountId());
-            signerIds.add(created.getId());
+        try {
+            if (options.getFile() != null) {
+                document = documents.upload(options.getFile(), options.getAccountId());
+            } else {
+                document = documents.upload(options.getFileBytes(), options.getFileName(), options.getAccountId());
+            }
+            if (document == null || document.getId() == null || document.getId().isBlank()) {
+                throw new ValidationException("Document upload succeeded but no document ID was returned");
+            }
+            uploadedDocumentId = document.getId();
+
+            if (!Boolean.FALSE.equals(options.getWaitForReady())) {
+                DocumentDetails ready = documents.waitUntilReady(uploadedDocumentId);
+                if (ready == null || !uploadedDocumentId.equals(ready.getId())) {
+                    throw new ValidationException("Document readiness response did not match the uploaded document");
+                }
+                document = ready;
+            }
+
+            for (UploadAndRequestSignaturesSigner s : options.getSigners()) {
+                CreateSignerPayload payload = new CreateSignerPayload(s.getName(), s.getEmail());
+                if (s.getWhatsappPhoneNumber() != null) payload.setWhatsappPhoneNumber(s.getWhatsappPhoneNumber());
+                Signer signer = signers.findOrCreate(payload, options.getAccountId());
+                if (signer == null || signer.getId() == null || signer.getId().isBlank()) {
+                    throw new ValidationException("Signer lookup succeeded but no signer ID was returned");
+                }
+                signerIds.add(signer.getId());
+            }
+
+            CreateAssignmentPayload assignmentPayload = new CreateAssignmentPayload()
+                    .setMethod("virtual")
+                    .setSignerStrings(signerIds);
+            if (options.getMessage() != null) assignmentPayload.setMessage(options.getMessage());
+            if (options.getExpiresAt() != null) assignmentPayload.setExpiresAt(options.getExpiresAt());
+            if (options.getCopyReceivers() != null) assignmentPayload.setCopyReceivers(options.getCopyReceivers());
+
+            Assignment assignment = assignments.create(uploadedDocumentId, assignmentPayload);
+            if (assignment == null || assignment.getId() == null || assignment.getId().isBlank()) {
+                throw new ValidationException("Assignment creation succeeded but no assignment ID was returned");
+            }
+            return new UploadAndRequestSignaturesResult(document, assignment, signerIds);
+        } catch (RuntimeException failure) {
+            cleanupFailedWorkflow(uploadedDocumentId, failure);
+            throw failure;
         }
+    }
 
-        CreateAssignmentPayload assignmentPayload = new CreateAssignmentPayload()
-                .setMethod("virtual")
-                .setSignerStrings(signerIds);
-        if (options.getMessage() != null) assignmentPayload.setMessage(options.getMessage());
-        if (options.getExpiresAt() != null) assignmentPayload.setExpiresAt(options.getExpiresAt());
-        if (options.getCopyReceivers() != null) assignmentPayload.setCopyReceivers(options.getCopyReceivers());
-
-        Assignment assignment = assignments.create(document.getId(), assignmentPayload);
-        return new UploadAndRequestSignaturesResult(document, assignment, signerIds);
+    private void cleanupFailedWorkflow(String documentId, RuntimeException failure) {
+        if (documentId == null) {
+            return;
+        }
+        try {
+            documents.delete(documentId);
+        } catch (RuntimeException cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
+        }
     }
 
     private static boolean isRetryable(int statusCode) {
@@ -290,10 +310,6 @@ public final class AssinafyClient {
         return requestUrl.scheme().equalsIgnoreCase(apiUrl.scheme())
                 && requestUrl.host().equalsIgnoreCase(apiUrl.host())
                 && requestUrl.port() == apiUrl.port();
-    }
-
-    private static boolean isLoopbackHost(String host) {
-        return "localhost".equalsIgnoreCase(host) || "::1".equals(host) || "127.0.0.1".equals(host);
     }
 
     private static final long MAX_RETRY_WAIT_MS = 30_000L;

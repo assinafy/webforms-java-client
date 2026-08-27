@@ -1,6 +1,6 @@
 # Assinafy Java SDK API Reference
 
-This reference maps the Java SDK to the 89 operations published at the
+This reference maps the Java SDK to the 89 operations documented at the
 [Assinafy API documentation](https://api.assinafy.com.br/v1/docs). Paths below omit the `/v1` prefix.
 
 ## Client surface
@@ -17,7 +17,7 @@ base URL; `getHttpClient()` exposes the configured OkHttp client for advanced in
 | `accountId` | null | Default workspace for account-scoped methods |
 | `baseUrl` | Production URL | HTTPS API root; loopback HTTP is accepted only for local tests |
 | `timeoutMs` | 30,000 | Connect, read, and write timeout; must be positive |
-| `maxRetries` | 0 | Number of additional attempts for safe reads on 429/503; negative values behave as zero |
+| `maxRetries` | 0 | Number of additional attempts for safe reads on 429/503; must be non-negative |
 
 Every option has a `getX()` accessor and fluent `setX(value)`. Request payload setters are also fluent. Response
 model getters map the snake_case wire properties listed in the response catalog to ordinary Java camelCase
@@ -35,8 +35,8 @@ Set an API key with `AssinafyClientOptions.setApiKey`; it is sent as `X-Api-Key`
 when supplied and otherwise use `AssinafyClientOptions.accountId`.
 
 Signer-facing methods take a `signerAccessCode` and send it as the `signer-access-code` query parameter. The
-document verification, public-document lookup/token, and signer artifact download routes are public in the
-published contract. The four password/social-login entry points are also usable before authentication.
+document verification, public-document lookup/token, and signer artifact download routes are public. The four
+password/social-login entry points are also usable before authentication.
 
 Path identifiers must be non-blank URL-unreserved values (`A-Z`, `a-z`, `0-9`, `.`, `_`, `~`, `-`). The SDK
 rejects unsafe path input before a request is sent; query values are URL-encoded by OkHttp.
@@ -62,6 +62,13 @@ validation raises `ValidationException`. Transport failures raise `NetworkExcept
 
 Use `ApiException.getStatusCode()`, `getResponseBody()`, and `getRetryAfterSeconds()` for diagnostics and
 caller-managed backoff. `ValidationException.getErrors()` returns structured validation details when present.
+
+The standard error body is `{ "status": integer, "message": string, "data": object|null }`. Callers should
+handle both 400 and 422 as validation failures. A blocked account deletion may also include
+`restrictions: [{ "code": "ActivePaidSubscription"|"PendingDocuments", "message": string,
+"account_ids": [string, ...] }]`. The SDK preserves the complete error JSON in
+`ApiException.getResponseBody()`. Per-operation status codes are listed below; authentication, authorization,
+content-type, rate-limit, and infrastructure layers can also return 403, 415, 429, or 503.
 
 These downloads are raw binary responses rather than JSON envelopes and return `byte[]`:
 
@@ -100,32 +107,30 @@ null to clear a value.
 | Password change | `{ "email": string*, "password": string*, "new_password": string* }` |
 | API-key creation | `{ "password": string* }` |
 | Document rename | `{ "name": string* }`, maximum 255 characters |
-| Document tag replace/append | SDK/live request: `{ "tags": [tagName, ...] }`; names not yet present are created |
-| Public token | SDK/live request: `{ "recipient": string*, "channel": "email"\|"whatsapp"* }`; see the compatibility note below |
+| Document tag replace/append | `{ "tags": [tagId, ...] }` |
+| Public token | `{ "recipient": string*, "channel": "email"\|"whatsapp"* }` |
 | `CreateSignerPayload` | `{ "full_name": string*, "email": string?, "whatsapp_phone_number": E.164? }` |
 | `UpdateSignerPayload` | Any non-empty subset of `full_name`, `email`, `whatsapp_phone_number`, `government_id` (CPF/CNPJ) |
-| Assignment expiration | `{ "expires_at": ISO-8601\|null }`; null clears expiration |
+| Assignment expiration | `{ "expires_at": ISO-8601 date-time }` |
 | Assignment decline | `{ "decline_reason": string* }` |
 | `AssignmentSignEntry[]` | `[{ "itemId": string*, "fieldId": string*, "pageId": string*, "value": string* }, ...]` |
 | Multi-sign | `{ "document_ids": [string, ...]* }` |
 | Multi-decline | `{ "document_ids": [string, ...]*, "decline_reason": string* }` |
 | Signer verification | `{ "verification-code": string* }` |
 | `ConfirmSignerDataPayload` | Any of `full_name`, `email`, `government_id` |
-| `CreateFieldPayload` | Current contract: `{ "type": string*, "name": string*, "regex": string\|null?, "is_required": boolean? }` |
-| `UpdateFieldPayload` | Current contract: any of `name`, `regex`, `is_active` |
-| Single field validation | `{ "value": any* }`; `signer-access-code` is optional |
+| `CreateFieldPayload` | `{ "type": string*, "name": string*, "regex": string\|null?, "is_required": boolean? }` |
+| `UpdateFieldPayload` | Any of `name`, `regex`, `is_active`; `clearRegex()` explicitly sends `"regex": null` |
+| Single field validation | `{ "value": any* }` |
 | `FieldValidationPayload[]` | `[{ "field_id": string*, "value": any* }, ...]` |
 | `CreateTagPayload` | `{ "name": string*, "color": six-digit-hex\|null? }`; name is at most 64 characters |
 | `UpdateTagPayload` | Any of `name`, `color`; `clearColor()` deliberately sends `"color": null` |
-| Signature image upload | Published portable contract: raw PNG bytes; query `type=signature\|initial`, optional `reuse=true\|false`. JPEG detection is retained for older/deployed compatibility but is not advertised by the current OpenAPI. |
+| Signature image upload | Raw PNG bytes; query `type=signature\|initial`, optional `reuse=true\|false` |
 
-The public OpenAPI schema currently shows `{ "email": ... }` for send-token, while the deployed API requires
-`recipient` plus `channel`. It also describes document tag values as IDs, while the deployed API and SDK use
-tag names and create missing names. `DocumentResource` follows the deployed behavior in both cases.
+Document tag requests carry tag IDs; the SDK forwards the supplied strings without rewriting them. The SDK also
+exposes environment-specific request forms in [SDK extensions](#sdk-extensions).
 
-`CreateFieldPayload.setActive` and `UpdateFieldPayload.setType` / `setRequired` are retained for compatibility
-with older deployments but are not properties of the current published schemas. For portable integrations,
-create the field first and change activity with `UpdateFieldPayload.setActive`.
+`CreateFieldPayload.setActive` and `UpdateFieldPayload.setType` / `setRequired` are SDK extensions. They are not
+properties of the documented field-create and field-update schemas.
 
 ### Assignment create and estimate
 
@@ -133,8 +138,7 @@ create the field first and change activity with `UpdateFieldPayload.setActive`.
 signer is required for create, and `entries` is required for a `collect` assignment.
 
 Use `setSigners(List<SignerRef>)` when setting verification, notification, or step. `setSignerStrings(...)` and
-the legacy `setSignerIds(...)` convert IDs to plain signer references; the most recently used signer setter
-wins.
+`setSignerIds(...)` convert IDs to plain signer references; the most recently used signer setter wins.
 
 ```json
 {
@@ -185,8 +189,9 @@ CreateAssignmentPayload collect = new CreateAssignmentPayload()
             new DisplaySettings(100, 100, 240, 40, 12))))));
 ```
 
-The estimate endpoint accepts `method`, `signers`, and `entries` pricing inputs; signer IDs are not required
-for an estimate. Invitation-only `message`, `expires_at`, and `copy_receivers` are not part of that contract.
+The estimate endpoint accepts `method`, `signers`, and `entries` pricing inputs. A virtual estimate requires
+non-empty `signers`; a collect estimate requires non-empty `entries`. Signer IDs within estimate signer entries
+are optional. Invitation-only `message`, `expires_at`, and `copy_receivers` are not part of that contract.
 
 Verification and notification are coupled. If neither is supplied both default to `Email`; supplying only one
 lets the API infer the other. `Email` verification pairs with `Email`, `Whatsapp` with `Whatsapp`, and
@@ -213,8 +218,8 @@ with artifact name `pades`.
 ]
 ```
 
-Use `signEntries(..., List.of(new AssignmentSignEntry(itemId, fieldId, pageId, value)))`; the legacy
-`sign(..., List<?>)` method remains available for raw maps.
+Use `signEntries(..., List.of(new AssignmentSignEntry(itemId, fieldId, pageId, value)))`; the untyped
+`sign(..., List<?>)` overload remains available for raw maps.
 
 ### Document from template
 
@@ -243,8 +248,8 @@ Use `signEntries(..., List.of(new AssignmentSignEntry(itemId, fieldId, pageId, v
 
 Creation requires `role_id` and `id` for each signer role. Estimation requires only `role_id`; it also accepts
 verification and notification methods for pricing. Template default tags are always applied and `tags` are
-merged on top. Use `new TemplateEditorField(fieldId, value)` with `setTemplateEditorFields`; the legacy
-`setEditorFields(List<?>)` method remains available for raw maps.
+merged on top. Use `new TemplateEditorField(fieldId, value)` with `setTemplateEditorFields`; the untyped
+`setEditorFields(List<?>)` overload remains available for raw maps.
 
 ### Webhook subscription
 
@@ -286,15 +291,15 @@ keys are:
 | Operation group | Supported query parameters |
 |---|---|
 | Paginated lists | `page`, `per-page` (maximum 100 where enforced) |
-| Documents list | `status`, `method` (`virtual\|collect`), `search`, comma-separated `tags`, `sort` (`name`, `updated_at`, prefix `-` for descending), pagination |
+| Documents list | `status`, `method` (`virtual\|collect`), `search`, comma-separated tag IDs in `tags` (all IDs must match), `sort` (`name` or `updated_at`), pagination |
 | Document search | `search`, `status`, pagination |
-| Assignments list | SDK supplies `accountId`; pagination |
+| Assignments list | `page`, `per-page` |
 | Fields list | `include_inactive`, `include_standard` |
 | Signers list | `search`, pagination |
 | Templates list | `search`, pagination |
 | Tags list | `search` |
 | Signer documents | pagination; search route takes `search` |
-| Account/user stats | `granularity=monthly\|daily`; `month=YYYY-MM` is required for daily |
+| Account/user stats | `granularity=monthly\|daily` (monthly by default); `month=YYYY-MM` is required for daily |
 | Tag delete | `force=true\|false` |
 | Signing view | optional `has_accepted_terms=true\|false` |
 | Signature upload | `type`, optional `reuse` |
@@ -313,7 +318,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `ApiKeyResponse` | `api_key` (full only on creation, masked on read, null when none exists) |
 | `EmailResponse` | `email` |
 | `NotificationPreferences` | The nine boolean keys listed above |
-| `DocumentStatsRow` | `period` (`YYYY-MM` or `YYYY-MM-DD`), `documents_uploaded`, `documents_sent`, `signature_requests`, `signature_requests_email`, `signature_requests_whatsapp`, `signature_requests_viewed`, `signature_requests_completed`, `documents_certified` |
+| `DocumentStatsRow` | `period` (`YYYY-MM` or `YYYY-MM-DD`), `documents_uploaded`, `documents_sent`, `signature_requests`, `signature_requests_notification_email`, `signature_requests_notification_whatsapp`, `signature_requests_notification_bypass`, `signature_requests_verification_email`, `signature_requests_verification_whatsapp`, `signature_requests_verification_bypass`, `signature_requests_verification_digital_certificate`, `signature_requests_viewed`, `signature_requests_completed`, `documents_certified` |
 | `Signer` | `resource`, `id`, `full_name`, `email?`, `whatsapp_phone_number?`, `government_id?`, `has_accepted_terms`; contextual fields: `has_signature`, `has_initial`, `is_signature_reusable`, `verification_method`, `notification_methods[]`, `step`, `notified`, `completed`, `notification_history[]` |
 | `AssignmentSignerNotification` | `event`, `status` (`sent\|failed`), `error_code?`, `error_message?`, `sent_at?`, `failed_at?` |
 | `Assignment` | `resource`, `id`, `sender_email`, `method` (`virtual\|collect`), `expires_at?`, `message?`, `signers[]`, `copy_receivers[]` (`Signer` objects), `items[]`, `summary`, `signing_urls[]` |
@@ -323,8 +328,8 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `CostEstimate` | `documents`, `credits`, `needs_extra_document`, `extra_document_cost`, `total_credits`, `breakdown[]`, `document_balance`, `credit_balance`, `has_sufficient_resources`, `blocking_reason?`, `message?` |
 | Cost breakdown | `code`, `name`, `cost`, `quantity`, `unit_cost` |
 | `ResendResult` | `is_sent`, `document_id`, `signer_id` |
-| `ResendCostEstimate` | Deployed response: `total`, `breakdown[]` (`code`, `name`, `cost`), `credit_balance`, `has_sufficient_credits` |
-| `WhatsappNotification` | `sent_at` (Unix seconds), `header`, `body`, `buttons[]` (`text`, compatibility `url?`), `phone_number`, `signer_id` |
+| `ResendCostEstimate` | Documented `CostEstimate` fields; also accepts compact `total`, `breakdown[]` (`code`, `name`, `cost`), `credit_balance`, `has_sufficient_credits` |
+| `WhatsappNotification` | `sent_at` (Unix seconds), `header`, `body`, `buttons[]` (`text`), `phone_number`, `signer_id` |
 | `DocumentDetails` / Document | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; public/signer contexts can add `page_count`, `created_by`, `current_signer`, `download_url`, `download_final_url`, `activities` |
 | `DocumentListItem` | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; lightweight search may omit expanded relationships |
 | Document artifacts | URL map keyed by `original`, `certificated`, `certificate-page`, `pades`, `bundle`, and contextual `thumbnail` |
@@ -344,14 +349,19 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `WebhookSubscription` | `events[]`, `is_active`, `url?`, `email?`, `updated_at?` |
 | `WebhookDispatch` | `resource`, `id`, `event`, `activity_id`, `endpoint?`, `payload?`, `delivered`, `http_status?`, `response_body?`, `error?`, `created_at`, `updated_at` |
 | `WebhookEventTypeInfo` | `id`, `description` |
-| `AcceptTermsResponse` | Deployed response fields: `full_name`, `email`, `has_accepted_terms` |
-| `VerifyEmailResponse` | Deployed response fields: `message`, `access_token` |
+| `AcceptTermsResponse` | Optional response fields `full_name`, `email`, `has_accepted_terms`; the documented success payload has no data, so the Java return may be null |
+| `VerifyEmailResponse` | Optional response fields `message`, `access_token`; the documented success payload has no data, so the Java return may be null |
 | `PaginationMeta` | `current_page`, `per_page`, `total`, `last_page` (built from response headers, not envelope `data`) |
 
-The published resend-estimate response references `CostEstimate`; the deployed endpoint returns the compact
-`ResendCostEstimate` shape above, which the SDK models directly.
+`ResendCostEstimate` extends `CostEstimate`. `getTotal()` falls back to `total_credits`, and
+`getHasSufficientCredits()` falls back to `has_sufficient_resources`, so both accepted response forms remain
+fully readable.
 
-## Published operation matrix
+Statistics are zero-filled for every returned period. The four verification counters (email, WhatsApp, bypass,
+and digital certificate) sum to `signature_requests`. Notification counters may sum to at least
+`signature_requests` because one request can generate more than one notification attempt.
+
+## Official operation matrix
 
 Every JSON response named below is the unwrapped `data` value. `void` means the SDK validates the success
 envelope and intentionally ignores its data. Status lists contain the documented success code followed by
@@ -377,12 +387,12 @@ documented error codes; the platform may additionally return global transport st
 
 | Operation | SDK method | Request | Return | Statuses |
 |---|---|---|---|---|
-| **GET** `/assignments` | `assignments.list([params][, accountId])` | Pagination; SDK adds `accountId` | `PaginatedResult<Assignment>` | 200, 401, 500 |
+| **GET** `/assignments` | `assignments.list([params][, accountId])` | Pagination + `accountId` | `PaginatedResult<Assignment>` | 200, 401, 500 |
 | **POST** `/documents/{documentId}/assignments` | `assignments.create(documentId, payload)` | Assignment create | `Assignment` | 200, 400, 401, 500 |
 | **POST** `/documents/{documentId}/assignments/estimate-cost` | `assignments.estimateCost(documentId, payload)` | Assignment estimate | `CostEstimate` | 200, 400, 401, 500 |
 | **PUT** `/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend` | `assignments.resendNotification(documentId, assignmentId, signerId)` | — | `ResendResult` | 200, 401, 500 |
 | **POST** `/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` | `assignments.estimateResendCost(documentId, assignmentId, signerId)` | — | `ResendCostEstimate` | 200, 401, 500 |
-| **PUT** `/documents/{documentId}/assignments/{assignmentId}/reset-expiration` | `assignments.resetExpiration(...)` / `clearExpiration(...)` | Assignment expiration | `Assignment` | 200, 400, 401, 404, 500 |
+| **PUT** `/documents/{documentId}/assignments/{assignmentId}/reset-expiration` | `assignments.resetExpiration(documentId, assignmentId, expiresAt)` | Assignment expiration | `Assignment` | 200, 400, 401, 404, 500 |
 | **GET** `/documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications` | `assignments.whatsappNotifications(documentId, assignmentId)` | — | `List<WhatsappNotification>` | 200, 401, 500 |
 
 ### Authentication — 9 operations
@@ -431,8 +441,8 @@ documented error codes; the platform may additionally return global transport st
 | **GET** `/accounts/{accountId}/fields/{fieldId}` | `fields.get(fieldId[, accountId])` | — | `FieldDefinition` | 200, 401, 404, 500 |
 | **PUT** `/accounts/{accountId}/fields/{fieldId}` | `fields.update(fieldId, payload[, accountId])` | `UpdateFieldPayload` | `FieldDefinition` | 200, 401, 404, 500 |
 | **DELETE** `/accounts/{accountId}/fields/{fieldId}` | `fields.delete(fieldId[, accountId])` | — | `void` | 200, 401, 404, 500 |
-| **POST** `/accounts/{accountId}/fields/{fieldId}/validate` | `fields.validate(fieldId, value[, signerAccessCode][, accountId])` | Single validation | `FieldValidationResult` | 200, 401, 500 |
-| **POST** `/accounts/{accountId}/fields/validate-multiple` | `fields.validateMultiple(values[, signerAccessCode][, accountId])` | `FieldValidationPayload[]` | `List<FieldValidationResult>` | 200, 401, 500 |
+| **POST** `/accounts/{accountId}/fields/{fieldId}/validate` | `fields.validate(fieldId, value)` | Single validation | `FieldValidationResult` | 200, 401, 500 |
+| **POST** `/accounts/{accountId}/fields/validate-multiple` | `fields.validateMultiple(values)` | `FieldValidationPayload[]` | `List<FieldValidationResult>` | 200, 401, 500 |
 | **GET** `/field-types` | `fields.listTypes()` | — | `List<FieldTypeInfo>` | 200, 401, 500 |
 
 ### Signers — 5 operations
@@ -445,15 +455,15 @@ documented error codes; the platform may additionally return global transport st
 | **PUT** `/accounts/{accountId}/signers/{signerId}` | `signers.update(signerId, payload[, accountId])` | `UpdateSignerPayload` | `Signer` | 200, 400, 401, 404, 500 |
 | **DELETE** `/accounts/{accountId}/signers/{signerId}` | `signers.delete(signerId[, accountId])` | — | `void` | 200, 401, 404, 500 |
 
-`signers.create` is idempotent by exact email: it searches first and returns an existing signer without applying
-new values. Use `update` when fields must change. It also recovers a duplicate-email race by re-querying.
+`signers.create` always sends the documented POST. Use `signers.findOrCreate` only when exact-email reuse is the
+intended application policy; it does not update an existing signer.
 
 ### Signing — 17 operations
 
 | Operation | SDK method | Request | Return | Statuses |
 |---|---|---|---|---|
 | **GET** `/public/documents/{documentId}` | `documents.getPublic(documentId)` | — | Public `DocumentDetails` | 200, 404, 500 |
-| **PUT** `/public/documents/{documentId}/send-token` | `documents.sendToken(documentId, recipient, channel)` | Public token | `void` | 200, 500 |
+| **PUT** `/public/documents/{documentId}/send-token` | `documents.sendToken(documentId, recipient, channel)` | Public token | `void` | 200, 400, 500 |
 | **GET** `/signers/self` | `signerSelf.getSelf(signerAccessCode)` | Signer access code | `Signer` | 200, 401, 500 |
 | **GET** `/signers/{signerId}/document` | `signerSelf.getCurrentDocument(signerId, signerAccessCode)` | Signer access code | `DocumentDetails` | 200, 401, 404, 500 |
 | **GET** `/sign` | `signerSelf.getSign(signerAccessCode[, hasAcceptedTerms])` | Signer access code; optional flag | `DocumentDetails` | 200, 400, 401, 409, 500 |
@@ -461,14 +471,14 @@ new values. Use `update` when fields must change. It also recovers a duplicate-e
 | **PUT** `/documents/{documentId}/assignments/{assignmentId}/reject` | `assignments.decline(documentId, assignmentId, signerAccessCode, reason)` | Assignment decline | `void` | 200, 401, 500 |
 | **PUT** `/signers/documents/sign-multiple` | `signerSelf.signMultiple(signerAccessCode, documentIds)` | Multi-sign | `void` | 200, 401, 500 |
 | **PUT** `/signers/documents/decline-multiple` | `signerSelf.declineMultiple(signerAccessCode, documentIds, reason)` | Multi-decline | `void` | 200, 401, 500 |
-| **POST** `/verify` | `signerSelf.verifyEmail(code, signerAccessCode)` | Signer verification | `VerifyEmailResponse` | 200, 400, 401, 500 |
+| **POST** `/verify` | `signerSelf.verifyEmail(code, signerAccessCode)` | Signer verification | `VerifyEmailResponse` or null | 200, 400, 401, 500 |
 | **PUT** `/documents/{documentId}/signers/confirm-data` | `signerSelf.confirmSignerData(documentId, signerAccessCode, payload)` | `ConfirmSignerDataPayload` | `Signer` | 200, 401, 500 |
-| **PUT** `/signers/accept-terms` | `signerSelf.acceptTerms(signerAccessCode)` | Signer access code | `AcceptTermsResponse` | 200, 401, 500 |
-| **POST** `/signature` | `signerSelf.uploadSignature(signerAccessCode, bytes, type[, reuse])` | Raw PNG + query; JPEG compatibility path | `void` | 200, 401, 500 |
+| **PUT** `/signers/accept-terms` | `signerSelf.acceptTerms(signerAccessCode)` | Signer access code | `AcceptTermsResponse` or null | 200, 401, 500 |
+| **POST** `/signature` | `signerSelf.uploadSignature(signerAccessCode, bytes, type[, reuse])` | Raw PNG + query | `void` | 200, 401, 500 |
 | **GET** `/signature/{signatureType}` | `signerSelf.downloadSignature(signerAccessCode, type)` | Signer access code | Raw `byte[]` | 200, 401, 404, 500 |
 | **GET** `/signers/{signerId}/documents` | `signerSelf.listDocuments(signerId, signerAccessCode[, params])` | Signer access code, pagination | `PaginatedResult<DocumentDetails>` | 200, 401, 500 |
 | **GET** `/signers/{signerId}/documents/search` | `signerSelf.searchDocuments(signerId, signerAccessCode, search)` | Signer access code, search | `PaginatedResult<DocumentDetails>` | 200, 401, 500 |
-| **GET** `/signers/{signerId}/documents/{documentId}/download/{artifactName}` | `signerSelf.downloadDocument(signerId, documentId, artifactName)` | Public; compatibility overload accepts access code | Raw `byte[]` | 200, 404, 500 |
+| **GET** `/signers/{signerId}/documents/{documentId}/download/{artifactName}` | `signerSelf.downloadDocument(signerId, documentId, artifactName)` | — | Raw `byte[]` | 200, 404, 500 |
 
 ### Tags — 4 operations
 
@@ -486,7 +496,7 @@ new values. Use `update` when fields must change. It also recovers a duplicate-e
 | **GET** `/accounts/{accountId}/templates` | `templates.list([params][, accountId])` | `search`, pagination | `PaginatedResult<TemplateListItem>` | 200, 401, 500 |
 
 Document creation and estimate operations for templates appear in the Documents table because that is how the
-published contract categorizes them.
+official documentation categorizes them.
 
 ### Users — 4 operations
 
@@ -508,36 +518,31 @@ published contract categorizes them.
 | **GET** `/accounts/{accountId}/webhooks` | `webhooks.listDispatches([params][, accountId])` | Webhook-history query | `PaginatedResult<WebhookDispatch>` | 200, 401, 500 |
 | **POST** `/accounts/{accountId}/webhooks/{historyId}/retry` | `webhooks.retryDispatch(historyId[, accountId])` | — | `WebhookDispatch` | 200, 400, 401, 404, 500 |
 
-## SDK convenience and compatibility methods
+## SDK extensions
 
-These public methods compose or alias the operations above rather than adding published operations:
+These public methods compose official operations, provide typed aliases, or expose additional request forms:
 
 | Method | Behavior and result |
 |---|---|
 | `AssinafyClient.create(...)` | Builds an API-key client; optional configurator can set timeout, retries, or base URL |
 | `AssinafyClient.fromConfig(map)` | Accepts snake/camel variants for API key, token, account ID, and base URL; API key wins over token |
-| `uploadAndRequestSignatures(options)` | Uploads a PDF, optionally polls until ready, finds/creates signers by email, creates a virtual assignment; returns `UploadAndRequestSignaturesResult` |
+| `uploadAndRequestSignatures(options)` | Uploads a PDF, optionally polls until ready, finds or creates signers by email, and creates a virtual assignment; on failure, best-effort deletes the upload while preserving reusable account-scoped signers; returns `UploadAndRequestSignaturesResult` |
 | `documents.waitUntilReady(id[, maxWaitMs, pollIntervalMs])` | Polls document details until `metadata_ready`, `pending_signature`, or `certificated`; throws on processing failure or timeout |
 | `documents.isFullySigned(id)` | Returns true for `certificated`, a positive completed summary, or a non-empty signer list whose `completed` flags are all true |
 | `documents.getSigningProgress(id)` | Derives `signed`, `total`, `pending`, and `percentage` from the assignment summary, falling back to signer `completed` flags |
 | `documents.download(id)` | Alias for the `certificated` artifact |
-| `assignments.clearExpiration(...)` | Alias that sends `expires_at: null` |
+| `assignments.clearExpiration(...)` | Sends the additional `expires_at: null` request form |
 | `assignments.signEntries(...)` | Type-safe collect submission using `AssignmentSignEntry`; delegates to `sign(...)` |
-| `signers.findByEmail(email[, accountId])` | Searches up to 100 candidates and returns an exact case-insensitive email match or null |
+| `signers.findByEmail(email[, accountId])` | Searches every reported page (100 candidates per page) and returns an exact case-insensitive email match or null |
+| `signers.findOrCreate(payload[, accountId])` | Reuses an exact email match when email is supplied; otherwise creates; re-queries after duplicate-email 400/409 races |
+| Field validation overloads with `signerAccessCode` | Add a `signer-access-code` query parameter to single or multiple validation requests |
+| `signerSelf.uploadSignature(...)` with JPEG bytes | Detects JPEG input and sends `image/jpeg`; the official operation documents PNG |
+| `signerSelf.downloadDocument(..., signerAccessCode)` | Adds `signer-access-code` to the signer artifact request |
+| `CreateFieldPayload.setActive`, `UpdateFieldPayload.setType/setRequired` | Additional field request properties |
+| `WhatsappNotification.buttons[].url` | Additional response field retained by the Java model when present |
+| Concise `DocumentStatsRow` accessors | Java-only aliases for canonical notification/verification counters; historical input names deserialize without changing serialized JSON |
 | `webhooks.update(...)` | Alias for create-or-replace `register(...)` |
-| `templates.get(templateId[, accountId])` | Compatibility route `GET /accounts/{accountId}/templates/{templateId}`; deployed and supported by the SDK but absent from the current published OpenAPI path list |
-
-Live compatibility notes:
-
-- `users.getSelf()` accepts both the published production shape (`AuthUser`) and the sandbox's current legacy envelope (`{ "user": ..., "accounts": [...] }`).
-- The sandbox router currently returns `404` for `GET /accounts/{accountId}/stats`, `GET /users/self/stats`, and `GET /users/self/notification-preferences`, while unauthenticated probes against production return `401`, which indicates the published routes exist there.
-- Sandbox account creation currently rejects the published optional `notification_sender_type` field, so live smoke coverage omits that optional input and unit coverage verifies serialization and validation for it separately.
-- Sandbox signer updates currently return 200 for `government_id` but omit and do not persist that field. The
-  production OpenAPI explicitly includes `government_id`; live smoke names this sandbox-version skip and unit
-  coverage verifies the exact request/response mapping.
-- The sandbox's collect-cost estimator still requires a top-level signer, while the production OpenAPI requires
-  only `entries` for collect estimates. The SDK follows the published contract; live smoke covers both the
-  sandbox-compatible signed estimate and the named signer-free sandbox-version skip.
+| `templates.get(templateId[, accountId])` | Calls `GET /accounts/{accountId}/templates/{templateId}` and returns `TemplateDetails`; this detail route is outside the official 89-operation list |
 
 All account-scoped resource methods expose overloads that either accept an explicit account ID or use the
 client default. List methods expose no-argument overloads and parameter-map overloads where applicable.

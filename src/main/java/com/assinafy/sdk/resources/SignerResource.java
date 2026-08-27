@@ -10,12 +10,9 @@ import okhttp3.OkHttpClient;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /** Account-owner client for signer creation, lookup, update, deletion, and search. */
 public final class SignerResource extends BaseResource {
-
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
     /**
      * Creates an instance.
@@ -30,19 +27,31 @@ public final class SignerResource extends BaseResource {
 
     /**
      * {@code POST /accounts/{account_id}/signers} — create a signer.
-     *
-     * <p><b>Idempotent by email.</b> When the payload carries an email, this first looks the signer up by email
-     * and, if one already exists, returns the existing record <em>without</em> sending the POST. As a safety net
-     * for a race, a duplicate-email error from the API (the live API reports this as HTTP 400, historically 409)
-     * is recovered by re-querying and returning the existing signer. Because of this, {@code create} will not
-     * apply changed {@code full_name}/{@code whatsapp_phone_number} values to an already-existing signer — use
-     * {@link #update(String, UpdateSignerPayload)} to modify an existing signer.</p>
+     * This method always sends the creation request; use {@link #findOrCreate(CreateSignerPayload, String)}
+     * when email-based reuse is desired.
      *
      * @param payload required signer fields
      * @param accountId account override, or {@code null} for the client default
-     * @return created or existing signer
+     * @return created signer
      */
     public Signer create(CreateSignerPayload payload, String accountId) {
+        validateCreatePayload(payload);
+        String id = accountId(accountId);
+        return createValidated(payload, id);
+    }
+
+    /**
+     * Finds a signer by email or creates one when no exact match exists.
+     *
+     * <p>This is the explicit idempotent alternative to {@link #create(CreateSignerPayload, String)}. Existing
+     * signer fields are not updated. A duplicate-email response caused by a concurrent creator is recovered by
+     * one final lookup.</p>
+     *
+     * @param payload required signer fields
+     * @param accountId account override, or {@code null} for the client default
+     * @return existing or newly created signer
+     */
+    public Signer findOrCreate(CreateSignerPayload payload, String accountId) {
         validateCreatePayload(payload);
         String id = accountId(accountId);
 
@@ -55,14 +64,17 @@ public final class SignerResource extends BaseResource {
         }
 
         try {
-            return httpPost("/accounts/" + id + "/signers", normalisePayload(payload), Signer.class);
+            return createValidated(payload, id);
         } catch (ApiException e) {
-            // The API rejects a duplicate email (observed as HTTP 400, historically 409). Recover by
-            // returning the pre-existing signer when we can find it; otherwise surface the original error.
+            // Recover a concurrent duplicate response only when an exact email match can now be found.
             if ((e.getStatusCode() == 400 || e.getStatusCode() == 409) && hasEmail) {
-                Signer duplicate = findByEmail(payload.getEmail(), id);
-                if (duplicate != null) {
-                    return duplicate;
+                try {
+                    Signer duplicate = findByEmail(payload.getEmail(), id);
+                    if (duplicate != null) {
+                        return duplicate;
+                    }
+                } catch (RuntimeException lookupFailure) {
+                    e.addSuppressed(lookupFailure);
                 }
             }
             throw e;
@@ -70,13 +82,27 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
-     * Returns created or existing signer in the default account.
+     * Finds or creates a signer in the default account.
      *
      * @param payload required signer fields
-     * @return created or existing signer in the default account
+     * @return existing or newly created signer
+     */
+    public Signer findOrCreate(CreateSignerPayload payload) {
+        return findOrCreate(payload, null);
+    }
+
+    /**
+     * Creates a signer in the default account.
+     *
+     * @param payload required signer fields
+     * @return created signer in the default account
      */
     public Signer create(CreateSignerPayload payload) {
         return create(payload, null);
+    }
+
+    private Signer createValidated(CreateSignerPayload payload, String accountId) {
+        return httpPost("/accounts/" + accountId + "/signers", normalisePayload(payload), Signer.class);
     }
 
     /**
@@ -150,8 +176,8 @@ public final class SignerResource extends BaseResource {
         if (payload == null) {
             throw new ValidationException("Signer update payload is required");
         }
-        if (payload.getEmail() != null && !payload.getEmail().isBlank()) {
-            assertEmail(payload.getEmail());
+        if (payload.getEmail() != null) {
+            requireEmail(payload.getEmail(), "Signer email");
         }
         return httpPut("/accounts/" + id + "/signers/" + sid, normaliseUpdatePayload(payload), Signer.class);
     }
@@ -190,21 +216,33 @@ public final class SignerResource extends BaseResource {
 
     /**
      * Finds a signer by exact email using {@code GET /accounts/{account_id}/signers?search=...} and matching
-     * case-insensitively on the email. Returns {@code null} when no signer matches. Note the lookup pages
-     * through up to 100 search results, so it may miss a match if the workspace has many same-prefix emails.
+     * case-insensitively on the email. All pages reported by the API are searched. Returns {@code null} when no
+     * signer matches.
      *
      * @param email required email address
      * @param accountId account override, or {@code null} for the client default
      * @return matching signer, or {@code null}
      */
     public Signer findByEmail(String email, String accountId) {
-        assertEmail(email);
+        requireEmail(email, "Signer email");
         String id = accountId(accountId);
-        PaginatedResult<Signer> result = list(queryParams("search", email, "per_page", "100"), id);
-        return result.getData().stream()
-                .filter(s -> s.getEmail() != null && s.getEmail().equalsIgnoreCase(email))
-                .findFirst()
-                .orElse(null);
+        int page = 1;
+        while (true) {
+            PaginatedResult<Signer> result = list(
+                    queryParams("search", email, "per_page", "100", "page", page), id);
+            Signer match = result.getData().stream()
+                    .filter(s -> s.getEmail() != null && s.getEmail().equalsIgnoreCase(email))
+                    .findFirst()
+                    .orElse(null);
+            if (match != null) {
+                return match;
+            }
+            if (result.getMeta() == null || result.getMeta().getLastPage() == null
+                    || page >= result.getMeta().getLastPage()) {
+                return null;
+            }
+            page++;
+        }
     }
 
     /**
@@ -217,12 +255,6 @@ public final class SignerResource extends BaseResource {
         return findByEmail(email, null);
     }
 
-    private void assertEmail(String email) {
-        if (email == null || !EMAIL_PATTERN.matcher(email).matches()) {
-            throw new ValidationException("Invalid email address");
-        }
-    }
-
     private void validateCreatePayload(CreateSignerPayload payload) {
         if (payload == null) {
             throw new ValidationException("Signer payload is required");
@@ -231,7 +263,7 @@ public final class SignerResource extends BaseResource {
             throw new ValidationException("Signer full name is required");
         }
         if (payload.getEmail() != null && !payload.getEmail().isBlank()) {
-            assertEmail(payload.getEmail());
+            requireEmail(payload.getEmail(), "Signer email");
         }
     }
 
@@ -250,7 +282,7 @@ public final class SignerResource extends BaseResource {
     private Map<String, Object> normaliseUpdatePayload(UpdateSignerPayload payload) {
         Map<String, Object> body = new LinkedHashMap<>();
         if (payload.getFullName() != null) body.put("full_name", payload.getFullName());
-        if (payload.getEmail() != null && !payload.getEmail().isBlank()) body.put("email", payload.getEmail());
+        if (payload.getEmail() != null) body.put("email", payload.getEmail());
         if (payload.getWhatsappPhoneNumber() != null) {
             body.put("whatsapp_phone_number", payload.getWhatsappPhoneNumber());
         }

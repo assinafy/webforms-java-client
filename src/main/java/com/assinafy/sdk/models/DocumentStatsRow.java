@@ -1,5 +1,7 @@
 package com.assinafy.sdk.models;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -21,11 +23,28 @@ public final class DocumentStatsRow {
     @JsonProperty("signature_requests")
     private int signatureRequests;
 
-    @JsonProperty("signature_requests_email")
-    private int signatureRequestsEmail;
+    @JsonProperty("signature_requests_notification_email")
+    @JsonAlias("signature_requests_email")
+    private int signatureRequestsNotificationEmail;
 
-    @JsonProperty("signature_requests_whatsapp")
-    private int signatureRequestsWhatsapp;
+    @JsonProperty("signature_requests_notification_whatsapp")
+    @JsonAlias("signature_requests_whatsapp")
+    private int signatureRequestsNotificationWhatsapp;
+
+    @JsonProperty("signature_requests_notification_bypass")
+    private int signatureRequestsNotificationBypass;
+
+    @JsonProperty("signature_requests_verification_email")
+    private int signatureRequestsVerificationEmail;
+
+    @JsonProperty("signature_requests_verification_whatsapp")
+    private int signatureRequestsVerificationWhatsapp;
+
+    @JsonProperty("signature_requests_verification_bypass")
+    private int signatureRequestsVerificationBypass;
+
+    @JsonProperty("signature_requests_verification_digital_certificate")
+    private int signatureRequestsVerificationDigitalCertificate;
 
     @JsonProperty("signature_requests_viewed")
     private int signatureRequestsViewed;
@@ -93,32 +112,146 @@ public final class DocumentStatsRow {
     public void setSignatureRequests(int signatureRequests) { this.signatureRequests = signatureRequests; }
 
     /**
-     * Returns number of {@code signature_requests_email}.
+     * Returns email notification requests.
      *
-     * @return number of {@code signature_requests_email}
+     * @return number of {@code signature_requests_notification_email}
      */
-    public int getSignatureRequestsEmail() { return signatureRequestsEmail; }
+    public int getSignatureRequestsNotificationEmail() { return signatureRequestsNotificationEmail; }
 
     /**
-     * Sets value of {@code signature_requests_email}.
+     * Sets email notification requests.
      *
-     * @param value value of {@code signature_requests_email}
+     * @param value value of {@code signature_requests_notification_email}
      */
-    public void setSignatureRequestsEmail(int value) { this.signatureRequestsEmail = value; }
+    public void setSignatureRequestsNotificationEmail(int value) { this.signatureRequestsNotificationEmail = value; }
 
     /**
-     * Returns number of {@code signature_requests_whatsapp}.
+     * Returns WhatsApp notification requests.
      *
-     * @return number of {@code signature_requests_whatsapp}
+     * @return number of {@code signature_requests_notification_whatsapp}
      */
-    public int getSignatureRequestsWhatsapp() { return signatureRequestsWhatsapp; }
+    public int getSignatureRequestsNotificationWhatsapp() { return signatureRequestsNotificationWhatsapp; }
 
     /**
-     * Sets value of {@code signature_requests_whatsapp}.
+     * Sets WhatsApp notification requests.
      *
-     * @param value value of {@code signature_requests_whatsapp}
+     * @param value value of {@code signature_requests_notification_whatsapp}
      */
-    public void setSignatureRequestsWhatsapp(int value) { this.signatureRequestsWhatsapp = value; }
+    public void setSignatureRequestsNotificationWhatsapp(int value) {
+        this.signatureRequestsNotificationWhatsapp = value;
+    }
+
+    /**
+     * Returns requests for which notification was bypassed.
+     *
+     * @return number of {@code signature_requests_notification_bypass}
+     */
+    public int getSignatureRequestsNotificationBypass() { return signatureRequestsNotificationBypass; }
+
+    /**
+     * Sets requests for which notification was bypassed.
+     *
+     * @param value value of {@code signature_requests_notification_bypass}
+     */
+    public void setSignatureRequestsNotificationBypass(int value) {
+        this.signatureRequestsNotificationBypass = value;
+    }
+
+    /**
+     * Returns email verification requests.
+     *
+     * @return number of {@code signature_requests_verification_email}
+     */
+    public int getSignatureRequestsVerificationEmail() { return signatureRequestsVerificationEmail; }
+
+    /**
+     * Sets email verification requests.
+     *
+     * @param value value of {@code signature_requests_verification_email}
+     */
+    public void setSignatureRequestsVerificationEmail(int value) { this.signatureRequestsVerificationEmail = value; }
+
+    /**
+     * Returns WhatsApp verification requests.
+     *
+     * @return number of {@code signature_requests_verification_whatsapp}
+     */
+    public int getSignatureRequestsVerificationWhatsapp() { return signatureRequestsVerificationWhatsapp; }
+
+    /**
+     * Sets WhatsApp verification requests.
+     *
+     * @param value value of {@code signature_requests_verification_whatsapp}
+     */
+    public void setSignatureRequestsVerificationWhatsapp(int value) {
+        this.signatureRequestsVerificationWhatsapp = value;
+    }
+
+    /**
+     * Returns requests for which verification was bypassed.
+     *
+     * @return number of {@code signature_requests_verification_bypass}
+     */
+    public int getSignatureRequestsVerificationBypass() { return signatureRequestsVerificationBypass; }
+
+    /**
+     * Sets requests for which verification was bypassed.
+     *
+     * @param value value of {@code signature_requests_verification_bypass}
+     */
+    public void setSignatureRequestsVerificationBypass(int value) {
+        this.signatureRequestsVerificationBypass = value;
+    }
+
+    /**
+     * Returns digital-certificate verification requests.
+     *
+     * @return number of {@code signature_requests_verification_digital_certificate}
+     */
+    public int getSignatureRequestsVerificationDigitalCertificate() {
+        return signatureRequestsVerificationDigitalCertificate;
+    }
+
+    /**
+     * Sets digital-certificate verification requests.
+     *
+     * @param value value of {@code signature_requests_verification_digital_certificate}
+     */
+    public void setSignatureRequestsVerificationDigitalCertificate(int value) {
+        this.signatureRequestsVerificationDigitalCertificate = value;
+    }
+
+    /**
+     * Returns email notification requests through the concise accessor.
+     *
+     * @return number of {@code signature_requests_notification_email}
+     */
+    @JsonIgnore
+    public int getSignatureRequestsEmail() { return signatureRequestsNotificationEmail; }
+
+    /**
+     * Sets email notification requests through the concise accessor.
+     *
+     * @param value value of {@code signature_requests_notification_email}
+     */
+    @JsonIgnore
+    public void setSignatureRequestsEmail(int value) { this.signatureRequestsNotificationEmail = value; }
+
+    /**
+     * Returns WhatsApp notification requests through the concise accessor.
+     *
+     * @return number of {@code signature_requests_notification_whatsapp}
+     */
+    @JsonIgnore
+    public int getSignatureRequestsWhatsapp() { return signatureRequestsNotificationWhatsapp; }
+
+    /**
+     * Sets WhatsApp notification requests through the concise accessor.
+     *
+     * @param value value of {@code signature_requests_notification_whatsapp}
+     */
+    @JsonIgnore
+    public void setSignatureRequestsWhatsapp(int value) { this.signatureRequestsNotificationWhatsapp = value; }
 
     /**
      * Returns signature requests first viewed during the period.

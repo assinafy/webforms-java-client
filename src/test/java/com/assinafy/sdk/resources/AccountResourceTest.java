@@ -80,13 +80,22 @@ class AccountResourceTest {
     void themeLogoStatsAndDeleteUseDocumentedContracts() throws Exception {
         server.enqueue(okJson(Map.of("account_name", "Acme", "primary_color", "aabbcc",
                 "logo", "https://example.test/logo")));
-        server.enqueue(new MockResponse().setBody(new okio.Buffer().writeUtf8("image"))
+        server.enqueue(new MockResponse().setBody("image")
                 .setHeader("Content-Type", "image/png"));
         server.enqueue(new MockResponse().setBody("{\"status\":200,\"message\":\"\"}")
                 .setHeader("Content-Type", "application/json"));
         server.enqueue(new MockResponse().setBody("{\"status\":200,\"message\":\"\"}")
                 .setHeader("Content-Type", "application/json"));
-        server.enqueue(okJson(List.of(Map.of("period", "2026-08", "documents_uploaded", 3))));
+        server.enqueue(okJson(List.of(Map.ofEntries(
+                Map.entry("period", "2026-08"),
+                Map.entry("documents_uploaded", 3),
+                Map.entry("signature_requests_notification_email", 4),
+                Map.entry("signature_requests_notification_whatsapp", 5),
+                Map.entry("signature_requests_notification_bypass", 6),
+                Map.entry("signature_requests_verification_email", 7),
+                Map.entry("signature_requests_verification_whatsapp", 8),
+                Map.entry("signature_requests_verification_bypass", 9),
+                Map.entry("signature_requests_verification_digital_certificate", 10)))));
         server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}")
                 .setHeader("Content-Type", "application/json"));
 
@@ -94,7 +103,21 @@ class AccountResourceTest {
         assertThat(resource.downloadLogo()).isEqualTo("image".getBytes());
         resource.uploadLogo(new byte[] {(byte) 0x89, 0x50}, "logo.png");
         resource.deleteLogo();
-        assertThat(resource.stats(Map.of("granularity", "monthly"))).hasSize(1);
+        var stats = resource.stats(Map.of("granularity", "monthly"));
+        assertThat(stats).hasSize(1);
+        assertThat(stats.getFirst().getSignatureRequestsNotificationEmail()).isEqualTo(4);
+        assertThat(stats.getFirst().getSignatureRequestsNotificationWhatsapp()).isEqualTo(5);
+        assertThat(stats.getFirst().getSignatureRequestsNotificationBypass()).isEqualTo(6);
+        assertThat(stats.getFirst().getSignatureRequestsVerificationEmail()).isEqualTo(7);
+        assertThat(stats.getFirst().getSignatureRequestsVerificationWhatsapp()).isEqualTo(8);
+        assertThat(stats.getFirst().getSignatureRequestsVerificationBypass()).isEqualTo(9);
+        assertThat(stats.getFirst().getSignatureRequestsVerificationDigitalCertificate()).isEqualTo(10);
+        assertThat(stats.getFirst().getSignatureRequestsEmail()).isEqualTo(4);
+        assertThat(stats.getFirst().getSignatureRequestsWhatsapp()).isEqualTo(5);
+        assertThat(MAPPER.writeValueAsString(stats.getFirst()))
+                .contains("\"signature_requests_notification_email\":4")
+                .doesNotContain("\"signatureRequestsEmail\"", "\"signatureRequestsWhatsapp\"",
+                        "\"signature_requests_email\"");
         resource.delete(false);
 
         server.takeRequest();
@@ -108,6 +131,18 @@ class AccountResourceTest {
         RecordedRequest delete = server.takeRequest();
         assertThat(delete.getMethod()).isEqualTo("DELETE");
         assertThat(delete.getBody().readUtf8()).isEqualTo("{\"force\":false}");
+    }
+
+    @Test
+    void statsAcceptsConciseNotificationFieldAliases() throws Exception {
+        server.enqueue(okJson(List.of(Map.of(
+                "signature_requests_email", 2,
+                "signature_requests_whatsapp", 3))));
+
+        var stats = resource.stats();
+
+        assertThat(stats.getFirst().getSignatureRequestsNotificationEmail()).isEqualTo(2);
+        assertThat(stats.getFirst().getSignatureRequestsNotificationWhatsapp()).isEqualTo(3);
     }
 
     @Test

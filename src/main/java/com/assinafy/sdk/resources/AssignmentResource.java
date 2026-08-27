@@ -209,15 +209,13 @@ public final class AssignmentResource extends BaseResource {
 
     /**
      * {@code POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost} —
-     * estimate the credit cost of resending a request to a signer. The live response is the compact
-     * {@link ResendCostEstimate} shape ({@code total}, {@code breakdown}, {@code credit_balance},
-     * {@code has_sufficient_credits}) — note this differs from the full {@link CostEstimate} the OpenAPI spec
-     * references for this route; the SDK follows the live behavior.
+     * estimate the credit cost of resending a request to a signer. {@link ResendCostEstimate} exposes the
+     * complete cost fields and the compact {@code total}/{@code has_sufficient_credits} aliases.
      *
      * @param documentId required document identifier
      * @param assignmentId required assignment identifier
      * @param signerId required signer identifier
-     * @return compact resend credit estimate
+     * @return resend credit estimate
      */
     public ResendCostEstimate estimateResendCost(String documentId, String assignmentId, String signerId) {
         String docId = requireId(documentId, "Document ID");
@@ -250,7 +248,7 @@ public final class AssignmentResource extends BaseResource {
         return Map.of("signer-access-code", signerAccessCode);
     }
 
-    private static Map<String, Object> buildPayload(CreateAssignmentPayload payload, boolean allowSignersWithoutId) {
+    private static Map<String, Object> buildPayload(CreateAssignmentPayload payload, boolean estimate) {
         if (payload == null) {
             throw new ValidationException("Assignment payload is required");
         }
@@ -264,20 +262,20 @@ public final class AssignmentResource extends BaseResource {
         }
 
         List<SignerRef> signerRefs = payload.resolveSignerRefs();
-        boolean collectEstimate = allowSignersWithoutId && "collect".equals(method);
+        boolean collectEstimate = estimate && "collect".equals(method);
         if (signerRefs.isEmpty() && !collectEstimate) {
             throw new ValidationException("At least one signer is required");
         }
 
         List<Map<String, Object>> normalisedSigners = new ArrayList<>();
         for (SignerRef ref : signerRefs) {
-            normalisedSigners.add(normaliseSignerRef(ref, allowSignersWithoutId));
+            normalisedSigners.add(normaliseSignerRef(ref, estimate));
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("method", method);
         if (!normalisedSigners.isEmpty()) body.put("signers", normalisedSigners);
-        if (!allowSignersWithoutId) {
+        if (!estimate) {
             if (payload.getMessage() != null) body.put("message", payload.getMessage());
             if (payload.getExpiresAt() != null) body.put("expires_at", payload.getExpiresAt());
             if (payload.getCopyReceivers() != null && !payload.getCopyReceivers().isEmpty()) {

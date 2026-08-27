@@ -6,16 +6,17 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * Cost breakdown for an assignment (or a document-from-template) plus the account's current balances.
+ * Cost breakdown for an assignment, resend, or document-from-template operation plus current balances.
  *
  * <p>Returned by {@code POST /documents/{id}/assignments/estimate-cost} and
- * {@code POST /accounts/{id}/templates/{id}/documents/estimate-cost}. The two decision fields to inspect
+ * {@code POST /accounts/{id}/templates/{id}/documents/estimate-cost}. Resend estimates are exposed through
+ * {@link ResendCostEstimate}. The two decision fields to inspect
  * before creating an assignment are {@link #getHasSufficientResources()} and {@link #getBlockingReason()}:
  * when resources are insufficient, {@code blocking_reason} is one of {@code PendingPayment},
  * {@code InsufficientDocuments}, or {@code InsufficientCredits}.</p>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public final class CostEstimate {
+public class CostEstimate {
 
     /** Creates an empty response model for deserialization. */
     public CostEstimate() {}

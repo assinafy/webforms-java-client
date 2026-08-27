@@ -1,6 +1,5 @@
 package com.assinafy.sdk.resources;
 
-import com.assinafy.sdk.exceptions.ApiException;
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.CostEstimate;
 import com.assinafy.sdk.models.CreateDocumentFromTemplateOptions;
@@ -24,6 +23,7 @@ import java.io.File;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -111,7 +111,7 @@ public final class DocumentResource extends BaseResource {
         if (!file.canRead()) {
             throw new ValidationException("File is not readable");
         }
-        if (!file.getName().toLowerCase().endsWith(".pdf")) {
+        if (!file.getName().toLowerCase(Locale.ROOT).endsWith(".pdf")) {
             throw new ValidationException("Only PDF files are supported");
         }
         if (file.length() > MAX_UPLOAD_BYTES) {
@@ -126,7 +126,7 @@ public final class DocumentResource extends BaseResource {
         if (fileName == null || fileName.isBlank()) {
             throw new ValidationException("File name is required");
         }
-        if (!fileName.toLowerCase().endsWith(".pdf")) {
+        if (!fileName.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
             throw new ValidationException("Only PDF files are supported");
         }
         if (bytes.length > MAX_UPLOAD_BYTES) {
@@ -268,17 +268,13 @@ public final class DocumentResource extends BaseResource {
         long maxWaitNanos = TimeUnit.MILLISECONDS.toNanos(maxWaitMs);
 
         while (System.nanoTime() - start < maxWaitNanos) {
-            try {
-                DocumentDetails d = details(id);
-                String status = d.getStatus() != null ? d.getStatus() : "unknown";
-                if (READY_STATUSES.contains(status)) {
-                    return d;
-                }
-                if (FAILED_STATUSES.contains(status)) {
-                    throw new ValidationException("Document processing failed with status: " + status);
-                }
-            } catch (ValidationException | ApiException e) {
-                throw e;
+            DocumentDetails d = details(id);
+            String status = d != null && d.getStatus() != null ? d.getStatus() : "unknown";
+            if (READY_STATUSES.contains(status)) {
+                return d;
+            }
+            if (FAILED_STATUSES.contains(status)) {
+                throw new ValidationException("Document processing failed with status: " + status);
             }
             try {
                 long remainingNanos = maxWaitNanos - (System.nanoTime() - start);
@@ -518,11 +514,8 @@ public final class DocumentResource extends BaseResource {
      * signer. Unauthenticated endpoint used by signer landing pages.
      *
      * <p>The request body is {@code {"recipient": ..., "channel": ...}}, where {@code channel} is {@code "email"}
-     * or {@code "whatsapp"} (any other value yields a {@code "Canal inválido"} error) and {@code recipient} is
-     * the target email/phone. The target document must be in {@code pending_signature} status. (The OpenAPI spec
-     * documents an {@code {"email": ...}} body, but the live API rejects that and requires
-     * {@code recipient}+{@code channel}; the SDK follows the live behavior.) The success envelope carries no
-     * data, so this returns {@code void}.</p>
+     * or {@code "whatsapp"} and {@code recipient} is the target email/phone. The target document must be in
+     * {@code pending_signature} status. The success envelope carries no data.</p>
      *
      * @param documentId required pending-signature document identifier
      * @param recipient required email address or phone number
@@ -533,8 +526,8 @@ public final class DocumentResource extends BaseResource {
         if (recipient == null || recipient.isBlank()) {
             throw new ValidationException("Recipient is required");
         }
-        if (channel == null || channel.isBlank()) {
-            throw new ValidationException("Channel is required");
+        if (!"email".equals(channel) && !"whatsapp".equals(channel)) {
+            throw new ValidationException("Channel must be 'email' or 'whatsapp'");
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("recipient", recipient);
@@ -571,14 +564,14 @@ public final class DocumentResource extends BaseResource {
      * {@code PUT /accounts/{account_id}/documents/{document_id}/tags}.
      *
      * @param documentId required document identifier
-     * @param tags replacement tag names; an empty list removes all tags
+     * @param tags replacement tag values or IDs; an empty list removes all tags
      * @param accountId account override, or {@code null} for the client default
      * @return attached tags after replacement
      */
     public List<Tag> replaceTags(String documentId, List<String> tags, String accountId) {
         String docId = requireId(documentId, "Document ID");
         String accId = accountId(accountId);
-        validateTagNames(tags, true);
+        validateTags(tags, true);
         List<Tag> result = httpPut("/accounts/" + accId + "/documents/" + docId + "/tags",
                 Map.of("tags", tags), new TypeReference<List<Tag>>() {}, Map.of());
         return result != null ? result : Collections.emptyList();
@@ -588,7 +581,7 @@ public final class DocumentResource extends BaseResource {
      * Returns attached tags after replacement in the default account.
      *
      * @param documentId required document identifier
-     * @param tags replacement tag names; an empty list removes all tags
+     * @param tags replacement tag values or IDs; an empty list removes all tags
      * @return attached tags after replacement in the default account
      */
     public List<Tag> replaceTags(String documentId, List<String> tags) {
@@ -599,14 +592,14 @@ public final class DocumentResource extends BaseResource {
      * {@code POST /accounts/{account_id}/documents/{document_id}/tags}.
      *
      * @param documentId required document identifier
-     * @param tags one or more tag names to append
+     * @param tags one or more tag values or IDs to append
      * @param accountId account override, or {@code null} for the client default
      * @return attached tags after append
      */
     public List<Tag> appendTags(String documentId, List<String> tags, String accountId) {
         String docId = requireId(documentId, "Document ID");
         String accId = accountId(accountId);
-        validateTagNames(tags, false);
+        validateTags(tags, false);
         List<Tag> result = httpPost("/accounts/" + accId + "/documents/" + docId + "/tags",
                 Map.of("tags", tags), new TypeReference<List<Tag>>() {}, Map.of());
         return result != null ? result : Collections.emptyList();
@@ -616,7 +609,7 @@ public final class DocumentResource extends BaseResource {
      * Returns attached tags after append in the default account.
      *
      * @param documentId required document identifier
-     * @param tags one or more tag names to append
+     * @param tags one or more tag values or IDs to append
      * @return attached tags after append in the default account
      */
     public List<Tag> appendTags(String documentId, List<String> tags) {
@@ -662,6 +655,7 @@ public final class DocumentResource extends BaseResource {
      */
     public boolean isFullySigned(String documentId) {
         DocumentDetails d = details(documentId);
+        if (d == null) return false;
         if ("certificated".equals(d.getStatus())) return true;
         if (d.getAssignment() != null && d.getAssignment().getSummary() != null) {
             int total = d.getAssignment().getSummary().getSignerCount();
@@ -685,7 +679,7 @@ public final class DocumentResource extends BaseResource {
         DocumentDetails d = details(documentId);
         int total = 0;
         int signed = 0;
-        if (d.getAssignment() != null) {
+        if (d != null && d.getAssignment() != null) {
             if (d.getAssignment().getSummary() != null) {
                 total = d.getAssignment().getSummary().getSignerCount();
                 signed = d.getAssignment().getSummary().getCompletedCount();
@@ -717,16 +711,16 @@ public final class DocumentResource extends BaseResource {
         }
     }
 
-    private void validateTagNames(List<String> tags, boolean allowEmpty) {
+    private void validateTags(List<String> tags, boolean allowEmpty) {
         if (tags == null) {
-            throw new ValidationException("Tag names are required");
+            throw new ValidationException("Tag values are required");
         }
         if (!allowEmpty && tags.isEmpty()) {
-            throw new ValidationException("At least one tag name is required");
+            throw new ValidationException("At least one tag value is required");
         }
         for (String tag : tags) {
             if (tag == null || tag.isBlank()) {
-                throw new ValidationException("Tag names cannot be blank");
+                throw new ValidationException("Tag values cannot be blank");
             }
         }
     }

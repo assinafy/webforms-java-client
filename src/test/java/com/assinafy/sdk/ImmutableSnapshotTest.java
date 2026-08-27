@@ -2,6 +2,7 @@ package com.assinafy.sdk;
 
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.PaginatedResult;
+import com.assinafy.sdk.models.UploadAndRequestSignaturesResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -39,5 +40,17 @@ class ImmutableSnapshotTest {
         assertThatThrownBy(() -> page.getData().add("third"))
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThat(new PaginatedResult<String>(null, null).getData()).isEmpty();
+    }
+
+    @Test
+    void workflowResultSnapshotsAndProtectsSignerIds() {
+        List<String> source = new ArrayList<>(List.of("signer-1"));
+
+        UploadAndRequestSignaturesResult result = new UploadAndRequestSignaturesResult(null, null, source);
+        source.set(0, "changed");
+
+        assertThat(result.getSignerIds()).containsExactly("signer-1");
+        assertThatThrownBy(() -> result.getSignerIds().add("signer-2"))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 }

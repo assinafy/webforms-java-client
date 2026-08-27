@@ -3,7 +3,7 @@
 ## Requirements
 
 - Java 25 or later (the artifact is compiled to Java 25 bytecode)
-- Maven 3.9+; use a Gradle release compatible with JDK 25 when building with Gradle
+- Maven 3.9.16 or newer 3.x (the wrapper pins 3.9.16); use a Gradle release that supports JDK 25
 
 The artifact runs on Java 25 and every later compatible JDK. The included wrapper pins Maven 3.9.16, and CI
 compiles, tests, and packages the release artifacts on the current JDK 25 LTS.
@@ -16,21 +16,25 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.0.2</version>
+    <version>2.1.0</version>
 </dependency>
 ```
 
 Then run:
 
 ```bash
-mvn install
+mvn verify
 ```
+
+For an application consuming the released package, `mvn verify` or `mvn package` resolves the dependency as
+part of the normal build. For SDK development, prefer the checked-in Maven Wrapper so every environment uses
+the repository-pinned Maven release: `./mvnw verify`.
 
 ## Gradle
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:2.0.2'
+    implementation 'com.assinafy:webforms-java-client-sdk:2.1.0'
 }
 ```
 
@@ -38,7 +42,7 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:2.0.2")
+    implementation("com.assinafy:webforms-java-client-sdk:2.1.0")
 }
 ```
 
@@ -98,13 +102,24 @@ export ASSINAFY_ACCOUNT_ID=your_account_id
 ```
 
 The SDK does not load `.env` files itself; pass values explicitly through `AssinafyClientOptions`. Do not
-commit local environment or Maven settings files containing credentials.
+commit local environment or Maven settings files containing credentials. In CI, store both variables as
+masked secrets and pass them only to jobs that need sandbox access. Production credentials must never be used
+by test jobs.
+
+```java
+AssinafyClient client = new AssinafyClient(new AssinafyClientOptions()
+    .setApiKey(System.getenv("ASSINAFY_API_KEY"))
+    .setAccountId(System.getenv("ASSINAFY_ACCOUNT_ID")));
+```
 
 ## Transitive Dependencies
 
 The SDK pulls in:
 
-| Dependency                       | Version   | Purpose              |
-|----------------------------------|-----------|----------------------|
-| `com.squareup.okhttp3:okhttp-jvm` | 5.5.0   | HTTP client          |
-| `com.fasterxml.jackson.core:jackson-databind` | 2.22.2 | JSON serialization |
+| Dependency | Version | Purpose |
+|---|---:|---|
+| `com.squareup.okhttp3:okhttp-jvm` | 5.5.0 | HTTP client |
+| `com.fasterxml.jackson.core:jackson-databind` | 2.22.2 | JSON data binding |
+| `com.fasterxml.jackson.core:jackson-core` | 2.22.2 | JSON streaming |
+| `com.fasterxml.jackson.core:jackson-annotations` | 2.22 | JSON model annotations |
+| `com.squareup.okio:okio-jvm` | 3.18.1 | OkHttp I/O runtime (transitive) |

@@ -44,6 +44,14 @@ class AuthenticationResourceTest {
     }
 
     @Test
+    void loginRejectsInvalidEmailWithoutSendingRequest() {
+        assertThatThrownBy(() -> resource.login("not-an-email", "password"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("email");
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
     void login_postsCredentialsAndParsesSession() throws Exception {
         server.enqueue(okJson(Map.of(
                 "access_token", "jwt",

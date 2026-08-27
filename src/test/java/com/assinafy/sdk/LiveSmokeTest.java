@@ -30,6 +30,9 @@ import com.assinafy.sdk.models.DisplaySettings;
 import com.assinafy.sdk.models.UpdateFieldPayload;
 import com.assinafy.sdk.models.UpdateSignerPayload;
 import com.assinafy.sdk.models.UpdateTagPayload;
+import com.assinafy.sdk.models.UploadAndRequestSignaturesOptions;
+import com.assinafy.sdk.models.UploadAndRequestSignaturesResult;
+import com.assinafy.sdk.models.UploadAndRequestSignaturesSigner;
 import com.assinafy.sdk.models.WebhookEventTypeInfo;
 import com.assinafy.sdk.models.WebhookSubscription;
 import com.assinafy.sdk.exceptions.ApiException;
@@ -37,6 +40,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -73,6 +77,13 @@ class LiveSmokeTest {
     private static final String API_KEY = System.getenv("ASSINAFY_API_KEY");
     private static final String ACCOUNT_ID = System.getenv("ASSINAFY_ACCOUNT_ID");
     private static final String DEFAULT_SANDBOX_BASE_URL = "https://sandbox.assinafy.com.br/v1";
+    private static final String INSUFFICIENT_RESOURCES_MESSAGE =
+            "A conta não possui recursos suficientes. Você precisa de documentos ou créditos para continuar.";
+
+    @BeforeEach
+    void paceSandboxRequests() throws InterruptedException {
+        Thread.sleep(1_000);
+    }
 
     private static AssinafyClient client() {
         String baseUrl = System.getenv().getOrDefault("ASSINAFY_BASE_URL", DEFAULT_SANDBOX_BASE_URL);
@@ -327,11 +338,17 @@ class LiveSmokeTest {
         DocumentDetails doc = client.documents.upload(samplePdf(), "sdk-smoke-exp-" + shortId() + ".pdf");
         try {
             client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
-            Assignment assignment = client.assignments.create(doc.getId(), new CreateAssignmentPayload()
-                    .setMethod("virtual")
-                    .setSigners(List.of(new SignerRef().setId(signer.getId())
-                            .setVerificationMethod("Email").setNotificationMethods(List.of("Email"))))
-                    .setExpiresAt("2027-12-31T23:59:00Z"));
+            Assignment assignment;
+            try {
+                assignment = client.assignments.create(doc.getId(), new CreateAssignmentPayload()
+                        .setMethod("virtual")
+                        .setSigners(List.of(new SignerRef().setId(signer.getId())
+                                .setVerificationMethod("Email").setNotificationMethods(List.of("Email"))))
+                        .setExpiresAt("2027-12-31T23:59:00Z"));
+            } catch (ApiException e) {
+                skipIfInsufficientResources(e);
+                throw e;
+            }
             assertThat(assignment.getId()).isNotBlank();
 
             Assignment reset = client.assignments.resetExpiration(doc.getId(), assignment.getId(),
@@ -395,7 +412,7 @@ class LiveSmokeTest {
     @Order(20)
     @DisplayName("Public document verify returns a typed result (invalid hash → isValid false)")
     void verifyInvalidHash() {
-        DocumentVerification result = client().documents.verify("ZZAUDITDUMMYHASH000");
+        DocumentVerification result = client().documents.verify("ZZSDKDUMMYHASH000");
         assertThat(result).isNotNull();
         assertThat(result.getIsValid()).isFalse();
         assertThat(result.getMessage()).isNotBlank();
@@ -434,10 +451,14 @@ class LiveSmokeTest {
     void approvedTestEmails() {
         AssinafyClient client = client();
         for (String email : List.of(testEmail(), secondTestEmail())) {
-            Signer signer = client.signers.create(new CreateSignerPayload("Assinafy SDK Test", email));
+            Signer signer = client.signers.findOrCreate(new CreateSignerPayload("Assinafy SDK Test", email));
             assertThat(signer.getId()).isNotBlank();
             assertThat(signer.getEmail()).isEqualToIgnoringCase(email);
         }
+        assertThatThrownBy(() -> client.signers.create(
+                new CreateSignerPayload("Assinafy SDK Duplicate Test", testEmail())))
+                .isInstanceOfSatisfying(ApiException.class,
+                        e -> assertThat(e.getStatusCode()).isIn(400, 409));
     }
 
     @Test
@@ -505,10 +526,12 @@ class LiveSmokeTest {
     @DisplayName("Document tag replace, append, list, detach, and cleanup round-trip")
     void documentTagRoundTrip() throws Exception {
         AssinafyClient client = client();
-        Tag first = client.tags.create(new CreateTagPayload("sdk-doc-tag-a-" + shortId()));
-        Tag second = client.tags.create(new CreateTagPayload("sdk-doc-tag-b-" + shortId()));
+        Tag first = null;
+        Tag second = null;
         DocumentDetails doc = null;
         try {
+            first = client.tags.create(new CreateTagPayload("sdk-doc-tag-a-" + shortId()));
+            second = client.tags.create(new CreateTagPayload("sdk-doc-tag-b-" + shortId()));
             doc = client.documents.upload(samplePdf(), "sdk-smoke-tags-" + shortId() + ".pdf");
             client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
 
@@ -521,9 +544,15 @@ class LiveSmokeTest {
             assertThat(client.documents.detachTag(doc.getId(), first.getId())).isTrue();
             assertThat(client.documents.replaceTags(doc.getId(), List.of())).isEmpty();
         } finally {
-            if (doc != null) client.documents.delete(doc.getId());
-            assertThat(client.tags.delete(first.getId(), true)).isTrue();
-            assertThat(client.tags.delete(second.getId(), true)).isTrue();
+            try {
+                if (doc != null) client.documents.delete(doc.getId());
+            } finally {
+                try {
+                    if (first != null) assertThat(client.tags.delete(first.getId(), true)).isTrue();
+                } finally {
+                    if (second != null) assertThat(client.tags.delete(second.getId(), true)).isTrue();
+                }
+            }
         }
     }
 
@@ -550,8 +579,14 @@ class LiveSmokeTest {
                 .map(role -> new TemplateSigner(role.getId(), signer.getId())
                         .setVerificationMethod("Email").setNotificationMethods(List.of("Email")))
                 .toList();
-        DocumentDetails created = client.documents.createFromTemplate(template.getId(), createSigners,
-                new CreateDocumentFromTemplateOptions().setName("sdk-template-" + shortId() + ".pdf"));
+        DocumentDetails created;
+        try {
+            created = client.documents.createFromTemplate(template.getId(), createSigners,
+                    new CreateDocumentFromTemplateOptions().setName("sdk-template-" + shortId() + ".pdf"));
+        } catch (ApiException e) {
+            skipIfInsufficientResources(e);
+            throw e;
+        }
         try {
             assertThat(client.documents.waitUntilReady(created.getId(), 60_000, 2_000).getId())
                     .isEqualTo(created.getId());
@@ -586,7 +621,14 @@ class LiveSmokeTest {
     @DisplayName("Password-reset request returns the approved test email")
     void passwordResetRequest() {
         String email = secondTestEmail();
-        assertThat(client().auth.requestPasswordReset(email).getEmail()).isEqualToIgnoringCase(email);
+        try {
+            assertThat(client().auth.requestPasswordReset(email).getEmail()).isEqualToIgnoringCase(email);
+        } catch (ApiException e) {
+            if (e.getStatusCode() == 404 && "Usuário não localizado.".equals(e.getMessage())) {
+                Assumptions.assumeTrue(false, "The approved password-reset address is not a sandbox user");
+            }
+            throw e;
+        }
     }
 
     @Test
@@ -615,10 +657,16 @@ class LiveSmokeTest {
                             .setCollectEntries(List.of(entry)));
             assertThat(estimate.getHasSufficientResources()).isNotNull();
 
-            Assignment created = client.assignments.create(doc.getId(), new CreateAssignmentPayload()
-                    .setMethod("collect")
-                    .setSignerStrings(signer.getId())
-                    .setCollectEntries(List.of(entry)));
+            Assignment created;
+            try {
+                created = client.assignments.create(doc.getId(), new CreateAssignmentPayload()
+                        .setMethod("collect")
+                        .setSignerStrings(signer.getId())
+                        .setCollectEntries(List.of(entry)));
+            } catch (ApiException e) {
+                skipIfInsufficientResources(e);
+                throw e;
+            }
             assertThat(created.getId()).isNotBlank();
         } finally {
             if (accountId != null) client.accounts.delete(false, accountId);
@@ -683,8 +731,49 @@ class LiveSmokeTest {
         }
     }
 
+    @Test
+    @Order(34)
+    @EnabledIfEnvironmentVariable(named = "ASSINAFY_LIVE_EMAILS", matches = "(?i)true")
+    @DisplayName("High-level upload-and-request workflow creates an assignment and cleans up")
+    void uploadAndRequestSignaturesRoundTrip() throws Exception {
+        AssinafyClient client = client();
+        String email = testEmail();
+        Signer signer = client.signers.findByEmail(email);
+        boolean createdSigner = signer == null;
+        if (createdSigner) {
+            signer = client.signers.create(new CreateSignerPayload("SDK Workflow Signer", email));
+        }
+        UploadAndRequestSignaturesResult result = null;
+        try {
+            try {
+                result = client.uploadAndRequestSignatures(new UploadAndRequestSignaturesOptions(
+                        samplePdf(), "sdk-workflow-" + shortId() + ".pdf",
+                        List.of(new UploadAndRequestSignaturesSigner("SDK Workflow Signer", email))));
+            } catch (ApiException e) {
+                skipIfInsufficientResources(e);
+                throw e;
+            }
+
+            assertThat(result.getDocument().getId()).isNotBlank();
+            assertThat(result.getAssignment().getId()).isNotBlank();
+            assertThat(result.getSignerIds()).containsExactly(signer.getId());
+        } finally {
+            try {
+                if (result != null) client.documents.delete(result.getDocument().getId());
+            } finally {
+                if (createdSigner) client.signers.delete(signer.getId());
+            }
+        }
+    }
+
     private static Signer ensureTestSigner(AssinafyClient client) {
-        return client.signers.create(new CreateSignerPayload("SDK Smoke Signer", testEmail()));
+        return client.signers.findOrCreate(new CreateSignerPayload("SDK Smoke Signer", testEmail()));
+    }
+
+    private static void skipIfInsufficientResources(ApiException e) {
+        if (e.getStatusCode() == 400 && INSUFFICIENT_RESOURCES_MESSAGE.equals(e.getMessage())) {
+            Assumptions.assumeTrue(false, "The sandbox account has insufficient documents or credits");
+        }
     }
 
     private static String testEmail() {

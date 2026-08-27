@@ -84,8 +84,12 @@ client.accounts.delete(false, created.getId());
 
 Account create/update sends `{"name": string?, "notification_sender_type": "User"|"Account"?}`. Account and
 user stats return `DocumentStatsRow[]`; each row contains `period`, `documents_uploaded`, `documents_sent`,
-`signature_requests`, the `_email`, `_whatsapp`, `_viewed`, and `_completed` request counts, and
-`documents_certified`. Daily stats require a `month` in `YYYY-MM` form.
+`signature_requests`, `signature_requests_notification_email`,
+`signature_requests_notification_whatsapp`, `signature_requests_notification_bypass`,
+`signature_requests_verification_email`, `signature_requests_verification_whatsapp`,
+`signature_requests_verification_bypass`, `signature_requests_verification_digital_certificate`,
+`signature_requests_viewed`, `signature_requests_completed`, and `documents_certified`. Daily stats require a
+`month` in `YYYY-MM` form.
 
 Notification preferences use these nine case-sensitive boolean JSON keys: `DocumentCompleted`,
 `SignerDeclined`, `DocumentCancelled`, `DocumentAboutToExpire`, `DocumentExpired`,
@@ -205,11 +209,12 @@ Response `data` (once processed — note the populated `pages` and `assignment`)
 
 ```java
 PaginatedResult<DocumentListItem> page = client.documents.list(
-    Map.of("page", "1", "per_page", "20", "sort", "-updated_at"));
+    Map.of("page", "1", "per_page", "20", "sort", "updated_at"));
 System.out.println("Total: " + page.getMeta().getTotal());   // from X-Pagination-Total-Count header
 ```
 
-Supported filters: `status`, `method`, `search`, `tags`, `sort`, plus `page`/`per-page`.
+Supported filters: `status`, `method`, `search`, comma-separated tag IDs in `tags` (all IDs must match),
+`sort=name|updated_at`, plus `page`/`per-page`.
 
 ### Search — `GET /accounts/{account_id}/documents/search`
 
@@ -298,14 +303,17 @@ client.documents.sendToken(documentId, "signer@example.com", "email");
 // Request: { "recipient": "signer@example.com", "channel": "email" }
 ```
 
+`channel` is `email` or `whatsapp`, and `recipient` is the matching address or phone number. The document must
+be in `pending_signature`.
+
 ### Document tags
 
 ```java
 List<Tag> tags = client.documents.listTags(doc.getId());                       // GET .../{id}/tags
-client.documents.appendTags(doc.getId(), List.of("Urgent"));                   // POST .../{id}/tags
-client.documents.replaceTags(doc.getId(), List.of("Contracts", "2026-Q1"));    // PUT  .../{id}/tags
+client.documents.appendTags(doc.getId(), List.of(urgentTagId));                // POST .../{id}/tags
+client.documents.replaceTags(doc.getId(), List.of(contractTagId, quarterTagId));// PUT  .../{id}/tags
 boolean detached = client.documents.detachTag(doc.getId(), tagId);             // {"detached":true}
-// append/replace request body: { "tags": ["Urgent"] }; response data: [ { "id": "...", "name": "Urgent" } ]
+// append/replace request body: { "tags": ["<tag-id>"] }; response data: [ { "id": "...", "name": "Urgent" } ]
 ```
 
 ### Signing progress (client-side helpers)
@@ -315,13 +323,14 @@ boolean done = client.documents.isFullySigned(doc.getId());
 SigningProgress progress = client.documents.getSigningProgress(doc.getId());
 System.out.printf("Signed: %d/%d (%.1f%%)%n",
     progress.getSigned(), progress.getTotal(), progress.getPercentage());
-// Final cleanup after every later operation that uses doc: client.documents.delete(doc.getId());
+// Delete only after documents.statuses() marks the current status deletable:
+// client.documents.delete(doc.getId());
 ```
 
 ## Signers
 
 ```java
-// Create — POST /accounts/{account_id}/signers  (idempotent by email; see note)
+// Strict create — POST /accounts/{account_id}/signers
 Signer signer = client.signers.create(
     new CreateSignerPayload("John Doe", "john@example.com").setWhatsappPhoneNumber("+5548999990000"));
 ```
@@ -345,11 +354,12 @@ Response `data`:
 }
 ```
 
-> **Idempotent create.** When an email is supplied, `create` looks the signer up first and returns the
-> existing record without re-creating it; it does **not** update changed fields on an existing signer — use
-> `update` for that.
+`create` always sends the POST and reports duplicate-email validation. Use `findOrCreate` when the application
+deliberately wants exact-email reuse; it returns the existing record without updating changed fields.
 
 ```java
+Signer reusable = client.signers.findOrCreate(
+    new CreateSignerPayload("John Doe", "john@example.com"));
 Signer existing = client.signers.findByEmail("john@example.com");            // GET .../signers?search=...
 Signer fetched  = client.signers.get(signer.getId());                        // GET .../signers/{id}
 PaginatedResult<Signer> list = client.signers.list(Map.of("search", "john"));// GET .../signers
@@ -409,8 +419,10 @@ Response `data` (abridged — note per-signer `step`, `notified`, `notification_
 ### List — `GET /assignments`
 
 ```java
-// Not document-scoped: the SDK sends the account context as the camelCase `accountId` query parameter.
-PaginatedResult<Assignment> all = client.assignments.list(Map.of("per_page", "20"));
+// Not document-scoped: the account context travels as the camelCase `accountId` query parameter,
+// which the SDK supplies from the client default or the explicit override.
+PaginatedResult<Assignment> all = client.assignments.list(Map.of("per-page", "20"));
+PaginatedResult<Assignment> other = client.assignments.list(Map.of("per-page", "20"), "other-account-id");
 ```
 
 ### Estimate cost — `POST /documents/{documentId}/assignments/estimate-cost`
@@ -459,17 +471,19 @@ Response `data` (typed as `CostEstimate`):
 ```java
 // PUT /documents/{doc}/assignments/{asg}/reset-expiration  — { "expires_at": "..." }
 client.assignments.resetExpiration(doc.getId(), assignment.getId(), "2027-06-30T00:00:00Z");
-// Pass null (or use clearExpiration) to remove the expiration: { "expires_at": null }
+// SDK extension: pass null (or use clearExpiration) to send { "expires_at": null }.
 client.assignments.clearExpiration(doc.getId(), assignment.getId());
 
 // PUT .../assignments/{asg}/signers/{signerId}/resend  -> ResendResult { is_sent, document_id, signer_id }
 ResendResult resent = client.assignments.resendNotification(doc.getId(), assignment.getId(), signer1.getId());
 
 // POST .../assignments/{asg}/signers/{signerId}/estimate-resend-cost
-// Note: live returns this compact shape (not the full CostEstimate the spec references).
 ResendCostEstimate resendCost = client.assignments.estimateResendCost(doc.getId(), assignment.getId(), signer1.getId());
-// Response data: { "total": 0, "breakdown": [ { "code": "NotificationEmailResend", "name": "Email Notification Resend", "cost": 0 } ],
+// Documented response: CostEstimate fields such as total_credits and has_sufficient_resources.
+// Also accepted: { "total": 0, "breakdown": [ { "code": "NotificationEmailResend",
+//                    "name": "Email Notification Resend", "cost": 0 } ],
 //                  "credit_balance": 0, "has_sufficient_credits": true }
+// getTotal() and getHasSufficientCredits() read either accepted form.
 
 // GET .../assignments/{asg}/whatsapp-notifications
 List<WhatsappNotification> notifications = client.assignments.whatsappNotifications(doc.getId(), assignment.getId());
@@ -630,8 +644,9 @@ Signer current = signingView.getCurrentSigner();   // who the access code resolv
 Signer self = client.signerSelf.getSelf(signerAccessCode);            // GET /signers/self
 boolean canReuse = Boolean.TRUE.equals(self.getSignatureReusable());  // is_signature_reusable
 // The access code is sent as the ?signer-access-code query parameter for these two calls:
-client.signerSelf.acceptTerms(signerAccessCode);                      // PUT /signers/accept-terms
-client.signerSelf.verifyEmail("123456", signerAccessCode);            // POST /verify
+AcceptTermsResponse terms = client.signerSelf.acceptTerms(signerAccessCode); // may be null when data is absent
+VerifyEmailResponse verified = client.signerSelf.verifyEmail(                // may be null when data is absent
+    "123456", signerAccessCode);
 
 // PUT /documents/{id}/signers/confirm-data — returns the updated Signer
 Signer confirmed = client.signerSelf.confirmSignerData(documentId, signerAccessCode,
@@ -639,7 +654,7 @@ Signer confirmed = client.signerSelf.confirmSignerData(documentId, signerAccessC
         .setFullName("John Doe").setEmail("signer@example.com").setGovernmentId("15774136604"));
 // Request: { "full_name": "John Doe", "email": "signer@example.com", "government_id": "15774136604" }
 
-// POST /signature — upload (PNG is portable; JPEG is a compatibility path); returns void, throws on error envelope
+// POST /signature — documented PNG upload; the SDK also detects JPEG bytes.
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature", true); // ?reuse=true
 byte[] saved = client.signerSelf.downloadSignature(signerAccessCode, "signature"); // GET /signature/{type}
@@ -662,8 +677,8 @@ PaginatedResult<DocumentDetails> found = client.signerSelf.searchDocuments(signe
 // GET /signers/{id}/documents/{docId}/download/{artifact}
 // This artifact route is public in the current API contract.
 byte[] copy = client.signerSelf.downloadDocument(signerId, documentId, "pades");
-// Compatibility overload: sends signer-access-code when integrating with an older deployment.
-byte[] legacyCopy = client.signerSelf.downloadDocument(
+// Optional overload sends signer-access-code with the artifact request.
+byte[] authorizedCopy = client.signerSelf.downloadDocument(
     signerId, documentId, "original", signerAccessCode);
 
 // PUT /signers/documents/sign-multiple    — { "document_ids": ["..."] }
@@ -691,8 +706,11 @@ Assignment assignment = result.getAssignment();    // created virtual assignment
 List<String> signerIds = result.getSignerIds();
 ```
 
-This helper uploads the file, waits until it is processable, creates (idempotent-by-email) signers, and
-creates a `virtual` assignment in one call.
+This helper uploads the file, waits until it is processable, deliberately reuses signers by exact email when
+present, and creates a `virtual` assignment. If a later step fails, it makes a best-effort deletion of the
+uploaded document. Account-scoped signers remain reusable and are never deleted automatically, because another
+workflow may already reference them. Cleanup errors are attached to the original exception as suppressed
+exceptions.
 
 ## Error Handling
 

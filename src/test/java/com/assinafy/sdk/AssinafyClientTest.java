@@ -49,7 +49,7 @@ class AssinafyClientTest {
     }
 
     @Test
-    void constructor_acceptsLegacyToken() {
+    void constructor_acceptsBearerToken() {
         AssinafyClient client = new AssinafyClient(new AssinafyClientOptions()
                 .setToken("t")
                 .setAccountId("acc"));
@@ -102,6 +102,14 @@ class AssinafyClientTest {
     void defaultBaseUrl_isProductionApi() {
         AssinafyClient client = new AssinafyClient(new AssinafyClientOptions().setApiKey("k"));
         assertThat(client.getBaseUrl()).isEqualTo("https://api.assinafy.com.br/v1");
+    }
+
+    @Test
+    void constructorRejectsNegativeMaxRetries() {
+        assertThatThrownBy(() -> new AssinafyClient(
+                new AssinafyClientOptions().setMaxRetries(-1)))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class)
+                .hasMessageContaining("non-negative");
     }
 
     @Test
@@ -373,6 +381,176 @@ class AssinafyClientTest {
                     .contains("\"method\":\"virtual\"", "\"id\":\"signer-1\"",
                             "\"message\":\"Please sign\"", "\"expires_at\":\"2026-09-01T12:00:00Z\"",
                             "\"copy_receivers\":[\"copy-signer-1\"]");
+        } finally {
+            server.shutdown();
+        }
+    }
+
+    @Test
+    void uploadAndRequestSignaturesKeepsUploadedIdWhenReadinessResponseMismatches() throws Exception {
+        MockWebServer server = new MockWebServer();
+        server.start();
+        try {
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":{\"id\":\"doc-1\",\"status\":\"uploaded\"}}"));
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":{\"id\":\"doc-other\",\"status\":\"metadata_ready\"}}"));
+            server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+            AssinafyClient client = AssinafyClient.create("k", "acc",
+                    opts -> opts.setBaseUrl(server.url("/v1").toString()));
+
+            assertThatThrownBy(() -> client.uploadAndRequestSignatures(
+                    new UploadAndRequestSignaturesOptions("%PDF-1.4".getBytes(), "contract.pdf",
+                            List.of(new UploadAndRequestSignaturesSigner("Jane", "jane@example.com")))))
+                    .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class)
+                    .hasMessageContaining("did not match");
+
+            assertThat(server.takeRequest().getPath()).isEqualTo("/v1/accounts/acc/documents");
+            assertThat(server.takeRequest().getPath()).isEqualTo("/v1/documents/doc-1");
+            RecordedRequest cleanup = server.takeRequest();
+            assertThat(cleanup.getMethod()).isEqualTo("DELETE");
+            assertThat(cleanup.getPath()).isEqualTo("/v1/documents/doc-1");
+            assertThat(server.getRequestCount()).isEqualTo(3);
+        } finally {
+            server.shutdown();
+        }
+    }
+
+    @Test
+    void uploadAndRequestSignaturesCleansDocumentAndPreservesCreatedSignerWhenAssignmentFails() throws Exception {
+        MockWebServer server = new MockWebServer();
+        server.start();
+        try {
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":{\"id\":\"doc-1\",\"status\":\"uploaded\"}}"));
+            server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":{\"id\":\"signer-1\",\"email\":\"jane@example.com\"}}"));
+            server.enqueue(new MockResponse().setResponseCode(500)
+                    .setBody("{\"status\":500,\"message\":\"Assignment failed\"}"));
+            server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+            AssinafyClient client = AssinafyClient.create("k", "acc",
+                    opts -> opts.setBaseUrl(server.url("/v1").toString()));
+
+            assertThatThrownBy(() -> client.uploadAndRequestSignatures(
+                    new UploadAndRequestSignaturesOptions("%PDF-1.4".getBytes(), "contract.pdf",
+                            List.of(new UploadAndRequestSignaturesSigner("Jane", "jane@example.com")))
+                            .setWaitForReady(false)))
+                    .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
+                    .hasMessageContaining("Assignment failed");
+
+            assertThat(server.takeRequest().getPath()).isEqualTo("/v1/accounts/acc/documents");
+            assertThat(server.takeRequest().getPath()).startsWith("/v1/accounts/acc/signers?")
+                    .contains("search=jane%40example.com");
+            assertThat(server.takeRequest().getPath()).isEqualTo("/v1/accounts/acc/signers");
+            assertThat(server.takeRequest().getPath()).isEqualTo("/v1/documents/doc-1/assignments");
+            RecordedRequest documentCleanup = server.takeRequest();
+            assertThat(documentCleanup.getMethod()).isEqualTo("DELETE");
+            assertThat(documentCleanup.getPath()).isEqualTo("/v1/documents/doc-1");
+            assertThat(server.getRequestCount()).isEqualTo(5);
+        } finally {
+            server.shutdown();
+        }
+    }
+
+    @Test
+    void uploadAndRequestSignaturesPreservesReusedSignerWhenAssignmentFails() throws Exception {
+        MockWebServer server = new MockWebServer();
+        server.start();
+        try {
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":{\"id\":\"doc-1\",\"status\":\"uploaded\"}}"));
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":[{\"id\":\"existing\",\"email\":\"jane@example.com\"}]}"));
+            server.enqueue(new MockResponse().setResponseCode(500)
+                    .setBody("{\"status\":500,\"message\":\"Assignment failed\"}"));
+            server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+            AssinafyClient client = AssinafyClient.create("k", "acc",
+                    opts -> opts.setBaseUrl(server.url("/v1").toString()));
+
+            assertThatThrownBy(() -> client.uploadAndRequestSignatures(
+                    new UploadAndRequestSignaturesOptions("%PDF-1.4".getBytes(), "contract.pdf",
+                            List.of(new UploadAndRequestSignaturesSigner("Jane", "jane@example.com")))
+                            .setWaitForReady(false)))
+                    .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class);
+
+            assertThat(server.getRequestCount()).isEqualTo(4);
+            server.takeRequest();
+            server.takeRequest();
+            server.takeRequest();
+            RecordedRequest cleanup = server.takeRequest();
+            assertThat(cleanup.getMethod()).isEqualTo("DELETE");
+            assertThat(cleanup.getPath()).isEqualTo("/v1/documents/doc-1");
+        } finally {
+            server.shutdown();
+        }
+    }
+
+    @Test
+    void uploadAndRequestSignaturesPreservesSignerCreatedByConcurrentRequest() throws Exception {
+        MockWebServer server = new MockWebServer();
+        server.start();
+        try {
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":{\"id\":\"doc-1\",\"status\":\"uploaded\"}}"));
+            server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+            server.enqueue(new MockResponse().setResponseCode(400)
+                    .setBody("{\"status\":400,\"message\":\"Duplicate signer\"}"));
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":[{\"id\":\"raced\",\"email\":\"jane@example.com\"}]}"));
+            server.enqueue(new MockResponse().setResponseCode(500)
+                    .setBody("{\"status\":500,\"message\":\"Assignment failed\"}"));
+            server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+            AssinafyClient client = AssinafyClient.create("k", "acc",
+                    opts -> opts.setBaseUrl(server.url("/v1").toString()));
+
+            assertThatThrownBy(() -> client.uploadAndRequestSignatures(
+                    new UploadAndRequestSignaturesOptions("%PDF-1.4".getBytes(), "contract.pdf",
+                            List.of(new UploadAndRequestSignaturesSigner("Jane", "jane@example.com")))
+                            .setWaitForReady(false)))
+                    .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
+                    .hasMessageContaining("Assignment failed");
+
+            assertThat(server.getRequestCount()).isEqualTo(6);
+            for (int i = 0; i < 5; i++) server.takeRequest();
+            RecordedRequest cleanup = server.takeRequest();
+            assertThat(cleanup.getMethod()).isEqualTo("DELETE");
+            assertThat(cleanup.getPath()).isEqualTo("/v1/documents/doc-1");
+        } finally {
+            server.shutdown();
+        }
+    }
+
+    @Test
+    void uploadAndRequestSignaturesPreservesSignersWhenDocumentCleanupFails() throws Exception {
+        MockWebServer server = new MockWebServer();
+        server.start();
+        try {
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":{\"id\":\"doc-1\",\"status\":\"uploaded\"}}"));
+            server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+            server.enqueue(new MockResponse().setBody(
+                    "{\"status\":200,\"data\":{\"id\":\"signer-1\",\"email\":\"jane@example.com\"}}"));
+            server.enqueue(new MockResponse().setResponseCode(500)
+                    .setBody("{\"status\":500,\"message\":\"Assignment failed\"}"));
+            server.enqueue(new MockResponse().setResponseCode(409)
+                    .setBody("{\"status\":409,\"message\":\"Document cleanup failed\"}"));
+            AssinafyClient client = AssinafyClient.create("k", "acc",
+                    opts -> opts.setBaseUrl(server.url("/v1").toString()));
+
+            try {
+                client.uploadAndRequestSignatures(new UploadAndRequestSignaturesOptions(
+                        "%PDF-1.4".getBytes(), "contract.pdf",
+                        List.of(new UploadAndRequestSignaturesSigner("Jane", "jane@example.com")))
+                        .setWaitForReady(false));
+                throw new AssertionError("Expected assignment failure");
+            } catch (com.assinafy.sdk.exceptions.ApiException e) {
+                assertThat(e.getStatusCode()).isEqualTo(500);
+                assertThat(e.getMessage()).contains("Assignment failed");
+                assertThat(e.getSuppressed()).hasSize(1)
+                        .allMatch(com.assinafy.sdk.exceptions.ApiException.class::isInstance);
+                assertThat(server.getRequestCount()).isEqualTo(5);
+            }
         } finally {
             server.shutdown();
         }

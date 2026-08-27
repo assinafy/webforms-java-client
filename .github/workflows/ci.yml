@@ -1,7 +1,13 @@
 name: CI
 
+# `push` is scoped to the default branch and version tags so a pull request from a branch in this repository
+# builds once (via `pull_request`) instead of twice.
 on:
   push:
+    branches:
+      - main
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
 
@@ -27,12 +33,13 @@ jobs:
           persist-credentials: false
 
       - name: Set up JDK 25 LTS
-        # actions/setup-java@v5.7.0 pinned to a commit SHA.
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        # actions/setup-java@v6.0.0 pinned to a commit SHA.
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
         with:
           distribution: temurin
           java-version: "25"
           cache: maven
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Run tests
         run: ./mvnw --batch-mode --no-transfer-progress verify

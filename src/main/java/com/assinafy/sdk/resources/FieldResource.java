@@ -219,6 +219,10 @@ public final class FieldResource extends BaseResource {
         if (values == null || values.isEmpty()) {
             throw new ValidationException("At least one field validation value is required");
         }
+        if (values.stream().anyMatch(value -> value == null || value.getFieldId() == null
+                || value.getFieldId().isBlank())) {
+            throw new ValidationException("Every field validation value must have a field ID");
+        }
         String id = accountId(accountId);
         Map<String, String> query = signerAccessCode != null && !signerAccessCode.isBlank()
                 ? Map.of("signer-access-code", signerAccessCode)

@@ -1,0 +1,58 @@
+name: Sandbox live tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      send_emails:
+        description: Run tests that send real email notifications
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-live
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Assinafy sandbox live tests (JDK 25 LTS)
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: sandbox
+      deployment: false
+
+    steps:
+      - name: Check out repository
+        # actions/checkout@v7.0.1 pinned to a commit SHA.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 25 LTS
+        # actions/setup-java@v6.0.0 pinned to a commit SHA.
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          cache-read-only: true
+
+      - name: Run live tests against the sandbox
+        env:
+          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
+          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
+          ASSINAFY_TEST_EMAIL: ${{ secrets.ASSINAFY_TEST_EMAIL }}
+          ASSINAFY_SECOND_TEST_EMAIL: ${{ secrets.ASSINAFY_SECOND_TEST_EMAIL }}
+          ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
+          ASSINAFY_LIVE_EMAILS: ${{ inputs.send_emails }}
+        run: |
+          test -n "${ASSINAFY_API_KEY}" || { echo "::error::ASSINAFY_API_KEY secret is required"; exit 1; }
+          test -n "${ASSINAFY_ACCOUNT_ID}" || { echo "::error::ASSINAFY_ACCOUNT_ID secret is required"; exit 1; }
+          test -n "${ASSINAFY_TEST_EMAIL}" || { echo "::error::ASSINAFY_TEST_EMAIL secret is required"; exit 1; }
+          test -n "${ASSINAFY_SECOND_TEST_EMAIL}" || { echo "::error::ASSINAFY_SECOND_TEST_EMAIL secret is required"; exit 1; }
+          ./mvnw --batch-mode --no-transfer-progress -Dtest=LiveSmokeTest test

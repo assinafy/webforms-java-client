@@ -11,7 +11,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * <p>Documented supported {@link #getEvent() event} values include {@code signature_request},
  * {@code document_about_to_expire}, {@code document_expired}, {@code document_canceled},
- * {@code document_declined}, {@code signed_delivery}, and {@code unknown} for unmapped legacy/provider data.
+ * {@code document_declined}, {@code signed_delivery}, and {@code unknown} for unmapped provider data.
  * {@link #getStatus() status} is {@code sent} on success or {@code failed} on a delivery problem.</p>
  *
  * @see <a href="https://api.assinafy.com.br/v1/docs">Assignment Signer Notification Object</a>

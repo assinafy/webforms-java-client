@@ -64,7 +64,7 @@ class SignerResourceTest {
     @Test
     void create_throwsWhenNoAccountId() {
         SignerResource noAccount = new SignerResource(new OkHttpClient(), server.url("/").toString(), null);
-        assertThatThrownBy(() -> noAccount.create(new CreateSignerPayload("Test", "test@test.com")))
+        assertThatThrownBy(() -> noAccount.create(new CreateSignerPayload("Test", "test@example.com")))
                 .isInstanceOf(ValidationException.class);
     }
 
@@ -77,24 +77,24 @@ class SignerResourceTest {
 
     @Test
     void create_usesCustomAccountId() throws Exception {
-        server.enqueue(okList(List.of()));
-        server.enqueue(okJson(Map.of("id", "123", "full_name", "Test", "email", "test@test.com")));
+        server.enqueue(okJson(Map.of("id", "123", "full_name", "Test", "email", "test@example.com")));
 
-        resource.create(new CreateSignerPayload("Test", "test@test.com"), "custom-account");
+        resource.create(new CreateSignerPayload("Test", "test@example.com"), "custom-account");
 
-        RecordedRequest findRequest = server.takeRequest();
-        assertThat(findRequest.getPath()).contains("/accounts/custom-account/signers");
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getMethod()).isEqualTo("POST");
+        assertThat(request.getPath()).isEqualTo("/accounts/custom-account/signers");
     }
 
     @Test
     void create_usesDefaultAccountId() throws Exception {
-        server.enqueue(okList(List.of()));
-        server.enqueue(okJson(Map.of("id", "123", "full_name", "Test", "email", "test@test.com")));
+        server.enqueue(okJson(Map.of("id", "123", "full_name", "Test", "email", "test@example.com")));
 
-        resource.create(new CreateSignerPayload("Test", "test@test.com"));
+        resource.create(new CreateSignerPayload("Test", "test@example.com"));
 
-        RecordedRequest findRequest = server.takeRequest();
-        assertThat(findRequest.getPath()).contains("/accounts/test-account/signers");
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getMethod()).isEqualTo("POST");
+        assertThat(request.getPath()).isEqualTo("/accounts/test-account/signers");
     }
 
     @Test
@@ -148,21 +148,38 @@ class SignerResourceTest {
     }
 
     @Test
-    void create_reusesExistingSignerByEmail() throws Exception {
+    void findByEmailSearchesEveryReportedPage() throws Exception {
+        server.enqueue(okList(List.of(
+                        Map.of("id", "1", "full_name", "Other", "email", "other@example.com")))
+                .setHeader("x-pagination-current-page", "1")
+                .setHeader("x-pagination-page-count", "2"));
+        server.enqueue(okList(List.of(
+                        Map.of("id", "2", "full_name", "John", "email", "JOHN@EXAMPLE.COM")))
+                .setHeader("x-pagination-current-page", "2")
+                .setHeader("x-pagination-page-count", "2"));
+
+        Signer result = resource.findByEmail("john@example.com");
+
+        assertThat(result.getId()).isEqualTo("2");
+        assertThat(server.takeRequest().getPath()).contains("page=1", "per-page=100");
+        assertThat(server.takeRequest().getPath()).contains("page=2", "per-page=100");
+    }
+
+    @Test
+    void findOrCreate_reusesExistingSignerByEmail() throws Exception {
         server.enqueue(okList(List.of(
                 Map.of("id", "existing", "full_name", "John", "email", "john@example.com")
         )));
 
-        Signer result = resource.create(new CreateSignerPayload("John", "john@example.com"));
+        Signer result = resource.findOrCreate(new CreateSignerPayload("John", "john@example.com"));
 
         assertThat(result.getId()).isEqualTo("existing");
         assertThat(server.getRequestCount()).isEqualTo(1);
     }
 
     @Test
-    void create_recoversFromDuplicate400ByReturningExisting() throws Exception {
-        // Race: pre-check finds nothing, POST returns the live 400 duplicate, then recovery re-queries and
-        // returns the existing signer instead of throwing (this catch-block is the class's subtlest logic).
+    void findOrCreate_recoversFromDuplicate400ByReturningExisting() throws Exception {
+        // A duplicate response can race with the pre-check; the recovery lookup returns the exact match.
         server.enqueue(okList(List.of()));
         server.enqueue(new MockResponse().setResponseCode(400)
                 .setBody("{\"status\":400,\"data\":null,\"message\":\"Um signatário com este e-mail já existe.\"}")
@@ -170,24 +187,45 @@ class SignerResourceTest {
         server.enqueue(okList(List.of(
                 Map.of("id", "existing", "full_name", "John", "email", "john@example.com"))));
 
-        Signer result = resource.create(new CreateSignerPayload("John", "john@example.com"));
+        Signer result = resource.findOrCreate(new CreateSignerPayload("John", "john@example.com"));
 
         assertThat(result.getId()).isEqualTo("existing");
         assertThat(server.getRequestCount()).isEqualTo(3);
     }
 
     @Test
-    void create_rethrowsNonDuplicate400() throws Exception {
-        // A 400 that is NOT a duplicate (recovery lookup finds nothing) must surface the original error.
+    void findOrCreate_rethrowsNonDuplicate400() throws Exception {
+        // When the recovery lookup finds no exact match, the original error must surface.
         server.enqueue(okList(List.of()));
         server.enqueue(new MockResponse().setResponseCode(400)
                 .setBody("{\"status\":400,\"data\":null,\"message\":\"Email inválido.\"}")
                 .setHeader("Content-Type", "application/json"));
         server.enqueue(okList(List.of()));
 
-        assertThatThrownBy(() -> resource.create(new CreateSignerPayload("John", "john@example.com")))
+        assertThatThrownBy(() -> resource.findOrCreate(new CreateSignerPayload("John", "john@example.com")))
                 .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
                 .hasMessageContaining("Email inválido.");
+    }
+
+    @Test
+    void findOrCreatePreservesDuplicateWhenRecoveryLookupFails() throws Exception {
+        server.enqueue(okList(List.of()));
+        server.enqueue(new MockResponse().setResponseCode(409)
+                .setBody("{\"status\":409,\"message\":\"Duplicate signer\"}")
+                .setHeader("Content-Type", "application/json"));
+        server.enqueue(new MockResponse().setResponseCode(503)
+                .setBody("{\"status\":503,\"message\":\"Lookup unavailable\"}")
+                .setHeader("Content-Type", "application/json"));
+
+        assertThatThrownBy(() -> resource.findOrCreate(new CreateSignerPayload("John", "john@example.com")))
+                .isInstanceOfSatisfying(com.assinafy.sdk.exceptions.ApiException.class, error -> {
+                    assertThat(error.getStatusCode()).isEqualTo(409);
+                    assertThat(error.getSuppressed()).singleElement()
+                            .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
+                            .extracting(suppressed -> ((com.assinafy.sdk.exceptions.ApiException) suppressed)
+                                    .getStatusCode())
+                            .isEqualTo(503);
+                });
     }
 
     @Test
@@ -237,18 +275,20 @@ class SignerResourceTest {
         assertThatThrownBy(() -> resource.update("s1", new UpdateSignerPayload()))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("At least one signer attribute");
+        assertThatThrownBy(() -> resource.update("s1",
+                new UpdateSignerPayload().setFullName("John").setEmail(" ")))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("email");
         assertThat(server.getRequestCount()).isZero();
     }
 
     @Test
     void create_serialisesWhatsappPhoneNumber() throws Exception {
-        server.enqueue(okList(List.of()));
         server.enqueue(okJson(Map.of("id", "123", "full_name", "John", "email", "john@example.com")));
 
         resource.create(new CreateSignerPayload("John", "john@example.com")
                 .setWhatsappPhoneNumber("+5548999990000"));
 
-        server.takeRequest();
         RecordedRequest postRequest = server.takeRequest();
         String body = postRequest.getBody().readUtf8();
         assertThat(body).contains("whatsapp_phone_number");

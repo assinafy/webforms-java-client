@@ -20,7 +20,7 @@ public final class UploadAndRequestSignaturesResult {
             List<String> signerIds) {
         this.document = document;
         this.assignment = assignment;
-        this.signerIds = signerIds;
+        this.signerIds = List.copyOf(signerIds);
     }
 
     /**

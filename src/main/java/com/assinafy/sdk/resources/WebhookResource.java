@@ -16,12 +16,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /** Client for webhook subscriptions, event types, dispatch history, and retries. */
 public final class WebhookResource extends BaseResource {
-
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
     /**
      * Creates an instance.
@@ -59,9 +56,7 @@ public final class WebhookResource extends BaseResource {
         } catch (URISyntaxException e) {
             throw new ValidationException("Webhook URL must be a valid URI");
         }
-        if (payload.getEmail() == null || !EMAIL_PATTERN.matcher(payload.getEmail()).matches()) {
-            throw new ValidationException("Webhook email must be valid");
-        }
+        requireEmail(payload.getEmail(), "Webhook email");
         if (payload.getEvents() == null || payload.getEvents().isEmpty()
                 || payload.getEvents().stream().anyMatch(event -> event == null || event.isBlank())) {
             throw new ValidationException("At least one webhook event is required");
@@ -90,9 +85,8 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
-     * Alias for {@link #register(RegisterWebhookPayload, String)}. The subscription is a create-or-replace
-     * {@code PUT}, so registering and updating are the same operation (the spec names it "Update webhook
-     * subscription"); this alias aids discoverability for callers looking for an {@code update}.
+     * Alias for {@link #register(RegisterWebhookPayload, String)}. The subscription uses one create-or-replace
+     * {@code PUT}, so registering and updating invoke the same operation.
      *
      * @param payload required subscription values
      * @param accountId account override, or {@code null} for the client default

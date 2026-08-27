@@ -3,10 +3,13 @@ package com.assinafy.sdk;
 /** Mutable builder-style configuration consumed and snapshotted by {@link AssinafyClient}. */
 public final class AssinafyClientOptions {
 
+    /** Production API root, used when {@link #setBaseUrl(String)} is not called. */
+    public static final String DEFAULT_BASE_URL = "https://api.assinafy.com.br/v1";
+
     private String apiKey;
     private String token;
     private String accountId;
-    private String baseUrl = "https://api.assinafy.com.br/v1";
+    private String baseUrl = DEFAULT_BASE_URL;
     private int timeoutMs = 30_000;
     private int maxRetries = 0;
 

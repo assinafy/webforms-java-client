@@ -82,7 +82,7 @@ class WebhookResourceTest {
         assertThatThrownBy(() -> resource.register(new RegisterWebhookPayload("https://example.com", "bad")
                 .setEvents(List.of("document_ready"))))
                 .isInstanceOf(ValidationException.class).hasMessageContaining("email");
-        assertThatThrownBy(() -> resource.register(new RegisterWebhookPayload("https://example.com", "a@b.com")
+        assertThatThrownBy(() -> resource.register(new RegisterWebhookPayload("https://example.com", "signer@example.com")
                 .setEvents(List.of(" "))))
                 .isInstanceOf(ValidationException.class).hasMessageContaining("event");
         assertThat(server.getRequestCount()).isZero();
