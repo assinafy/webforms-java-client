@@ -25,8 +25,6 @@ public final class SignerSelfResource extends BaseResource {
 
     private static final MediaType PNG = MediaType.get("image/png");
     private static final MediaType JPEG = MediaType.get("image/jpeg");
-    private static final String SIGNER_ACCESS_CODE = "signer-access-code";
-
     /**
      * Creates an instance.
      *
@@ -44,7 +42,7 @@ public final class SignerSelfResource extends BaseResource {
      * @return calling signer's profile
      */
     public Signer getSelf(String signerAccessCode) {
-        return httpGet("/signers/self", accessCodeQuery(signerAccessCode), Signer.class);
+        return httpGet("/signers/self", signerAccessCodeQuery(signerAccessCode), Signer.class);
     }
 
     /**
@@ -57,7 +55,7 @@ public final class SignerSelfResource extends BaseResource {
      * @return signer-facing document and assignment details
      */
     public DocumentDetails getSign(String signerAccessCode, Boolean hasAcceptedTerms) {
-        Map<String, String> query = new LinkedHashMap<>(accessCodeQuery(signerAccessCode));
+        Map<String, String> query = new LinkedHashMap<>(signerAccessCodeQuery(signerAccessCode));
         if (hasAcceptedTerms != null) {
             query.put("has_accepted_terms", String.valueOf(hasAcceptedTerms));
         }
@@ -83,7 +81,7 @@ public final class SignerSelfResource extends BaseResource {
      */
     public AcceptTermsResponse acceptTerms(String signerAccessCode) {
         return httpPut("/signers/accept-terms", null, AcceptTermsResponse.class,
-                accessCodeQuery(signerAccessCode));
+                signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
@@ -101,7 +99,7 @@ public final class SignerSelfResource extends BaseResource {
             throw new ValidationException("Verification code is required");
         }
         Map<String, Object> body = Map.of("verification-code", verificationCode);
-        return httpPost("/verify", body, VerifyEmailResponse.class, accessCodeQuery(signerAccessCode));
+        return httpPost("/verify", body, VerifyEmailResponse.class, signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
@@ -120,7 +118,7 @@ public final class SignerSelfResource extends BaseResource {
             throw new ValidationException("Payload is required");
         }
         return httpPut("/documents/" + docId + "/signers/confirm-data", payload, Signer.class,
-                accessCodeQuery(signerAccessCode));
+                signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
@@ -167,7 +165,7 @@ public final class SignerSelfResource extends BaseResource {
      * @return signature or initial image bytes
      */
     public byte[] downloadSignature(String signerAccessCode, String type) {
-        return httpGetBinary("/signature/" + resolveSignatureType(type), accessCodeQuery(signerAccessCode));
+        return httpGetBinary("/signature/" + resolveSignatureType(type), signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
@@ -180,7 +178,7 @@ public final class SignerSelfResource extends BaseResource {
      */
     public DocumentDetails getCurrentDocument(String signerId, String signerAccessCode) {
         String sid = requireId(signerId, "Signer ID");
-        return httpGet("/signers/" + sid + "/document", accessCodeQuery(signerAccessCode), DocumentDetails.class);
+        return httpGet("/signers/" + sid + "/document", signerAccessCodeQuery(signerAccessCode), DocumentDetails.class);
     }
 
     /**
@@ -207,7 +205,7 @@ public final class SignerSelfResource extends BaseResource {
             Map<String, String> params) {
         String sid = requireId(signerId, "Signer ID");
         Map<String, String> query = new LinkedHashMap<>(params != null ? params : Map.of());
-        query.put(SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode));
+        query.putAll(signerAccessCodeQuery(signerAccessCode));
         return httpGetList("/signers/" + sid + "/documents", query, DocumentDetails.class);
     }
 
@@ -225,7 +223,7 @@ public final class SignerSelfResource extends BaseResource {
             String searchTerm) {
         String sid = requireId(signerId, "Signer ID");
         Map<String, String> query = new LinkedHashMap<>();
-        query.put(SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode));
+        query.putAll(signerAccessCodeQuery(signerAccessCode));
         if (searchTerm != null && !searchTerm.isBlank()) {
             query.put("search", searchTerm);
         }
@@ -241,7 +239,7 @@ public final class SignerSelfResource extends BaseResource {
     public void signMultiple(String signerAccessCode, List<String> documentIds) {
         requireDocumentIds(documentIds);
         httpPutVoid("/signers/documents/sign-multiple", Map.of("document_ids", documentIds),
-                accessCodeQuery(signerAccessCode));
+                signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
@@ -260,7 +258,7 @@ public final class SignerSelfResource extends BaseResource {
                 "document_ids", documentIds,
                 "decline_reason", declineReason
         );
-        httpPutVoid("/signers/documents/decline-multiple", body, accessCodeQuery(signerAccessCode));
+        httpPutVoid("/signers/documents/decline-multiple", body, signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
@@ -275,7 +273,7 @@ public final class SignerSelfResource extends BaseResource {
     public byte[] downloadDocument(String signerId, String documentId, String artifactName,
             String signerAccessCode) {
         return httpGetBinary(artifactPath(signerId, documentId, artifactName),
-                accessCodeQuery(signerAccessCode));
+                signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
@@ -297,13 +295,9 @@ public final class SignerSelfResource extends BaseResource {
         return "/signers/" + sid + "/documents/" + docId + "/download/" + artifact;
     }
 
-    private Map<String, String> accessCodeQuery(String signerAccessCode) {
-        return Map.of(SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode));
-    }
-
     private Map<String, String> signatureQuery(String signerAccessCode, String type, Boolean reuse) {
         Map<String, String> params = new LinkedHashMap<>();
-        params.put(SIGNER_ACCESS_CODE, requireAccessCode(signerAccessCode));
+        params.putAll(signerAccessCodeQuery(signerAccessCode));
         params.put("type", type);
         if (reuse != null) {
             params.put("reuse", String.valueOf(reuse));
@@ -333,13 +327,6 @@ public final class SignerSelfResource extends BaseResource {
             return PNG;
         }
         throw new ValidationException("Signature image must be PNG or JPEG");
-    }
-
-    private String requireAccessCode(String code) {
-        if (code == null || code.isBlank()) {
-            throw new ValidationException("Signer access code is required");
-        }
-        return code;
     }
 
     private void requireDocumentIds(List<String> documentIds) {

@@ -1,9 +1,29 @@
 # Assinafy Webforms Java Client SDK
 
-Java client SDK for the [Assinafy Webforms API](https://api.assinafy.com.br/v1/docs).
+Java client SDK for the [Assinafy API](https://api.assinafy.com.br/v1/docs), the Brazilian digital signature
+platform.
 
 Covers all 89 operations in the official API contract: accounts, users, authentication, documents, signers,
 assignments, fields, templates, tags, webhooks, and the signer-facing signing flows.
+
+> **Two Java clients for the same API.** Assinafy ships two. `com.assinafy:assinafy-sdk` is the current one
+> and where a **new** integration should start. This artifact is the older client, maintained for integrations
+> already on it. Both expose `com.assinafy.sdk.AssinafyClient` and both cover all 89 operations, but they are
+> not drop-in equivalents:
+>
+> | | `assinafy-sdk` | `webforms-java-client-sdk` (this one) |
+> |---|---|---|
+> | Configuration | `AssinafyClientOptions.builder().apiKey(...)` | `new AssinafyClientOptions().setApiKey(...)` |
+> | `timeoutMs` | `long` | `int` |
+> | Pluggable `Logger` | yes | no |
+> | `SANDBOX_BASE_URL` constant | yes | no |
+> | Automatic retry on 429/503 | no | yes, via `maxRetries` |
+>
+> Porting to `assinafy-sdk` therefore means rewriting client construction, and re-implementing backoff
+> yourself if you rely on `maxRetries`.
+>
+> The `webforms` in the artifact name is historical. It carries no webforms-specific API, and is unrelated to
+> Oracle Forms, for which "WebForms Java client" is the more common meaning of the phrase.
 
 This README follows one document from installation to a signed, downloaded PDF. Each section is the next step
 of that journey, so reading top to bottom gives you the whole integration; jumping to a heading gives you one
@@ -24,14 +44,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.1.0</version>
+    <version>2.2.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.1.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.2.0'
 ```
 
 The artifact is published to GitHub Packages, so the repository must be declared once in your build. See
@@ -551,6 +571,10 @@ docker compose run --rm test
 
 # Or run the complete local verification with the Maven Wrapper (requires JDK 25+)
 ./mvnw verify
+
+# The release gate: Javadoc doclint plus the sources and javadoc jars. CI runs this as a separate step,
+# because doclint warnings fail here and not under `verify`.
+./mvnw -DskipTests -Prelease package
 
 # Live smoke tests against the sandbox (skipped unless credentials are set; defaults to the sandbox base URL)
 ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ./mvnw test -Dtest=LiveSmokeTest

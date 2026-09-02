@@ -156,9 +156,8 @@ public final class WebhookResource extends BaseResource {
      * @return subscribable event types, never {@code null}
      */
     public List<WebhookEventTypeInfo> listEventTypes() {
-        List<WebhookEventTypeInfo> result = httpGet("/webhooks/event-types",
-                new TypeReference<List<WebhookEventTypeInfo>>() {});
-        return result != null ? result : List.of();
+        return orEmpty(httpGet("/webhooks/event-types",
+                new TypeReference<List<WebhookEventTypeInfo>>() {}));
     }
 
     /**

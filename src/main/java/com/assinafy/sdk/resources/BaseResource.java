@@ -34,6 +34,9 @@ public abstract class BaseResource {
     /** JSON request-body media type used by resource methods. */
     protected static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
+    /** Query-parameter name carrying a signer's short-lived access code on signer-facing endpoints. */
+    protected static final String SIGNER_ACCESS_CODE = "signer-access-code";
+
     /** Shared HTTP client configured by {@link com.assinafy.sdk.AssinafyClient}. */
     protected final OkHttpClient httpClient;
 
@@ -738,6 +741,46 @@ public abstract class BaseResource {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /**
+     * Normalizes an array-shaped {@code data} payload. The API returns a JSON array for collection endpoints
+     * but sends {@code "data": null} when the collection is empty, so every list-returning resource method
+     * routes its result through this to guarantee a non-null return.
+     *
+     * @param <T> list item type
+     * @param list parsed response list, or {@code null}
+     * @return the supplied list, or an immutable empty list when it was {@code null}
+     */
+    protected static <T> List<T> orEmpty(List<T> list) {
+        return list != null ? list : List.of();
+    }
+
+    /**
+     * Builds the query map authorizing a signer-facing request with the signer's access code.
+     *
+     * @param signerAccessCode required signer access code
+     * @return single-entry query map keyed by {@link #SIGNER_ACCESS_CODE}
+     * @throws ValidationException when the access code is absent or blank
+     */
+    protected Map<String, String> signerAccessCodeQuery(String signerAccessCode) {
+        if (signerAccessCode == null || signerAccessCode.isBlank()) {
+            throw new ValidationException("Signer access code is required");
+        }
+        return Map.of(SIGNER_ACCESS_CODE, signerAccessCode);
+    }
+
+    /**
+     * Builds the query map for an endpoint where the signer access code is optional — present when a signer is
+     * acting, absent when the account owner is.
+     *
+     * @param signerAccessCode signer access code, or {@code null}
+     * @return single-entry query map, or an empty map when no access code was supplied
+     */
+    protected Map<String, String> optionalSignerAccessCodeQuery(String signerAccessCode) {
+        return signerAccessCode != null && !signerAccessCode.isBlank()
+                ? Map.of(SIGNER_ACCESS_CODE, signerAccessCode)
+                : Map.of();
     }
 
     /**

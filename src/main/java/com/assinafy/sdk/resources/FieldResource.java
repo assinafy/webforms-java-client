@@ -11,7 +11,6 @@ import com.assinafy.sdk.models.UpdateFieldPayload;
 import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.OkHttpClient;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -172,9 +171,7 @@ public final class FieldResource extends BaseResource {
     public FieldValidationResult validate(String fieldId, Object value, String signerAccessCode, String accountId) {
         String id = accountId(accountId);
         String fid = requireId(fieldId, "Field ID");
-        Map<String, String> query = signerAccessCode != null && !signerAccessCode.isBlank()
-                ? Map.of("signer-access-code", signerAccessCode)
-                : Map.of();
+        Map<String, String> query = optionalSignerAccessCodeQuery(signerAccessCode);
         Map<String, Object> body = new HashMap<>();
         body.put("value", value);
         return httpPost("/accounts/" + id + "/fields/" + fid + "/validate",
@@ -224,12 +221,9 @@ public final class FieldResource extends BaseResource {
             throw new ValidationException("Every field validation value must have a field ID");
         }
         String id = accountId(accountId);
-        Map<String, String> query = signerAccessCode != null && !signerAccessCode.isBlank()
-                ? Map.of("signer-access-code", signerAccessCode)
-                : Map.of();
-        List<FieldValidationResult> result = httpPost("/accounts/" + id + "/fields/validate-multiple",
-                values, new TypeReference<List<FieldValidationResult>>() {}, query);
-        return result != null ? result : Collections.emptyList();
+        Map<String, String> query = optionalSignerAccessCodeQuery(signerAccessCode);
+        return orEmpty(httpPost("/accounts/" + id + "/fields/validate-multiple", values,
+                new TypeReference<List<FieldValidationResult>>() {}, query));
     }
 
     /**
@@ -260,8 +254,7 @@ public final class FieldResource extends BaseResource {
      * @return available field types, never {@code null}
      */
     public List<FieldTypeInfo> listTypes() {
-        List<FieldTypeInfo> result = httpGet("/field-types", new TypeReference<List<FieldTypeInfo>>() {});
-        return result != null ? result : Collections.emptyList();
+        return orEmpty(httpGet("/field-types", new TypeReference<List<FieldTypeInfo>>() {}));
     }
 
     private void validateCreatePayload(CreateFieldPayload payload) {

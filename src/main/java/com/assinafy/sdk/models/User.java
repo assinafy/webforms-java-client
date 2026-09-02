@@ -21,6 +21,9 @@ public final class User {
     @JsonProperty("has_accepted_terms")
     private Boolean hasAcceptedTerms;
 
+    @JsonProperty("is_password_set")
+    private Boolean passwordSet;
+
     @JsonProperty("created_at")
     private String createdAt;
 
@@ -120,6 +123,20 @@ public final class User {
      * @param hasAcceptedTerms wire {@code has_accepted_terms}
      */
     public void setHasAcceptedTerms(Boolean hasAcceptedTerms) { this.hasAcceptedTerms = hasAcceptedTerms; }
+
+    /**
+     * Returns wire {@code is_password_set}: {@code true} when the account has a password and can use the
+     * email/password login, {@code false} for a social-login-only account.
+     *
+     * @return wire {@code is_password_set}, or {@code null} when the endpoint omits it
+     */
+    public Boolean getPasswordSet() { return passwordSet; }
+    /**
+     * Sets wire {@code is_password_set}.
+     *
+     * @param passwordSet wire {@code is_password_set}
+     */
+    public void setPasswordSet(Boolean passwordSet) { this.passwordSet = passwordSet; }
 
     /**
      * Returns wire {@code created_at} timestamp.

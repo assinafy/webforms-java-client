@@ -1,5 +1,46 @@
 # Changelog
 
+## [2.2.0] - 2026-09-02
+
+### Added
+- `User.getPasswordSet()` / `setPasswordSet(Boolean)` expose the `is_password_set` property that
+  `GET /users/self` returns. It is `false` for an account that can only sign in through a social provider, so
+  a caller can tell whether the email/password and change-password routes apply before offering them.
+- `BaseResource` gains three `protected` helpers for subclasses and resources: `orEmpty(List)` normalizes an
+  array endpoint's `"data": null` to an empty list, and `signerAccessCodeQuery(String)` /
+  `optionalSignerAccessCodeQuery(String)` build the `signer-access-code` query map, with the required variant
+  rejecting a blank code. The parameter name is available as the `SIGNER_ACCESS_CODE` constant.
+
+### Changed
+- `DocumentActivity.getPayload()` documents that its value is a JSON object for most events but a JSON array
+  for others, such as `document_prepared`. It stays typed as `Object` for that reason; deserializing it as a
+  map fails on the array form and takes the whole `documents.activities(...)` call with it.
+  `getOrigin()` documents its `ip` and `user-agent` keys and that it is null for server-generated events.
+- Every list-returning method builds its non-null result through the shared `orEmpty(...)`, replacing twelve
+  copies of the same null check and the two different empty-list idioms they used.
+- `signerSelf`, `assignments`, and `fields` build the `signer-access-code` query through the shared
+  `BaseResource` helpers instead of three private variants of the same code.
+
+### Documentation
+- `docs/API_REFERENCE.md` records `is_password_set` on `User`, the two `DocumentActivity` payload shapes, and
+  the two digital-certificate routes the API deploys without publishing a schema for, which is why the SDK
+  does not wrap them.
+- `README.md` and the POM describe what this client wraps as the Assinafy API, which is what the API calls
+  itself; there is no separately named "Assinafy Webforms API". The `webforms` in the artifact name is
+  historical and the README says so.
+- `README.md` compares this client against the current `com.assinafy:assinafy-sdk`. Both cover all 89
+  operations behind the same `AssinafyClient`, but they are not drop-in equivalents: configuration differs,
+  and automatic retry on 429/503 exists only here while a pluggable logger and a sandbox-URL constant exist
+  only there.
+- `README.md` adds the release-profile command that gates Javadoc separately from `verify`.
+
+### Test Suite
+- 221 mock-backed unit tests + 34 live sandbox tests, green on JDK 25. A new test pins both
+  `DocumentActivity` payload shapes.
+- `LiveSmokeTest.templateDocumentRoundTrip` treats a workspace with no template as an unmet precondition and
+  skips, matching every other environment check in the suite. The API publishes no template-creation route, so
+  a workspace without one cannot reach this flow at all.
+
 ## [2.1.0] - 2026-08-27
 
 ### Changed

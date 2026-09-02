@@ -8,7 +8,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import okhttp3.OkHttpClient;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -70,9 +69,8 @@ public final class UserResource extends BaseResource {
      * @return user-wide document KPI rows, never {@code null}
      */
     public List<DocumentStatsRow> stats(Map<String, String> params) {
-        List<DocumentStatsRow> result = httpGet("/users/self/stats", params != null ? params : Map.of(),
-                new TypeReference<List<DocumentStatsRow>>() {});
-        return result != null ? result : Collections.emptyList();
+        return orEmpty(httpGet("/users/self/stats", params != null ? params : Map.of(),
+                new TypeReference<List<DocumentStatsRow>>() {}));
     }
 
     /**

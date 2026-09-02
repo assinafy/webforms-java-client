@@ -13,6 +13,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -240,6 +241,35 @@ class DocumentResourceTest {
         assertThat(server.takeRequest().getPath())
                 .isEqualTo("/documents/doc-1/activities");
         assertThat(activities).hasSize(1);
+    }
+
+    @Test
+    void activities_acceptBothObjectAndArrayPayloadShapes() throws Exception {
+        // The activity payload is not uniform: most events carry a JSON object, but some (document_prepared)
+        // carry an array. Typing the field as a map deserializes the object form and breaks the array form,
+        // taking the whole activities call down with it — so both shapes are pinned here.
+        server.enqueue(okJson(List.of(
+                Map.of("id", 26690, "event", "signature_requested",
+                        "payload", Map.of("signer_email", "signer@example.com",
+                                "notification_method", "email")),
+                Map.of("id", 26688, "event", "document_prepared", "payload", List.of()),
+                Map.of("id", 26687, "event", "assignment_created",
+                        "origin", Map.of("ip", "203.0.113.7", "user-agent", "Assinafy-Java-SDK")))));
+
+        var activities = resource.activities("doc-1");
+
+        assertThat(activities).hasSize(3);
+        assertThat(activities.get(0).getPayload())
+                .asInstanceOf(InstanceOfAssertFactories.MAP)
+                .containsEntry("signer_email", "signer@example.com")
+                .containsEntry("notification_method", "email");
+        assertThat(activities.get(0).getOrigin()).isNull();
+        assertThat(activities.get(1).getPayload())
+                .asInstanceOf(InstanceOfAssertFactories.LIST).isEmpty();
+        assertThat(activities.get(2).getOrigin())
+                .asInstanceOf(InstanceOfAssertFactories.MAP)
+                .containsEntry("ip", "203.0.113.7")
+                .containsEntry("user-agent", "Assinafy-Java-SDK");
     }
 
     @Test

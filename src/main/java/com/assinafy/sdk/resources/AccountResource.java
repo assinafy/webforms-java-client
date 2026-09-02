@@ -12,7 +12,6 @@ import okhttp3.OkHttpClient;
 import okhttp3.RequestBody;
 
 import java.net.URLConnection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -36,8 +35,7 @@ public final class AccountResource extends BaseResource {
      * @return workspace accounts, never {@code null}
      */
     public List<WorkspaceAccount> list() {
-        List<WorkspaceAccount> result = httpGet("/accounts", new TypeReference<List<WorkspaceAccount>>() {});
-        return result != null ? result : Collections.emptyList();
+        return orEmpty(httpGet("/accounts", new TypeReference<List<WorkspaceAccount>>() {}));
     }
 
     /**
@@ -197,9 +195,8 @@ public final class AccountResource extends BaseResource {
      */
     public List<DocumentStatsRow> stats(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
-        List<DocumentStatsRow> result = httpGet("/accounts/" + id + "/stats",
-                params != null ? params : Map.of(), new TypeReference<List<DocumentStatsRow>>() {});
-        return result != null ? result : Collections.emptyList();
+        return orEmpty(httpGet("/accounts/" + id + "/stats", params != null ? params : Map.of(),
+                new TypeReference<List<DocumentStatsRow>>() {}));
     }
 
     /**

@@ -41,12 +41,14 @@ class UserResourceTest {
     @Test
     void selfPreferencesUpdateAndStatsUseDocumentedContracts() throws Exception {
         server.enqueue(okJson(Map.of("id", "u1", "name", "Bill", "email", "bill@example.com",
-                "is_email_verified", true)));
+                "is_email_verified", true, "is_password_set", true)));
         server.enqueue(okJson(Map.of("DocumentCompleted", true, "SignerDeclined", true)));
         server.enqueue(okJson(Map.of("DocumentCompleted", false, "SignerDeclined", true)));
         server.enqueue(okJson(List.of(Map.of("period", "2026-08-20", "documents_certified", 2))));
 
-        assertThat(resource.getSelf().getEmailVerified()).isTrue();
+        var self = resource.getSelf();
+        assertThat(self.getEmailVerified()).isTrue();
+        assertThat(self.getPasswordSet()).isTrue();
         assertThat(resource.getNotificationPreferences().getDocumentCompleted()).isTrue();
         var updated = resource.updateNotificationPreferences(
                 new NotificationPreferences().setDocumentCompleted(false));

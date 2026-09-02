@@ -200,8 +200,9 @@ Sequential `step` values must be positive, contiguous from 1, and supplied for e
 
 `DigitalCertificate` requires the account feature, a CPF/CNPJ in the signer's `government_id`, and a step that
 contains only that signer. It adds two credits per signer (`SignatureDigitalCertificate`) plus notification
-cost. The signer completes the ICP-Brasil Web PKI flow outside this server-side SDK; download the qualified PDF
-with artifact name `pades`.
+cost. The signer completes the ICP-Brasil Web PKI flow in a browser, through the `POST /signers/certificate/start`
+and `POST /signers/certificate/complete` routes, which the API deploys but publishes no schema for and which
+this server-side SDK therefore does not wrap. Download the resulting qualified PDF with artifact name `pades`.
 
 ### Assignment collect submission
 
@@ -313,7 +314,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 |---|---|
 | `WorkspaceAccount` / Account | `resource`, `id`, `name`, `primary_color?`, `secondary_color?`, `notification_sender_type` (`User\|Account`), `roles[]`, `is_delete_allowed`, `created_at` |
 | `AccountTheme` | `account_name`, `primary_color`, `secondary_color?`, `logo` |
-| `User` | `id`, `name`, `email`, `telephone?`, `government_id?`, `is_email_verified`, `has_accepted_terms`, `created_at`, `to_be_deleted_at?` |
+| `User` | `id`, `name`, `email`, `telephone?`, `government_id?`, `is_email_verified`, `has_accepted_terms`, `is_password_set` (`false` for a social-login-only account), `created_at`, `to_be_deleted_at?` |
 | `AuthenticationResult` | `access_token`, `user` (`User`), `accounts[]` (stored as `WorkspaceAccount`; authentication populates `id`, `name`, `roles`, `is_delete_allowed`, `created_at`) |
 | `ApiKeyResponse` | `api_key` (full only on creation, masked on read, null when none exists) |
 | `EmailResponse` | `email` |
@@ -336,7 +337,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `DocumentPage` | `id`, `number`, `height`, `width`, `download_url` |
 | `DocumentStatus` | `code`, `deletable` |
 | `DocumentVerification` | `hash`, `id?`, `status?`, `page_count?` (string), `signer_count?` (string), `completed_count?`, `completed_at?`, `verified_at`, `is_valid`, `message` |
-| `DocumentActivity` | `id`, `event`, `message`, `payload?`, `origin?`, `created_at` |
+| `DocumentActivity` | `id`, `event`, `message`, `payload?`, `origin?`, `created_at`. `payload` is typed `Object` because its shape varies by event — a JSON object for most events, a JSON array for others such as `document_prepared`. `origin` is a JSON object of `ip` and `user-agent`, and is null for server-generated events |
 | `FieldDefinition` | `resource`, `id`, `name`, `type`, `regex?`, `is_pre_defined`, `is_active`, `is_required`, `is_standard`, `is_read_only`, `is_visible` |
 | `FieldTypeInfo` | `type`, `name` |
 | `FieldValidationResult` | Single: `type`, `success`, `error_message`; multiple also includes `field_id` |

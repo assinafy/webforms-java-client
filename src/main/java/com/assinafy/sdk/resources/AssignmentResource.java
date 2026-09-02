@@ -116,7 +116,7 @@ public final class AssignmentResource extends BaseResource {
             throw new ValidationException("At least one sign entry is required");
         }
         httpPostVoid("/documents/" + docId + "/assignments/" + asgId,
-                entries, requireAccessCodeQuery(signerAccessCode));
+                entries, signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
@@ -149,7 +149,7 @@ public final class AssignmentResource extends BaseResource {
         }
         httpPutVoid("/documents/" + docId + "/assignments/" + asgId + "/reject",
                 Map.of("decline_reason", declineReason),
-                requireAccessCodeQuery(signerAccessCode));
+                signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
@@ -236,16 +236,8 @@ public final class AssignmentResource extends BaseResource {
     public List<WhatsappNotification> whatsappNotifications(String documentId, String assignmentId) {
         String docId = requireId(documentId, "Document ID");
         String asgId = requireId(assignmentId, "Assignment ID");
-        List<WhatsappNotification> result = httpGet("/documents/" + docId + "/assignments/" + asgId
-                + "/whatsapp-notifications", new TypeReference<List<WhatsappNotification>>() {});
-        return result != null ? result : List.of();
-    }
-
-    private Map<String, String> requireAccessCodeQuery(String signerAccessCode) {
-        if (signerAccessCode == null || signerAccessCode.isBlank()) {
-            throw new ValidationException("Signer access code is required");
-        }
-        return Map.of("signer-access-code", signerAccessCode);
+        return orEmpty(httpGet("/documents/" + docId + "/assignments/" + asgId + "/whatsapp-notifications",
+                new TypeReference<List<WhatsappNotification>>() {}));
     }
 
     private static Map<String, Object> buildPayload(CreateAssignmentPayload payload, boolean estimate) {

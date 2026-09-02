@@ -19,6 +19,10 @@ target/
 # Local Claude Code session state (never commit)
 .claude/
 
+# Agent working guides: local-only, may reference sandbox credentials
+AGENTS.md
+CLAUDE.md
+
 # Local Maven repo cache (used by GitLab CI's MAVEN_OPTS)
 .m2/
 

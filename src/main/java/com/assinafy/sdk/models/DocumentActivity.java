@@ -64,7 +64,14 @@ public final class DocumentActivity {
     /**
      * Returns the event-specific payload snapshot, or {@code null}.
      *
-     * @return the event-specific payload snapshot, or {@code null}
+     * <p>The shape depends on {@link #getEvent()} and is <strong>not</strong> uniform, which is why this is
+     * typed as {@link Object} rather than a map. Most events carry a JSON object: {@code signature_requested}
+     * carries {@code signer_full_name}, {@code signer_email}, {@code signer_whatsapp_phone_number}, and
+     * {@code notification_method}; {@code assignment_created} carries {@code user_name}, {@code user_email},
+     * and {@code user_telephone}. Other events, such as {@code document_prepared}, carry a JSON array
+     * instead. Inspect the value before casting — deserializing it as a map fails for the array form.</p>
+     *
+     * @return a {@code Map<String, Object>} or a {@code List<Object>} depending on the event, or {@code null}
      */
     public Object getPayload() { return payload; }
 
@@ -76,9 +83,11 @@ public final class DocumentActivity {
     public void setPayload(Object payload) { this.payload = payload; }
 
     /**
-     * Returns request-origin metadata such as IP and user agent, or {@code null}.
+     * Returns request-origin metadata, or {@code null} for a server-generated event such as
+     * {@code signature_requested}. When present it is a JSON object carrying the {@code ip} and
+     * {@code user-agent} of the request that produced the activity.
      *
-     * @return request-origin metadata such as IP and user agent, or {@code null}
+     * @return a {@code Map<String, Object>} of origin metadata, or {@code null}
      */
     public Object getOrigin() { return origin; }
 

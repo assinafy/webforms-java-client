@@ -20,7 +20,6 @@ import okhttp3.OkHttpClient;
 import okhttp3.RequestBody;
 
 import java.io.File;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -219,9 +218,7 @@ public final class DocumentResource extends BaseResource {
      * @return document status catalogue, never {@code null}
      */
     public List<DocumentStatus> statuses() {
-        List<DocumentStatus> result = httpGet("/documents/statuses",
-                new TypeReference<List<DocumentStatus>>() {});
-        return result != null ? result : Collections.emptyList();
+        return orEmpty(httpGet("/documents/statuses", new TypeReference<List<DocumentStatus>>() {}));
     }
 
     /**
@@ -361,9 +358,8 @@ public final class DocumentResource extends BaseResource {
      */
     public List<DocumentActivity> activities(String documentId) {
         String id = requireId(documentId, "Document ID");
-        List<DocumentActivity> result = httpGet("/documents/" + id + "/activities",
-                new TypeReference<List<DocumentActivity>>() {});
-        return result != null ? result : Collections.emptyList();
+        return orEmpty(httpGet("/documents/" + id + "/activities",
+                new TypeReference<List<DocumentActivity>>() {}));
     }
 
     /**
@@ -545,9 +541,8 @@ public final class DocumentResource extends BaseResource {
     public List<Tag> listTags(String documentId, String accountId) {
         String docId = requireId(documentId, "Document ID");
         String accId = accountId(accountId);
-        List<Tag> result = httpGet("/accounts/" + accId + "/documents/" + docId + "/tags",
-                new TypeReference<List<Tag>>() {});
-        return result != null ? result : Collections.emptyList();
+        return orEmpty(httpGet("/accounts/" + accId + "/documents/" + docId + "/tags",
+                new TypeReference<List<Tag>>() {}));
     }
 
     /**
@@ -572,9 +567,8 @@ public final class DocumentResource extends BaseResource {
         String docId = requireId(documentId, "Document ID");
         String accId = accountId(accountId);
         validateTags(tags, true);
-        List<Tag> result = httpPut("/accounts/" + accId + "/documents/" + docId + "/tags",
-                Map.of("tags", tags), new TypeReference<List<Tag>>() {}, Map.of());
-        return result != null ? result : Collections.emptyList();
+        return orEmpty(httpPut("/accounts/" + accId + "/documents/" + docId + "/tags", Map.of("tags", tags),
+                new TypeReference<List<Tag>>() {}, Map.of()));
     }
 
     /**
@@ -600,9 +594,8 @@ public final class DocumentResource extends BaseResource {
         String docId = requireId(documentId, "Document ID");
         String accId = accountId(accountId);
         validateTags(tags, false);
-        List<Tag> result = httpPost("/accounts/" + accId + "/documents/" + docId + "/tags",
-                Map.of("tags", tags), new TypeReference<List<Tag>>() {}, Map.of());
-        return result != null ? result : Collections.emptyList();
+        return orEmpty(httpPost("/accounts/" + accId + "/documents/" + docId + "/tags", Map.of("tags", tags),
+                new TypeReference<List<Tag>>() {}, Map.of()));
     }
 
     /**
