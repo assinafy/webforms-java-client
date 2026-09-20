@@ -12,6 +12,10 @@ package com.assinafy.sdk.exceptions;
  * {@code Retry-After} / {@code X-Rate-Limit-Reset} hint is captured into {@link #getRetryAfterSeconds()} so
  * callers can implement their own backoff. It is left {@code null} on permanent errors (e.g. 400/401) so a
  * caller keying retries on its presence never backs off on a non-retryable failure.</p>
+ *
+ * <p>OAuth failures additionally populate {@link #getOAuthError()}, and an {@code insufficient_scope}
+ * rejection also populates {@link #getRequiredScope()}, so an application can branch on the machine-readable
+ * code instead of re-parsing the response body or the {@code WWW-Authenticate} header.</p>
  */
 public class ApiException extends AssinafyException {
 
@@ -23,6 +27,10 @@ public class ApiException extends AssinafyException {
     private final String responseBody;
     /** Server-suggested retry delay in seconds, or {@code null}. */
     private Integer retryAfterSeconds;
+    /** RFC 6749 error code, or {@code null}. */
+    private String oauthError;
+    /** Scope named by an {@code insufficient_scope} challenge, or {@code null}. */
+    private String requiredScope;
 
     /**
      * Creates an API failure with its parsed message and raw response body.
@@ -83,6 +91,41 @@ public class ApiException extends AssinafyException {
      */
     public ApiException withRetryAfterSeconds(Integer retryAfterSeconds) {
         this.retryAfterSeconds = retryAfterSeconds;
+        return this;
+    }
+
+    /**
+     * RFC 6749 error code identifying an OAuth failure, read from a flat {@code {error, error_description}}
+     * body returned by the token or revoke endpoint, or from the {@code WWW-Authenticate} challenge on a
+     * 401/403. Typical values are {@code invalid_grant}, {@code invalid_client}, {@code invalid_target},
+     * {@code unsupported_grant_type}, and {@code insufficient_scope}. {@code null} on every non-OAuth failure.
+     *
+     * @return the OAuth error code, or {@code null}
+     */
+    public String getOAuthError() {
+        return oauthError;
+    }
+
+    /**
+     * Scope named by an {@code insufficient_scope} challenge. Treat it as a prompt to send the user through
+     * the authorization flow again with that scope added, not as a reason to retry the same request.
+     *
+     * @return the missing scope, or {@code null}
+     */
+    public String getRequiredScope() {
+        return requiredScope;
+    }
+
+    /**
+     * Attaches an OAuth error code and the scope a challenge named, for fluent throw-site usage.
+     *
+     * @param oauthError RFC 6749 error code, or {@code null}
+     * @param requiredScope scope named by an {@code insufficient_scope} challenge, or {@code null}
+     * @return this exception
+     */
+    public ApiException withOAuthChallenge(String oauthError, String requiredScope) {
+        this.oauthError = oauthError;
+        this.requiredScope = requiredScope;
         return this;
     }
 

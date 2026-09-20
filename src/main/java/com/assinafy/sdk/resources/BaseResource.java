@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Shared HTTP transport, JSON-envelope parsing, validation, and pagination support for endpoint resources. */
@@ -30,6 +31,7 @@ public abstract class BaseResource {
 
     private static final Pattern PATH_SEGMENT = Pattern.compile("[A-Za-z0-9._~-]+");
     private static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
+    private static final Pattern CHALLENGE_PARAMETER = Pattern.compile("([A-Za-z_]+)=\"([^\"]*)\"");
 
     /** JSON request-body media type used by resource methods. */
     protected static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
@@ -391,6 +393,21 @@ public abstract class BaseResource {
     }
 
     /**
+     * Executes a GET against a fully-qualified URL instead of a path under {@link #baseUrl}. It exists for the
+     * RFC 8615 {@code /.well-known/} documents the API publishes at its host root, outside the {@code /v1}
+     * prefix; every other request belongs on a path-based helper.
+     *
+     * @param <T> response model type
+     * @param url absolute request URL
+     * @param dataType response model class
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
+    protected <T> T httpGetAbsolute(String url, Class<T> dataType) {
+        Request request = new Request.Builder().url(url).get().build();
+        return execute(request, MAPPER.getTypeFactory().constructType(dataType));
+    }
+
+    /**
      * Executes a binary GET without query parameters.
      *
      * @param path API path beginning with {@code /}
@@ -529,7 +546,7 @@ public abstract class BaseResource {
             try {
                 return parseEnvelope(json, response.code(), dataType);
             } catch (ApiException e) {
-                throw attachRetryAfter(e, response);
+                throw attachResponseHints(e, response);
             }
         } catch (ApiException e) {
             throw e;
@@ -554,7 +571,7 @@ public abstract class BaseResource {
                     throw new ApiException(response.code());
                 }
             } catch (ApiException e) {
-                throw attachRetryAfter(e, response);
+                throw attachResponseHints(e, response);
             }
         } catch (ApiException e) {
             throw e;
@@ -585,7 +602,7 @@ public abstract class BaseResource {
                         throw new ApiException(response.code());
                     }
                 } catch (ApiException e) {
-                    throw attachRetryAfter(e, response);
+                    throw attachResponseHints(e, response);
                 }
                 throw new NetworkException("Expected a binary response but received JSON");
             }
@@ -605,7 +622,7 @@ public abstract class BaseResource {
             try {
                 data = parseEnvelope(json, response.code(), listType);
             } catch (ApiException e) {
-                throw attachRetryAfter(e, response);
+                throw attachResponseHints(e, response);
             }
             PaginationMeta meta = parsePaginationMeta(response);
             return new PaginatedResult<>(data != null ? data : Collections.emptyList(), meta);
@@ -617,22 +634,50 @@ public abstract class BaseResource {
     }
 
     /**
-     * Captures the server's retry hint into the exception so callers can back off on a rate-limit/temporary
-     * error. Only attached for retryable statuses (HTTP 429 / 503): the {@code X-Rate-Limit-Reset} header is
-     * present on virtually every response (including successful ones and permanent 4xx errors), so attaching it
-     * unconditionally would wrongly signal that a permanent 400/401 is worth retrying. Reads {@code Retry-After}
-     * first, then falls back to {@code X-Rate-Limit-Reset}; only the delta-seconds form is surfaced (an
-     * HTTP-date {@code Retry-After} is ignored). Header lookup is case-insensitive (OkHttp).
+     * Copies the server's response-header hints into the exception.
+     *
+     * <p>The retry hint is attached only for retryable statuses (HTTP 429 / 503): the
+     * {@code X-Rate-Limit-Reset} header is present on virtually every response (including successful ones and
+     * permanent 4xx errors), so attaching it unconditionally would wrongly signal that a permanent 400/401 is
+     * worth retrying. Reads {@code Retry-After} first, then falls back to {@code X-Rate-Limit-Reset}; only the
+     * delta-seconds form is surfaced (an HTTP-date {@code Retry-After} is ignored).</p>
+     *
+     * <p>On a 401/403 the {@code WWW-Authenticate} challenge is parsed for the OAuth error code and, for
+     * {@code insufficient_scope}, the scope it names. A code already read from the response body wins, since
+     * the body is the more specific source. Header lookup is case-insensitive (OkHttp).</p>
      */
-    private ApiException attachRetryAfter(ApiException e, Response response) {
-        if (e.getStatusCode() != 429 && e.getStatusCode() != 503) {
-            return e;
+    private ApiException attachResponseHints(ApiException e, Response response) {
+        if (e.getStatusCode() == 429 || e.getStatusCode() == 503) {
+            Integer seconds = parseRetryAfterSeconds(response.header("Retry-After"));
+            if (seconds == null) {
+                seconds = parseRetryAfterSeconds(response.header("X-Rate-Limit-Reset"));
+            }
+            if (seconds != null) {
+                e = e.withRetryAfterSeconds(seconds);
+            }
         }
-        Integer seconds = parseRetryAfterSeconds(response.header("Retry-After"));
-        if (seconds == null) {
-            seconds = parseRetryAfterSeconds(response.header("X-Rate-Limit-Reset"));
+        if (e.getOAuthError() == null && (e.getStatusCode() == 401 || e.getStatusCode() == 403)) {
+            String challenge = response.header("WWW-Authenticate");
+            String error = challengeParameter(challenge, "error");
+            if (error != null) {
+                e = e.withOAuthChallenge(error, challengeParameter(challenge, "scope"));
+            }
         }
-        return seconds != null ? e.withRetryAfterSeconds(seconds) : e;
+        return e;
+    }
+
+    /** Reads one {@code name="value"} parameter out of an RFC 6750 {@code WWW-Authenticate} challenge. */
+    private static String challengeParameter(String header, String name) {
+        if (header == null || header.isBlank()) {
+            return null;
+        }
+        Matcher matcher = CHALLENGE_PARAMETER.matcher(header);
+        while (matcher.find()) {
+            if (name.equals(matcher.group(1))) {
+                return matcher.group(2);
+            }
+        }
+        return null;
     }
 
     private Integer parseRetryAfterSeconds(String value) {
@@ -658,7 +703,7 @@ public abstract class BaseResource {
             JsonNode root = MAPPER.readTree(json);
             if (root.has("status") && root.get("status").isNumber()) {
                 int envelopeStatus = root.get("status").asInt();
-                String message = root.has("message") ? root.get("message").asText(null) : null;
+                String message = errorMessage(root);
                 if (envelopeStatus >= 400) {
                     throw new ApiException(envelopeStatus, message, json);
                 }
@@ -675,8 +720,7 @@ public abstract class BaseResource {
                 return null;
             }
             if (httpStatus < 200 || httpStatus >= 300) {
-                String message = root.has("message") ? root.get("message").asText(null) : null;
-                throw new ApiException(httpStatus, message, json);
+                throw oauthAware(new ApiException(httpStatus, errorMessage(root), json), root);
             }
             return MAPPER.convertValue(root, dataType);
         } catch (ApiException e) {
@@ -698,14 +742,13 @@ public abstract class BaseResource {
     private void throwIfEnvelopeError(String json, int httpStatus) {
         Integer envelopeStatus = null;
         String message = null;
+        JsonNode root = null;
         try {
-            JsonNode root = MAPPER.readTree(json);
+            root = MAPPER.readTree(json);
             if (root.has("status") && root.get("status").isNumber()) {
                 envelopeStatus = root.get("status").asInt();
             }
-            if (root.has("message")) {
-                message = root.get("message").asText(null);
-            }
+            message = errorMessage(root);
         } catch (Exception ignored) {
             // Not JSON (e.g. a plain-text error) — fall through to the HTTP-status check below.
         }
@@ -713,8 +756,38 @@ public abstract class BaseResource {
             throw new ApiException(envelopeStatus, message, json);
         }
         if (httpStatus < 200 || httpStatus >= 300) {
-            throw new ApiException(httpStatus, message, json);
+            throw oauthAware(new ApiException(httpStatus, message, json), root);
         }
+    }
+
+    /**
+     * Reads the human-readable failure text a body carries. The platform envelope uses {@code message}; the
+     * OAuth endpoints answer with the flat RFC 6749 {@code {error, error_description}} object instead, so both
+     * spellings are honoured and neither loses the server's explanation.
+     */
+    private static String errorMessage(JsonNode root) {
+        for (String key : new String[] {"message", "error_description", "error"}) {
+            String value = textOrNull(root, key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /** Attaches the RFC 6749 {@code error} code of a flat OAuth error body, when the body carries one. */
+    private static ApiException oauthAware(ApiException failure, JsonNode root) {
+        String error = root != null ? textOrNull(root, "error") : null;
+        return error != null ? failure.withOAuthChallenge(error, null) : failure;
+    }
+
+    private static String textOrNull(JsonNode root, String field) {
+        JsonNode node = root != null ? root.get(field) : null;
+        if (node == null || !node.isTextual()) {
+            return null;
+        }
+        String value = node.asText();
+        return value.isBlank() ? null : value;
     }
 
     private PaginationMeta parsePaginationMeta(Response response) {

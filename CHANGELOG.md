@@ -1,5 +1,46 @@
 # Changelog
 
+## [2.3.0] - 2026-09-20
+
+### Added
+- `client.oauth` covers the OAuth 2.1 authorization-code flow the API now publishes, for applications acting in
+  other people's workspaces with those users' permission: `exchangeAuthorizationCode(...)`,
+  `refreshToken(...)`, `revoke(...)`, `userInfo()`, and `protectedResourceMetadata()`. An access token is used
+  like any other bearer credential, through `AssinafyClientOptions.setToken(...)`.
+- `oauth.authorizationUrl(OAuthAuthorizationRequest)` builds the browser-facing authorization URL. It fixes
+  `response_type=code` and `code_challenge_method=S256`, derives the PKCE challenge from the verifier so the
+  two cannot disagree, and defaults the RFC 8707 resource indicator to the origin of the client's base URL.
+  `OAuthResource.generateCodeVerifier()` and `generateState()` produce the per-attempt secrets from
+  `SecureRandom`.
+- `OAuthTokens`, `OAuthUserInfo`, and `OAuthProtectedResource` model the three flat responses those endpoints
+  return. RFC 6749, OpenID Connect, and RFC 8615 each require a bare object, so they are not wrapped in the
+  platform's `{status,message,data}` envelope and the SDK reads them directly.
+- `ApiException.getOAuthError()` carries the RFC 6749 error code of a failure — `invalid_grant`,
+  `invalid_client`, `invalid_target`, `unsupported_grant_type`, `insufficient_scope` — read from a flat
+  `{error, error_description}` body or from a `WWW-Authenticate` challenge. On an `insufficient_scope`
+  rejection, `getRequiredScope()` names the scope to reconnect with, which is the difference between a
+  permission the user has not granted and a workspace the token cannot reach.
+
+### Changed
+- An error body that carries `error_description` instead of `message` surfaces that text as the exception
+  message, rather than the generic `API request failed with status N` that discarded the server's explanation.
+- Redirect URIs and PKCE code verifiers are validated before a request is sent: a non-HTTPS or fragment-bearing
+  redirect URI, and a verifier outside the RFC 7636 grammar of 43 to 128 unreserved characters, raise
+  `ValidationException` locally rather than costing a round trip and an `invalid_grant`.
+
+### Documentation
+- `README.md` is the complete integration guide in Portuguese, following one document from installation to a
+  signed, downloaded PDF, and `README.en.md` is the same guide in English. Both gain an OAuth stage, the
+  verification and notification method tables with their coupling rules and per-signer costs, the ICP-Brasil
+  A1/A3 certificate requirements, the document artifact table, and the environment table.
+- `docs/API_REFERENCE.md` covers the four new operations, the OAuth request and response payloads, the scope
+  catalog, and the flow's client-side rules; `docs/EXAMPLES.md` adds a six-step runnable OAuth walkthrough.
+
+### Test Suite
+- 237 mock-backed unit tests + 36 live sandbox tests, green on JDK 25. Sixteen new tests pin the OAuth request
+  bodies, the flat response parsing, the S256 authorization URL, the two error-code sources, and the
+  host-root metadata path. The two new live tests skip while OAuth remains undeployed to the sandbox.
+
 ## [2.2.0] - 2026-09-02
 
 ### Added

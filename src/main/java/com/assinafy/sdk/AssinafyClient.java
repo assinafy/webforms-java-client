@@ -15,6 +15,7 @@ import com.assinafy.sdk.resources.AccountResource;
 import com.assinafy.sdk.resources.AuthenticationResource;
 import com.assinafy.sdk.resources.DocumentResource;
 import com.assinafy.sdk.resources.FieldResource;
+import com.assinafy.sdk.resources.OAuthResource;
 import com.assinafy.sdk.resources.SignerResource;
 import com.assinafy.sdk.resources.SignerSelfResource;
 import com.assinafy.sdk.resources.TagResource;
@@ -60,6 +61,8 @@ public final class AssinafyClient {
     public final SignerSelfResource signerSelf;
     /** Login, password, social-login, and API-key operations. */
     public final AuthenticationResource auth;
+    /** OAuth 2.1 authorization-code flow: authorization URL, token exchange, refresh, revoke, and userinfo. */
+    public final OAuthResource oauth;
     /** Account CRUD, theme, logo, and account-statistics operations. */
     public final AccountResource accounts;
     /** Current-user profile, notification-preference, and user-statistics operations. */
@@ -141,6 +144,7 @@ public final class AssinafyClient {
         this.fields = new FieldResource(httpClient, baseUrl, accountId);
         this.signerSelf = new SignerSelfResource(httpClient, baseUrl);
         this.auth = new AuthenticationResource(httpClient, baseUrl);
+        this.oauth = new OAuthResource(httpClient, baseUrl);
         this.accounts = new AccountResource(httpClient, baseUrl, accountId);
         this.users = new UserResource(httpClient, baseUrl);
     }

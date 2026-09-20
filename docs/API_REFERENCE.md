@@ -1,14 +1,16 @@
 # Assinafy Java SDK API Reference
 
-This reference maps the Java SDK to the 89 operations documented at the
-[Assinafy API documentation](https://api.assinafy.com.br/v1/docs). Paths below omit the `/v1` prefix.
+This reference maps the Java SDK to the 93 operations documented at the
+[Assinafy API documentation](https://api.assinafy.com.br/v1/docs). Paths below omit the `/v1` prefix, except
+for the OAuth protected-resource metadata, which the API serves at its host root.
 
 ## Client surface
 
 Construct with `new AssinafyClient(options)`, `AssinafyClient.create(apiKey, accountId[, configurator])`, or
-`AssinafyClient.fromConfig(map)`. The client exposes `accounts`, `users`, `auth`, `documents`, `signers`,
-`assignments`, `fields`, `templates`, `tags`, `webhooks`, and `signerSelf`. `getBaseUrl()` returns the normalized
-base URL; `getHttpClient()` exposes the configured OkHttp client for advanced integration and diagnostics.
+`AssinafyClient.fromConfig(map)`. The client exposes `accounts`, `users`, `auth`, `oauth`, `documents`,
+`signers`, `assignments`, `fields`, `templates`, `tags`, `webhooks`, and `signerSelf`. `getBaseUrl()` returns
+the normalized base URL; `getHttpClient()` exposes the configured OkHttp client for advanced integration and
+diagnostics.
 
 | `AssinafyClientOptions` property | Default | Meaning |
 |---|---|---|
@@ -36,7 +38,12 @@ when supplied and otherwise use `AssinafyClientOptions.accountId`.
 
 Signer-facing methods take a `signerAccessCode` and send it as the `signer-access-code` query parameter. The
 document verification, public-document lookup/token, and signer artifact download routes are public. The four
-password/social-login entry points are also usable before authentication.
+password/social-login entry points are also usable before authentication, as are the three OAuth endpoints that
+precede a token.
+
+An OAuth access token is a bearer credential: set it with `setToken` and it is sent as
+`Authorization: Bearer`. The API refuses an OAuth token supplied as `X-Api-Key` or in the query string. A token
+is scoped to the one workspace the user chose; calling any other workspace answers 403.
 
 Path identifiers must be non-blank URL-unreserved values (`A-Z`, `a-z`, `0-9`, `.`, `_`, `~`, `-`). The SDK
 rejects unsafe path input before a request is sent; query values are URL-encoded by OkHttp.
@@ -61,7 +68,10 @@ exposes the status, response body, and rate-limit retry hint. Resource, client, 
 validation raises `ValidationException`. Transport failures raise `NetworkException`.
 
 Use `ApiException.getStatusCode()`, `getResponseBody()`, and `getRetryAfterSeconds()` for diagnostics and
-caller-managed backoff. `ValidationException.getErrors()` returns structured validation details when present.
+caller-managed backoff. `getOAuthError()` carries the RFC 6749 error code of an OAuth failure, read from a flat
+`{ "error": string, "error_description": string }` body or from a `WWW-Authenticate` challenge; on an
+`insufficient_scope` rejection `getRequiredScope()` names the scope to reconnect with.
+`ValidationException.getErrors()` returns structured validation details when present.
 
 The standard error body is `{ "status": integer, "message": string, "data": object|null }`. Callers should
 handle both 400 and 422 as validation failures. A blocked account deletion may also include
@@ -125,6 +135,9 @@ null to clear a value.
 | `CreateTagPayload` | `{ "name": string*, "color": six-digit-hex\|null? }`; name is at most 64 characters |
 | `UpdateTagPayload` | Any of `name`, `color`; `clearColor()` deliberately sends `"color": null` |
 | Signature image upload | Raw PNG bytes; query `type=signature\|initial`, optional `reuse=true\|false` |
+| OAuth token exchange | `{ "grant_type": "authorization_code"*, "code": string*, "redirect_uri": string*, "code_verifier": string*, "client_id": string*, "client_secret": string?, "resource": string }` |
+| OAuth token refresh | `{ "grant_type": "refresh_token"*, "refresh_token": string*, "client_id": string*, "client_secret": string? }` |
+| OAuth token revocation | `{ "token": string*, "token_type_hint": "access_token"\|"refresh_token"?, "client_id": string*, "client_secret": string? }` |
 
 Document tag requests carry tag IDs; the SDK forwards the supplied strings without rewriting them. The SDK also
 exposes environment-specific request forms in [SDK extensions](#sdk-extensions).
@@ -203,6 +216,64 @@ contains only that signer. It adds two credits per signer (`SignatureDigitalCert
 cost. The signer completes the ICP-Brasil Web PKI flow in a browser, through the `POST /signers/certificate/start`
 and `POST /signers/certificate/complete` routes, which the API deploys but publishes no schema for and which
 this server-side SDK therefore does not wrap. Download the resulting qualified PDF with artifact name `pades`.
+
+### OAuth 2.1 authorization-code flow
+
+`client.oauth` covers applications that act in **other people's** workspaces with those users' permission. An
+integration automating its own workspace keeps using an API key and needs none of this.
+
+The browser-facing authorization page lives on the authorization server, `https://auth.assinafy.com.br`; the
+token, revoke, and userinfo endpoints live on this API. PKCE with `S256` is mandatory for every application,
+confidential ones included.
+
+```java
+String verifier = OAuthResource.generateCodeVerifier();   // 43 chars from A-Z a-z 0-9 - . _ ~
+String state = OAuthResource.generateState();
+// Persist verifier and state in the user's session, then redirect the browser to:
+String url = client.oauth.authorizationUrl(
+        new OAuthAuthorizationRequest("client-id", "https://myapp.example/oauth/callback")
+                .setScopes(List.of("documents:read", "documents:write", "offline_access"))
+                .setState(state)
+                .setCodeVerifier(verifier));
+```
+
+`authorizationUrl` fixes `response_type=code` and `code_challenge_method=S256`, derives `code_challenge` as the
+base64url SHA-256 of the verifier, and defaults `resource` to the origin of the client's base URL. Override the
+endpoint with `setAuthorizationEndpoint(...)` and the resource indicator with `setResource(...)`; add
+`setNonce(...)` when requesting `openid`.
+
+| Scope | Grants |
+|---|---|
+| `documents:read` | Read documents, their pages, tags, signers, assignments, and activity |
+| `documents:write` | Create, update, and delete documents and manage their signers and assignments |
+| `templates:read` | Read templates, their pages, roles, fields, and tags |
+| `templates:write` | Create, update, and delete templates and their contents |
+| `account:read` | Read the workspace profile, theme, and logo |
+| `openid` | Identify the user and enable `GET /oauth/userinfo` |
+| `profile` | Include the user's name in the `id_token` and userinfo claims |
+| `email` | Include the user's email and its verification status in those claims |
+| `offline_access` | Receive a refresh token; never appears in the granted `scope` of an access token |
+
+Billing, account lifecycle, credential management, and administration are never reachable with an OAuth token,
+whatever its scopes.
+
+On the redirect URI, verify `state` against the stored value and `iss` against
+`https://auth.assinafy.com.br` before using the code. The code is single-use and expires 60 seconds after
+approval:
+
+```java
+OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
+        "client-id", "client-secret", code, "https://myapp.example/oauth/callback", verifier);
+```
+
+Access tokens last one hour and a connection lasts 30 days from the user's approval. `refreshToken(...)`
+returns a **new** refresh token and retires the old one, so store the new value before using the response,
+refresh one at a time per connection, and never replay an old token after a timeout — a reused refresh token is
+indistinguishable from a stolen one and ends the whole connection.
+
+Redirect URIs must be HTTPS, carry no fragment, and match a registered value character for character; the SDK
+rejects a malformed one before sending a request. A code verifier outside the RFC 7636 grammar of 43 to 128
+unreserved characters is likewise rejected locally rather than returning `invalid_grant`.
 
 ### Assignment collect submission
 
@@ -353,6 +424,12 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `AcceptTermsResponse` | Optional response fields `full_name`, `email`, `has_accepted_terms`; the documented success payload has no data, so the Java return may be null |
 | `VerifyEmailResponse` | Optional response fields `message`, `access_token`; the documented success payload has no data, so the Java return may be null |
 | `PaginationMeta` | `current_page`, `per_page`, `total`, `last_page` (built from response headers, not envelope `data`) |
+| `OAuthTokens` | `access_token`, `token_type` (`Bearer`), `expires_in` (seconds), `refresh_token?` (only with `offline_access`), `scope` (space-separated, never contains `offline_access`), `id_token?` (only with `openid`) |
+| `OAuthUserInfo` | `sub`, `name?` (needs `profile`), `email?` and `email_verified?` (need `email`) |
+| `OAuthProtectedResource` | `resource`, `authorization_servers[]`, `scopes_supported[]`, `bearer_methods_supported[]` |
+
+The three OAuth response models above are **not** envelope payloads. RFC 6749, OIDC Core, and RFC 8615 each
+require a flat object, so those endpoints answer with the object itself and the SDK deserializes it directly.
 
 `ResendCostEstimate` extends `CostEstimate`. `getTotal()` falls back to `total_credits`, and
 `getHasSufficientCredits()` falls back to `has_sufficient_resources`, so both accepted response forms remain
@@ -445,6 +522,22 @@ documented error codes; the platform may additionally return global transport st
 | **POST** `/accounts/{accountId}/fields/{fieldId}/validate` | `fields.validate(fieldId, value)` | Single validation | `FieldValidationResult` | 200, 401, 500 |
 | **POST** `/accounts/{accountId}/fields/validate-multiple` | `fields.validateMultiple(values)` | `FieldValidationPayload[]` | `List<FieldValidationResult>` | 200, 401, 500 |
 | **GET** `/field-types` | `fields.listTypes()` | — | `List<FieldTypeInfo>` | 200, 401, 500 |
+
+### OAuth — 4 operations
+
+| Operation | SDK method | Request | Return | Statuses |
+|---|---|---|---|---|
+| **POST** `/oauth/token` (`authorization_code`) | `oauth.exchangeAuthorizationCode(clientId, clientSecret, code, redirectUri, codeVerifier)` | OAuth token exchange | `OAuthTokens` | 200, 400, 401, 500 |
+| **POST** `/oauth/token` (`refresh_token`) | `oauth.refreshToken(clientId, clientSecret, refreshToken)` | OAuth token refresh | `OAuthTokens` | 200, 400, 401, 500 |
+| **POST** `/oauth/revoke` | `oauth.revoke(clientId, clientSecret, token[, tokenTypeHint])` | OAuth token revocation | `void` | 200, 401, 500 |
+| **GET** `/oauth/userinfo` | `oauth.userInfo()` | — | `OAuthUserInfo` | 200, 401, 403, 500 |
+| **GET** `/.well-known/oauth-protected-resource` | `oauth.protectedResourceMetadata()` | — | `OAuthProtectedResource` | 200, 500 |
+
+The metadata document is served at the API host root rather than under `/v1`, and the SDK derives that URL from
+the configured base URL. `POST /oauth/token` is one documented operation with two grant types, which is why
+five SDK methods cover four operations. Every one of them is public except `userinfo`, which reads the client's
+bearer token. Revocation answers 200 for any token outcome — revoked, already revoked, unknown, or malformed —
+so it cannot be used to probe whether a token exists; only failed client authentication answers 401.
 
 ### Signers — 5 operations
 
@@ -543,7 +636,10 @@ These public methods compose official operations, provide typed aliases, or expo
 | `WhatsappNotification.buttons[].url` | Additional response field retained by the Java model when present |
 | Concise `DocumentStatsRow` accessors | Java-only aliases for canonical notification/verification counters; historical input names deserialize without changing serialized JSON |
 | `webhooks.update(...)` | Alias for create-or-replace `register(...)` |
-| `templates.get(templateId[, accountId])` | Calls `GET /accounts/{accountId}/templates/{templateId}` and returns `TemplateDetails`; this detail route is outside the official 89-operation list |
+| `templates.get(templateId[, accountId])` | Calls `GET /accounts/{accountId}/templates/{templateId}` and returns `TemplateDetails`; this detail route is outside the official operation list |
+| `OAuthResource.generateCodeVerifier()` | Returns a fresh 43-character RFC 7636 PKCE verifier from `SecureRandom` |
+| `OAuthResource.generateState()` | Returns a fresh opaque `state` value for CSRF protection on the redirect URI |
+| `oauth.authorizationUrl(request)` | Builds the authorization-server URL, deriving the `S256` challenge from the verifier so the two can never disagree; makes no HTTP request |
 
 All account-scoped resource methods expose overloads that either accept an explicit account ID or use the
 client default. List methods expose no-argument overloads and parameter-map overloads where applicable.

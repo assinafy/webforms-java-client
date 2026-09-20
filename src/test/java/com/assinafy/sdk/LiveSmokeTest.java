@@ -16,6 +16,7 @@ import com.assinafy.sdk.models.FieldTypeInfo;
 import com.assinafy.sdk.models.FieldValidationResult;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.NotificationPreferences;
+import com.assinafy.sdk.models.OAuthProtectedResource;
 import com.assinafy.sdk.models.RegisterWebhookPayload;
 import com.assinafy.sdk.models.Signer;
 import com.assinafy.sdk.models.SignerRef;
@@ -772,8 +773,54 @@ class LiveSmokeTest {
         }
     }
 
+    @Test
+    @Order(35)
+    @DisplayName("OAuth protected-resource metadata is read when OAuth is deployed to the sandbox")
+    void oauthProtectedResourceMetadata() {
+        OAuthProtectedResource metadata;
+        try {
+            metadata = client().oauth.protectedResourceMetadata();
+        } catch (ApiException e) {
+            skipUnlessOAuthDeployed(e);
+            throw e;
+        }
+
+        assertThat(metadata.getResource()).isNotBlank();
+        assertThat(metadata.getAuthorizationServers()).isNotEmpty();
+        assertThat(metadata.getScopesSupported()).contains("documents:read");
+        assertThat(metadata.getBearerMethodsSupported()).contains("header");
+    }
+
+    @Test
+    @Order(36)
+    @DisplayName("OAuth token endpoint answers invalid_client for an unknown client when deployed")
+    void oauthTokenEndpointRejectsUnknownClient() {
+        ApiException failure;
+        try {
+            client().oauth.refreshToken("sdk-live-probe", null, "sdk-live-probe");
+            throw new AssertionError("Expected the token endpoint to reject an unknown client");
+        } catch (ApiException e) {
+            failure = e;
+        }
+
+        skipUnlessOAuthDeployed(failure);
+        assertThat(failure.getStatusCode()).isEqualTo(401);
+        assertThat(failure.getOAuthError()).isEqualTo("invalid_client");
+    }
+
     private static Signer ensureTestSigner(AssinafyClient client) {
         return client.signers.findOrCreate(new CreateSignerPayload("SDK Smoke Signer", testEmail()));
+    }
+
+    /**
+     * OAuth reaches production ahead of the sandbox. There the router answers 404 for {@code /oauth/*} and the
+     * edge answers 403 for the host-root metadata document; both are environment facts rather than SDK
+     * failures, so both skip.
+     */
+    private static void skipUnlessOAuthDeployed(ApiException e) {
+        if (e.getStatusCode() == 404 || e.getStatusCode() == 403) {
+            Assumptions.assumeTrue(false, "OAuth is not deployed to the current sandbox version");
+        }
     }
 
     private static void skipIfInsufficientResources(ApiException e) {

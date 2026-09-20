@@ -1,7 +1,7 @@
 # Examples
 
 Worked end-to-end examples for the SDK. The [API reference](API_REFERENCE.md) contains the complete
-89-operation matrix and centralized request/response payload definitions.
+93-operation matrix and centralized request/response payload definitions.
 
 ## Response envelope
 
@@ -25,6 +25,10 @@ Error envelope example (raised as `ApiException`, `getStatusCode() == 401`):
 ```json
 { "status": 401, "data": null, "message": "Credenciais inválidas." }
 ```
+
+The OAuth endpoints are the documented exception: RFC 6749, OpenID Connect, and RFC 8615 each require a flat
+object, so `/oauth/token`, `/oauth/revoke`, `/oauth/userinfo`, and the protected-resource metadata answer with
+the object itself. A failure there is still an `ApiException`, and `getOAuthError()` carries its `error` code.
 
 ## Client Setup
 
@@ -144,6 +148,150 @@ publicClient.auth.requestPasswordReset("user@example.com");         // PUT /auth
 publicClient.auth.resetPassword("user@example.com", resetToken, "new"); // PUT /authentication/reset-password
 publicClient.auth.resetPassword("user@example.com", null, "new");       // token omitted from the body
 ```
+
+## OAuth — acting in someone else's workspace
+
+An API key automates *your own* workspace. OAuth is for an application that other Assinafy customers connect
+to *their* workspace: they approve it once, and you receive tokens limited to the permissions they granted and
+to the single workspace they chose. Nothing below applies to an API-key integration.
+
+Register the application in the Assinafy app under **Settings → OAuth applications**; you receive a
+`client_id`, and a `client_secret` for a confidential (server-side) application. PKCE is mandatory for every
+application, confidential ones included.
+
+### 1. Start a connection
+
+```java
+// Fresh per connection attempt. Keep both in the user's session — steps 2 and 3 need them.
+String verifier = OAuthResource.generateCodeVerifier();
+String state = OAuthResource.generateState();
+
+String authorizeUrl = client.oauth.authorizationUrl(
+    new OAuthAuthorizationRequest("your-client-id", "https://myapp.example/oauth/callback")
+        .setScopes(List.of("documents:read", "documents:write", "offline_access"))
+        .setState(state)
+        .setCodeVerifier(verifier));
+// Send the browser there with a full page navigation, not an AJAX call.
+```
+
+Produces, with every value URL-encoded:
+
+```
+https://auth.assinafy.com.br/oauth/authorize
+  ?response_type=code
+  &client_id=your-client-id
+  &redirect_uri=https://myapp.example/oauth/callback
+  &scope=documents:read documents:write offline_access
+  &state=<state>
+  &code_challenge=<base64url(sha256(verifier))>
+  &code_challenge_method=S256
+  &resource=https://api.assinafy.com.br
+```
+
+### 2. Handle the return and exchange the code
+
+```java
+// On https://myapp.example/oauth/callback?code=...&state=...&iss=https://auth.assinafy.com.br
+if (!storedState.equals(returnedState) || !"https://auth.assinafy.com.br".equals(returnedIss)) {
+    throw new IllegalStateException("Authorization response is not ours");
+}
+
+OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
+    "your-client-id", "your-client-secret",   // pass null as the secret for a public application
+    code, "https://myapp.example/oauth/callback", storedVerifier);
+```
+
+Request `POST /oauth/token`:
+
+```json
+{
+  "grant_type": "authorization_code",
+  "code": "<one-time code, valid 60 seconds>",
+  "redirect_uri": "https://myapp.example/oauth/callback",
+  "code_verifier": "<the stored verifier>",
+  "client_id": "your-client-id",
+  "client_secret": "your-client-secret",
+  "resource": "https://api.assinafy.com.br"
+}
+```
+
+Response — a flat object, not the `{status,message,data}` envelope:
+
+```json
+{
+  "access_token": "eyJhbGciOiJSUzI1...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "def502...",
+  "scope": "documents:read documents:write",
+  "id_token": null
+}
+```
+
+`scope` is what you actually received; read it instead of assuming. `refresh_token` is present only when
+`offline_access` was requested and consented, and `id_token` only when `openid` was granted.
+
+### 3. Call the API as the user
+
+```java
+AssinafyClient asUser = new AssinafyClient(
+    new AssinafyClientOptions().setToken(tokens.getAccessToken()));
+
+// A token belongs to exactly one workspace, and the workspace list returns that one.
+String workspaceId = asUser.accounts.list().get(0).getId();   // store it beside the tokens
+
+PaginatedResult<DocumentListItem> documents = asUser.documents.list(Map.of(), workspaceId);
+```
+
+Calling a different workspace — even another one the same user belongs to — answers 403. Connect each
+workspace separately and keep tokens per workspace.
+
+### 4. Refresh, and handle a missing scope
+
+```java
+// Access tokens last one hour. Save the NEW refresh token before doing anything else with the response:
+// every refresh retires the previous one, and replaying a retired token ends the whole connection.
+OAuthTokens renewed = client.oauth.refreshToken("your-client-id", "your-client-secret", storedRefreshToken);
+store.save(renewed.getRefreshToken());
+
+try {
+    asUser.documents.upload(new File("contract.pdf"));
+} catch (ApiException e) {
+    if ("insufficient_scope".equals(e.getOAuthError())) {
+        // Reconnect asking for e.getRequiredScope() as well — not a request to retry.
+        redirectToAuthorize(e.getRequiredScope());
+    } else if (e.getStatusCode() == 401) {
+        // Token expired or revoked: refresh, and if that fails ask the user to connect again.
+    }
+}
+```
+
+### 5. Identify the user, and disconnect
+
+```java
+// Needs the openid scope; name needs profile and email needs email.
+OAuthUserInfo who = asUser.oauth.userInfo();        // GET /oauth/userinfo
+String subject = who.getSub();
+
+// When the user disconnects in your product, revoke rather than only forgetting the token.
+// Every token outcome answers 200, so this never reveals whether a token existed.
+client.oauth.revoke("your-client-id", "your-client-secret", storedRefreshToken, "refresh_token");
+```
+
+Discovery, if you configure endpoints dynamically:
+
+```java
+OAuthProtectedResource metadata = client.oauth.protectedResourceMetadata();
+// GET https://api.assinafy.com.br/.well-known/oauth-protected-resource
+metadata.getResource();              // "https://api.assinafy.com.br"
+metadata.getAuthorizationServers();  // ["https://auth.assinafy.com.br"]
+metadata.getScopesSupported();
+```
+
+Most OAuth libraries need only the issuer, `https://auth.assinafy.com.br`, and read the authorize, token,
+revoke, userinfo, and JWKS URLs from its own
+`/.well-known/oauth-authorization-server` document. That document is served by the authorization server, not
+by this API.
 
 ## Documents
 
@@ -727,6 +875,11 @@ try {
     // API returned an error (HTTP non-2xx or an error envelope) — includes server-side 400 validation errors
     System.err.println("API " + e.getStatusCode() + ": " + e.getMessage());
     System.err.println("Body: " + e.getResponseBody());
+    if (e.getOAuthError() != null) {
+        // RFC 6749 code: invalid_grant, invalid_client, invalid_target, unsupported_grant_type,
+        // or insufficient_scope — in which case getRequiredScope() names the scope to reconnect with.
+        System.err.println("OAuth " + e.getOAuthError() + " scope=" + e.getRequiredScope());
+    }
     if (e.getStatusCode() == 429 && e.getRetryAfterSeconds() != null) {
         try {
             Thread.sleep(e.getRetryAfterSeconds() * 1000L); // honor Retry-After, or set options.maxRetries

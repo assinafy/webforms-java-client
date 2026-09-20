@@ -5,13 +5,13 @@
 Java client SDK for the [Assinafy API](https://api.assinafy.com.br/v1/docs), the Brazilian digital signature
 platform.
 
-Covers all 89 operations in the official API contract: accounts, users, authentication, documents, signers,
-assignments, fields, templates, tags, webhooks, and the signer-facing signing flows.
+Covers all 93 operations in the official API contract: accounts, users, authentication, OAuth, documents,
+signers, assignments, fields, templates, tags, webhooks, and the signer-facing signing flows.
 
 > **Two Java clients for the same API.** Assinafy ships two. `com.assinafy:assinafy-sdk` is the current one
 > and where a **new** integration should start. This artifact is the older client, maintained for integrations
-> already on it. Both expose `com.assinafy.sdk.AssinafyClient` and both cover all 89 operations, but they are
-> not drop-in equivalents:
+> already on it. Both expose `com.assinafy.sdk.AssinafyClient` and both cover every documented operation, but
+> they are not drop-in equivalents:
 >
 > | | `assinafy-sdk` | `webforms-java-client-sdk` (this one) |
 > |---|---|---|
@@ -46,14 +46,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.2.0</version>
+    <version>2.3.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.2.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.3.0'
 ```
 
 The artifact is published to GitHub Packages, so the repository must be declared once in your build. See
@@ -121,7 +121,8 @@ new AssinafyClient(new AssinafyClientOptions().setToken("jwt_xxx").setAccountId(
 new AssinafyClient(new AssinafyClientOptions());
 ```
 
-Section 10 covers obtaining a token and managing API keys.
+Section 10 covers obtaining a token and managing API keys, and section 11 covers OAuth, which is how an
+application acts in *other people's* workspaces.
 
 ---
 
@@ -141,6 +142,10 @@ Three response shapes follow from that:
 - **`byte[]`** for binary downloads (logos, document artifacts, page images, thumbnails, signature images).
   These are not envelopes; when the server answers one with an error envelope instead, the SDK detects the JSON
   body and raises `ApiException` rather than handing you the error as if it were a PDF.
+
+The OAuth endpoints in section 11 are the one documented exception: RFC 6749, OpenID Connect, and RFC 8615 each
+require a flat object, so they answer with the object rather than the envelope. The SDK reads it directly and
+still raises `ApiException` on failure.
 
 Retries are opt-in and deliberately narrow. With `maxRetries` above zero the client retries only `GET`, `HEAD`,
 and `OPTIONS` that receive 429 or 503. It honors a numeric `Retry-After` or `X-Rate-Limit-Reset`, caps the wait
@@ -325,12 +330,50 @@ CreateAssignmentPayload collect = new CreateAssignmentPayload()
             new DisplaySettings(100, 100, 240, 40, 12))))));
 ```
 
-**Verification and notification.** `SignerRef.verificationMethod` accepts `Email`, `Whatsapp`, or
-`DigitalCertificate`, and `notificationMethods` accepts `Email` or `Whatsapp`. If neither is supplied both
-default to `Email`; supplying one lets the API infer the other. Only one notification channel per signer.
-Digital-certificate signers need a CPF/CNPJ in `government_id`, the account feature enabled, and a signing step
-containing no other signer; the resulting qualified PAdES PDF is
-`client.documents.download(documentId, "pades")`.
+### Verification and notification methods
+
+Set per signer at assignment time through `SignerRef.setVerificationMethod(...)` and
+`setNotificationMethods(...)`. Verification and notification are **coupled**: send one, both, or neither, and
+the missing side is inferred. With neither, both default to `Email`.
+
+| Method | How it works | Cost per signer |
+| --- | --- | --- |
+| `Email` *(default)* | A one-time code by email, required before signing | Free |
+| `Whatsapp` | A one-time code over WhatsApp | Verification is free; the WhatsApp notification it requires costs 0.45 credits, on paid plans only |
+| `DigitalCertificate` | The signer signs with their **own ICP-Brasil certificate (A1 or A3)** through the Web PKI browser extension, producing a **qualified PAdES** signature | 2 credits, plus the notification cost |
+
+Allowed pairings — an invalid one answers HTTP 400:
+
+| Verification | Accepted notifications |
+| --- | --- |
+| `Email` | `Email` |
+| `Whatsapp` | `Whatsapp` |
+| `DigitalCertificate` | `Email` **or** `Whatsapp` |
+
+One notification channel per signer. No verification method is priced on its own: what is billed is the
+**notification** it travels with — plus, for a digital certificate, the signature itself. So two email-notified
+signers cost 0 credits and two WhatsApp-notified ones cost 0.9.
+
+```java
+CreateAssignmentPayload overWhatsapp = new CreateAssignmentPayload()
+    .setMethod("virtual")
+    .setSigners(List.of(SignerRef.of(signer.getId())
+        .setVerificationMethod("Whatsapp")
+        .setNotificationMethods(List.of("Whatsapp"))
+        .setStep(1)));
+```
+
+**ICP-Brasil digital certificates (A1 and A3).** These need the **Digital Certificate** feature on the account
+(Standard and Pro plans), a CPF or CNPJ in the signer's `government_id`, and exactly **one certificate signer
+alone in that step**. A CPF requires that person's own certificate (an e-CPF, or an e-CNPJ naming them as legal
+representative); a CNPJ requires the company's e-CNPJ. A1 (a file) and A3 (a token or smartcard) both work —
+they differ only in where the signer's key is stored, and both are reached through the same Web PKI extension.
+The 2-credit charge appears in the estimate under `SignatureDigitalCertificate`.
+
+The ordinary signing endpoint **rejects** certificate signers: their signature comes from a two-step handshake
+with the Web PKI extension (`POST /v1/signers/certificate/start`, then `.../complete`). Those two routes are
+deployed on production only, are not in the published OpenAPI document, and are therefore not wrapped by this
+server-side SDK. Once the flow completes, the qualified PDF is `client.documents.download(documentId, "pades")`.
 
 **Signing order.** `step` sequences the signers: everyone sharing a step signs in parallel, and the next step
 is notified only after the previous one completes. If you use it, every signer needs one, and the values must
@@ -535,7 +578,123 @@ publicClient.auth.resetPassword("user@example.com", resetToken, "new-password");
 
 ---
 
-## 11. Errors
+## 11. OAuth — acting in someone else's workspace
+
+Everything above assumes the workspace is yours. OAuth is the other case: an application that *other* Assinafy
+customers connect to *their* workspace. They approve it once, and you receive tokens limited to the permissions
+they granted and to the one workspace they chose — never their password or API key, and they can switch it off
+at any time. If you are automating your own account, keep the API key and skip this section.
+
+Register the application in the Assinafy app under **Settings → OAuth applications**. You receive a
+`client_id`, plus a `client_secret` if it is *confidential* (runs on a server you control). PKCE is mandatory
+for every application, confidential ones included.
+
+**1. Start a connection.** Generate a verifier and a state per attempt and keep both in the user's session.
+
+```java
+String verifier = OAuthResource.generateCodeVerifier();
+String state = OAuthResource.generateState();
+
+String authorizeUrl = client.oauth.authorizationUrl(
+    new OAuthAuthorizationRequest("your-client-id", "https://myapp.example/oauth/callback")
+        .setScopes(List.of("documents:read", "documents:write", "offline_access"))
+        .setState(state)
+        .setCodeVerifier(verifier));
+```
+
+Send the browser there with a full page navigation. `response_type=code` and `code_challenge_method=S256` are
+fixed, the challenge is derived from the verifier, and `resource` defaults to the origin of the client's base
+URL. The redirect URI must be HTTPS, carry no fragment, and match a registered value character for character —
+`…/callback` and `…/callback/` are different URIs. If the client ID or redirect URI is wrong, the user is *not*
+sent back to you: the authorization server shows an error on its own page.
+
+| Scope | Lets your app |
+|---|---|
+| `documents:read` | Read documents, their signers, assignments, and activity |
+| `documents:write` | Create documents and send them for signature |
+| `templates:read` / `templates:write` | Read, and create or change, templates |
+| `account:read` | Read the workspace profile, theme, and logo |
+| `openid` / `profile` / `email` | Identify the user, and read their name and email |
+| `offline_access` | Receive a refresh token, so the app keeps working while the user is away |
+
+Request the minimum: the user approves everything or nothing, and each permission is another line they read.
+Billing, account lifecycle, credentials, and administration are never reachable with an OAuth token.
+
+**2. Handle the return.** Check `state` against the stored value and `iss` against
+`https://auth.assinafy.com.br` before anything else. Then exchange the code from your server — it is single-use
+and expires 60 seconds after approval.
+
+```java
+OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
+    "your-client-id", "your-client-secret",   // null secret for a public application
+    code, "https://myapp.example/oauth/callback", storedVerifier);
+```
+
+Read `tokens.getScope()` for what you actually received rather than assuming. `getRefreshToken()` is populated
+only when `offline_access` was granted, and `getIdToken()` only when `openid` was.
+
+**3. Call the API as the user.** A token belongs to exactly one workspace, and the workspace list returns that
+one; store its ID beside the tokens.
+
+```java
+AssinafyClient asUser = new AssinafyClient(
+    new AssinafyClientOptions().setToken(tokens.getAccessToken()));
+String workspaceId = asUser.accounts.list().get(0).getId();
+```
+
+Calling any other workspace answers 403, even one the same user belongs to. If a customer uses several, connect
+each separately and keep tokens per workspace.
+
+**4. Keep it alive.** Access tokens last one hour; a connection lasts 30 days from approval, and refreshing
+does not extend it, so plan for users to reconnect monthly.
+
+```java
+OAuthTokens renewed = client.oauth.refreshToken("your-client-id", "your-client-secret", storedRefreshToken);
+store.save(renewed.getRefreshToken());   // before using anything else in the response
+```
+
+Every refresh issues a new refresh token and retires the old one. A reused refresh token cannot be told apart
+from a stolen one being replayed, so it ends the whole connection: treat a timeout as "maybe it worked",
+re-read your saved token instead of retrying blindly, and refresh one at a time per connection.
+
+**5. Handle the two OAuth failures.** A missing permission answers 403 with a challenge naming it; the SDK
+surfaces both parts.
+
+```java
+catch (ApiException e) {
+    if ("insufficient_scope".equals(e.getOAuthError())) {
+        reconnectRequesting(e.getRequiredScope());   // reconnect, not retry
+    } else if (e.getStatusCode() == 401) {
+        // Expired or revoked: refresh, and if that fails ask the user to connect again.
+    }
+}
+```
+
+A 403 *without* that code has another cause: a different workspace, the user's own role, or an area OAuth
+tokens can never reach.
+
+**6. Identify and disconnect.**
+
+```java
+OAuthUserInfo who = asUser.oauth.userInfo();   // needs openid; name needs profile, email needs email
+
+// On disconnect, revoke rather than only forgetting the token. Every token outcome answers 200.
+client.oauth.revoke("your-client-id", "your-client-secret", storedRefreshToken, "refresh_token");
+```
+
+`client.oauth.protectedResourceMetadata()` reads the RFC 9728 document at the API host root, naming the
+canonical resource identifier and the authorization server. Most OAuth libraries need only the issuer,
+`https://auth.assinafy.com.br`, and read the rest from its own `/.well-known/oauth-authorization-server`
+document, which the authorization server serves — not this API.
+
+Before going live: a new verifier and state per attempt; `state` and `iss` checked; the secret only on your
+server; the new refresh token saved before use; 401 handled; the workspace ID stored per connection; every
+production redirect URI registered; only the permissions you need; tokens revoked on disconnect. A new
+application is unverified and can connect to at most 25 workspaces until Assinafy reviews it.
+
+---
+
+## 12. Errors
 
 Everything the SDK throws descends from `AssinafyException`, so one catch block can be the backstop while the
 three subtypes let you separate "my input was wrong" from "the API said no" from "the network failed".
@@ -552,6 +711,7 @@ try {
     // The API rejected it. getResponseBody() keeps the complete error JSON.
     System.err.println("API error " + e.getStatusCode() + ": " + e.getMessage());
     Integer backoff = e.getRetryAfterSeconds(); // populated only for retryable 429/503
+    String oauthError = e.getOAuthError();      // RFC 6749 code on an OAuth failure; see section 11
 } catch (NetworkException e) {
     // Transport failure, or a response body that could not be parsed.
     System.err.println("Network: " + e.getMessage());
@@ -565,7 +725,20 @@ The standard error body is `{ "status": integer, "message": string, "data": obje
 
 ---
 
-## 12. Development
+## 13. Environments
+
+| Environment | Base URL |
+| --- | --- |
+| Production | `https://api.assinafy.com.br/v1` (default) |
+| Sandbox | `https://sandbox.assinafy.com.br/v1` — set it with `setBaseUrl(...)`; this artifact exposes no sandbox constant |
+
+The sandbox trails production. A route the sandbox router answers 404 for while `api.assinafy.com.br` serves it
+is deployment lag, not a missing route — today that covers the OAuth endpoints and the two digital-certificate
+routes.
+
+---
+
+## 14. Development
 
 ```bash
 # Run tests in Docker (recommended)
@@ -602,6 +775,16 @@ CI runs `./mvnw verify` on the current JDK 25 LTS. GitLab is the source of truth
 the equivalent Actions workflows run. Releases publish to GitHub Packages on a `v*` tag via the `release`
 profile (`-Prelease`, which also builds `-sources` and `-javadoc` jars).
 
+---
+
+## Documentation
+
+- [docs/API_REFERENCE.md](docs/API_REFERENCE.md) — the per-operation lookup table
+- [docs/EXAMPLES.md](docs/EXAMPLES.md) — longer runnable programs
+- [docs/INSTALLATION.md](docs/INSTALLATION.md) — build setup
+- [README.md](README.md) — this same guide, in Portuguese
+- [API documentation](https://api.assinafy.com.br/v1/docs)
+
 ## License
 
-MIT
+Distributed under the [MIT](LICENSE) license.

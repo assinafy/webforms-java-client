@@ -7,4 +7,7 @@ target/
 .env
 .env.*
 .audit/
+.claude/
+AGENTS.md
+CLAUDE.md
 .DS_Store
