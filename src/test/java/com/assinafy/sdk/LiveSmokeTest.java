@@ -681,42 +681,6 @@ class LiveSmokeTest {
     }
 
     @Test
-    @Order(32)
-    @DisplayName("Published collect estimate without signers is exercised when deployed to the sandbox")
-    void collectEstimateWithoutSigners() throws Exception {
-        AssinafyClient client = client();
-        String accountId = null;
-        try {
-            accountId = client.accounts.create(
-                    new AccountPayload("SDK Collect Estimate Account " + shortId())).getId();
-            FieldDefinition field = client.fields.create(
-                    new CreateFieldPayload("text", "SDK Collect Estimate " + shortId()), accountId);
-            Signer signer = client.signers.create(
-                    new CreateSignerPayload("SDK Collect Estimate Signer", testEmail()), accountId);
-            DocumentDetails doc = client.documents.upload(
-                    samplePdf(), "sdk-collect-estimate-" + shortId() + ".pdf", accountId);
-            DocumentDetails ready = client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
-            CollectAssignmentEntry entry = new CollectAssignmentEntry(ready.getPages().get(0).getId(), List.of(
-                    new CollectFieldPlacement(signer.getId(), field.getId(),
-                            new DisplaySettings(10, 10, 100, 30, 12))));
-
-            try {
-                assertThat(client.assignments.estimateCost(doc.getId(), new CreateAssignmentPayload()
-                        .setMethod("collect").setCollectEntries(List.of(entry)))).isNotNull();
-            } catch (ApiException e) {
-                if (e.getStatusCode() == 400 && e.getMessage() != null
-                        && e.getMessage().contains("signatários")) {
-                    Assumptions.assumeTrue(false,
-                            "Published signer-free collect estimate is not deployed to the current sandbox");
-                }
-                throw e;
-            }
-        } finally {
-            if (accountId != null) client.accounts.delete(false, accountId);
-        }
-    }
-
-    @Test
     @Order(33)
     @DisplayName("Published account notification_sender_type create field is exercised when deployed")
     void accountNotificationSenderType() {

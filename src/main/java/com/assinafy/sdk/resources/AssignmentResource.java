@@ -253,9 +253,11 @@ public final class AssignmentResource extends BaseResource {
             throw new ValidationException("At least one collect entry is required");
         }
 
+        // Required for both methods: creation needs to know who signs, and an estimate is priced
+        // per signer. The contract marks `signers` required only for `virtual`, but the API
+        // answers a signer-less body with 400 "Pelo menos um signatários precisa ser informado."
         List<SignerRef> signerRefs = payload.resolveSignerRefs();
-        boolean collectEstimate = estimate && "collect".equals(method);
-        if (signerRefs.isEmpty() && !collectEstimate) {
+        if (signerRefs.isEmpty()) {
             throw new ValidationException("At least one signer is required");
         }
 
@@ -266,7 +268,7 @@ public final class AssignmentResource extends BaseResource {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("method", method);
-        if (!normalisedSigners.isEmpty()) body.put("signers", normalisedSigners);
+        body.put("signers", normalisedSigners);
         if (!estimate) {
             if (payload.getMessage() != null) body.put("message", payload.getMessage());
             if (payload.getExpiresAt() != null) body.put("expires_at", payload.getExpiresAt());

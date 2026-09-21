@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.4.0] - 2026-09-21
+
+### Fixed
+- Require at least one signer on every assignment body and always send the `signers` key. The
+  published contract marks `signers` as required only for `virtual`, but the API prices per signer
+  in both modes and answers a signer-less body with
+  `400 "Pelo menos um signatários precisa ser informado."` `buildPayload` carved out collect
+  estimates and then omitted the key entirely, so such an estimate could never be priced.
+- Drop the `collectEstimateWithoutSigners` live test. It caught that 400 and treated it as "not
+  deployed to this environment", which is what kept the contract misreading alive.
+
 ## [2.3.0] - 2026-09-20
 
 ### Added

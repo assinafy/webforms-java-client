@@ -216,11 +216,12 @@ class AssignmentResourceTest {
     }
 
     @Test
-    void estimateCost_acceptsCollectEntriesWithoutSigners() throws Exception {
+    void estimateCost_sendsSignersAlongsideCollectEntries() throws Exception {
         server.enqueue(okJson(Map.of("total_credits", 0)));
 
         resource.estimateCost("doc-1", new CreateAssignmentPayload()
                 .setMethod("collect")
+                .setSigners(List.of(new SignerRef().setVerificationMethod("DigitalCertificate")))
                 .setEntries(List.of(new CollectAssignmentEntry("p1", List.of(
                         new CollectFieldPlacement("s1", "f1",
                                 new DisplaySettings(10, 20, 100, 30, 12, "Arial", "#D5EBFF")))))));
@@ -233,7 +234,19 @@ class AssignmentResourceTest {
                 .contains("\"field_id\":\"f1\"")
                 .contains("\"fontSize\":12.0")
                 .contains("\"backgroundColor\":\"#D5EBFF\"");
-        assertThat(body).doesNotContain("\"signers\"");
+        // collect is priced per signer too, so the channels must reach the API.
+        assertThat(body).contains("\"verification_method\":\"DigitalCertificate\"");
+    }
+
+    @Test
+    void estimateCost_requiresAtLeastOneSignerInEitherMethod() {
+        // The API refuses a signer-less estimate in either mode.
+        assertThatThrownBy(() -> resource.estimateCost("doc-1", new CreateAssignmentPayload()
+                .setMethod("collect")
+                .setEntries(List.of(new CollectAssignmentEntry("p1", List.of(
+                        new CollectFieldPlacement("s1", "f1", new DisplaySettings(10, 20, 100, 30, 12, "Arial", "#D5EBFF"))))))))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("At least one signer");
     }
 
     @Test
