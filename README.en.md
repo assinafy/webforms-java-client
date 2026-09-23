@@ -46,14 +46,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.3.0</version>
+    <version>2.5.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.3.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.5.0'
 ```
 
 The artifact is published to GitHub Packages, so the repository must be declared once in your build. See
@@ -614,6 +614,7 @@ sent back to you: the authorization server shows an error on its own page.
 | `documents:write` | Create documents and send them for signature |
 | `templates:read` / `templates:write` | Read, and create or change, templates |
 | `account:read` | Read the workspace profile, theme, and logo |
+| `webhooks:write` | Configure and deactivate the workspace webhook subscription |
 | `openid` / `profile` / `email` | Identify the user, and read their name and email |
 | `offline_access` | Receive a refresh token, so the app keeps working while the user is away |
 
@@ -767,9 +768,8 @@ requires the short-lived signer access code and one-time verification code deliv
 account with document/credit capacity. Use the signer self-service sequence from section 8 with a disposable
 assignment when validating that final step; CI does not fabricate or persist either credential.
 
-GitHub's manual `sandbox-live` workflow reads credentials and test recipients from the protected `sandbox`
-environment. Notification-producing cases remain disabled unless the dispatch input explicitly enables them.
-The mirrored GitLab manual job uses protected, masked, sandbox-scoped variables and the same opt-in rule.
+The GitLab manual job uses protected, masked, sandbox-scoped variables; notification-producing
+cases require an explicit opt-in.
 
 CI runs `./mvnw verify` on the current JDK 25 LTS. GitLab is the source of truth and mirrors to GitHub, where
 the equivalent Actions workflows run. Releases publish to GitHub Packages on a `v*` tag via the `release`

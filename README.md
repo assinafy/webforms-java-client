@@ -48,14 +48,14 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.3.0</version>
+    <version>2.5.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.3.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.5.0'
 ```
 
 O artefato é publicado no GitHub Packages, então o repositório precisa ser declarado uma vez no seu
@@ -650,6 +650,7 @@ autorização mostra o erro na própria página dele.
 | `documents:write` | Criar documentos e enviá-los para assinatura |
 | `templates:read` / `templates:write` | Ler, e criar ou alterar, templates |
 | `account:read` | Ler o perfil, o tema e o logo do workspace |
+| `webhooks:write` | Configurar e desativar a assinatura de webhooks do workspace |
 | `openid` / `profile` / `email` | Identificar o usuário e ler nome e e-mail |
 | `offline_access` | Receber um refresh token, para seguir funcionando na ausência do usuário |
 

@@ -249,6 +249,7 @@ endpoint with `setAuthorizationEndpoint(...)` and the resource indicator with `s
 | `templates:read` | Read templates, their pages, roles, fields, and tags |
 | `templates:write` | Create, update, and delete templates and their contents |
 | `account:read` | Read the workspace profile, theme, and logo |
+| `webhooks:write` | Configure and deactivate the workspace webhook subscription |
 | `openid` | Identify the user and enable `GET /oauth/userinfo` |
 | `profile` | Include the user's name in the `id_token` and userinfo claims |
 | `email` | Include the user's email and its verification status in those claims |

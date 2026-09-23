@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.5.0] - 2026-09-23
+
+### Added
+- OAuth authorization requests can include `webhooks:write` to configure and deactivate a workspace webhook subscription.
+
 ## [2.4.0] - 2026-09-21
 
 ### Fixed

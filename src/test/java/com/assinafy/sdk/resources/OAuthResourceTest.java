@@ -78,7 +78,7 @@ class OAuthResourceTest {
     void authorizationUrl_buildsTheDocumentedQueryWithAnS256Challenge() throws Exception {
         String url = resource.authorizationUrl(
                 new OAuthAuthorizationRequest("client-1", REDIRECT_URI)
-                        .setScopes(List.of("documents:read", "documents:write", "offline_access"))
+                        .setScopes(List.of("documents:read", "webhooks:write", "offline_access"))
                         .setState("state-1")
                         .setCodeVerifier(VERIFIER)
                         .setNonce("nonce-1"));
@@ -94,7 +94,7 @@ class OAuthResourceTest {
         assertThat(parsed.queryParameter("client_id")).isEqualTo("client-1");
         assertThat(parsed.queryParameter("redirect_uri")).isEqualTo(REDIRECT_URI);
         assertThat(parsed.queryParameter("scope"))
-                .isEqualTo("documents:read documents:write offline_access");
+                .isEqualTo("documents:read webhooks:write offline_access");
         assertThat(parsed.queryParameter("state")).isEqualTo("state-1");
         assertThat(parsed.queryParameter("code_challenge")).isEqualTo(expectedChallenge);
         assertThat(parsed.queryParameter("code_challenge_method")).isEqualTo("S256");
