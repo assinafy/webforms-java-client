@@ -22,8 +22,10 @@ import com.assinafy.sdk.resources.TagResource;
 import com.assinafy.sdk.resources.TemplateResource;
 import com.assinafy.sdk.resources.WebhookResource;
 import com.assinafy.sdk.resources.UserResource;
+import okhttp3.ConnectionSpec;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
+import okhttp3.TlsVersion;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,6 +41,11 @@ import java.util.function.Consumer;
  * are unwrapped from Assinafy's {@code {status,message,data}} envelope; binary download methods return bytes.</p>
  */
 public final class AssinafyClient {
+
+    /** HTTPS requires TLS 1.2 or later; cleartext remains only for the loopback URLs the base-URL check accepts. */
+    private static final List<ConnectionSpec> CONNECTION_SPECS = List.of(
+            new ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS).tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2).build(),
+            ConnectionSpec.CLEARTEXT);
 
     private final OkHttpClient httpClient;
     private final String baseUrl;
@@ -96,6 +103,7 @@ public final class AssinafyClient {
         final String apiKey = options.getApiKey();
         final String token = options.getToken();
         this.httpClient = new OkHttpClient.Builder()
+                .connectionSpecs(CONNECTION_SPECS)
                 .connectTimeout(options.getTimeoutMs(), TimeUnit.MILLISECONDS)
                 .readTimeout(options.getTimeoutMs(), TimeUnit.MILLISECONDS)
                 .writeTimeout(options.getTimeoutMs(), TimeUnit.MILLISECONDS)

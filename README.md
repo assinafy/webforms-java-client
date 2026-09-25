@@ -41,6 +41,7 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 - Java 25+ (o SDK é compilado e verificado no Java 25 LTS atual)
 - Maven 3.9.16 ou 3.x mais recente (o wrapper fixa 3.9.16); para Gradle, use um release que suporte
   JDK 25
+- TLS 1.2 ou superior: o cliente recusa TLS 1.0 e 1.1
 
 **Maven**
 
@@ -48,14 +49,14 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.5.0</version>
+    <version>2.5.1</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.5.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.5.1'
 ```
 
 O artefato é publicado no GitHub Packages, então o repositório precisa ser declarado uma vez no seu

@@ -5,7 +5,9 @@ import com.assinafy.sdk.models.DocumentStatus;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesOptions;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesResult;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesSigner;
+import okhttp3.ConnectionSpec;
 import okhttp3.OkHttpClient;
+import okhttp3.TlsVersion;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -30,6 +32,14 @@ class AssinafyClientTest {
         assertThat(client.accounts).isNotNull();
         assertThat(client.users).isNotNull();
         assertThat(client.documents).isNotNull();
+    }
+
+    @Test
+    void httpClient_requiresTls12OrLaterForHttps() {
+        OkHttpClient httpClient = new AssinafyClient(new AssinafyClientOptions().setAccountId("acc")).getHttpClient();
+        assertThat(httpClient.connectionSpecs().stream().filter(ConnectionSpec::isTls).toList())
+                .isNotEmpty()
+                .allSatisfy(spec -> assertThat(spec.tlsVersions()).containsOnly(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2));
     }
 
     @Test

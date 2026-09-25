@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.5.1] - 2026-09-25
+
+### Security
+- The SDK's own HTTPS client now requires TLS 1.2 or newer; TLS 1.0 and 1.1 are refused. Clients supplied by the caller are unchanged.
+
 ## [2.5.0] - 2026-09-23
 
 ### Added

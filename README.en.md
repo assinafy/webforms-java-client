@@ -39,6 +39,7 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 
 - Java 25+ (the SDK is compiled and verified on the current Java 25 LTS)
 - Maven 3.9.16 or newer 3.x (the wrapper pins 3.9.16); for Gradle, use a release that supports JDK 25
+- TLS 1.2 or later: the client refuses TLS 1.0 and 1.1
 
 **Maven**
 
@@ -46,14 +47,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.5.0</version>
+    <version>2.5.1</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.5.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.5.1'
 ```
 
 The artifact is published to GitHub Packages, so the repository must be declared once in your build. See
