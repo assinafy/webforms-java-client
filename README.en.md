@@ -47,14 +47,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.5.1</version>
+    <version>2.6.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.5.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.6.0'
 ```
 
 The artifact is published to GitHub Packages, so the repository must be declared once in your build. See
@@ -623,8 +623,9 @@ Request the minimum: the user approves everything or nothing, and each permissio
 Billing, account lifecycle, credentials, and administration are never reachable with an OAuth token.
 
 **2. Handle the return.** Check `state` against the stored value and `iss` against
-`https://auth.assinafy.com.br` before anything else. Then exchange the code from your server — it is single-use
-and expires 60 seconds after approval.
+`https://auth.assinafy.com.br` before anything else, including on an `error=` return (such as `access_denied`
+when the user declines), which carries no code to exchange. Then exchange the code from your server — it is
+single-use and expires 60 seconds after approval.
 
 ```java
 OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
@@ -633,7 +634,8 @@ OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
 ```
 
 Read `tokens.getScope()` for what you actually received rather than assuming. `getRefreshToken()` is populated
-only when `offline_access` was granted, and `getIdToken()` only when `openid` was.
+only when `offline_access` was granted, and `getIdToken()` only when `openid` was; the SDK does not validate the
+`id_token`, so check it with an OpenID Connect library before trusting it.
 
 **3. Call the API as the user.** A token belongs to exactly one workspace, and the workspace list returns that
 one; store its ID beside the tokens.
@@ -647,17 +649,27 @@ String workspaceId = asUser.accounts.list().get(0).getId();
 Calling any other workspace answers 403, even one the same user belongs to. If a customer uses several, connect
 each separately and keep tokens per workspace.
 
-**4. Keep it alive.** Access tokens last one hour; a connection lasts 30 days from approval, and refreshing
-does not extend it, so plan for users to reconnect monthly.
+**4. Keep it alive.** Access tokens last one hour. A refresh token is valid for 30 days, and every refresh
+returns a new one with a fresh 30 days; a connection only expires if your app goes 30 days without refreshing,
+after which the user has to reconnect.
 
 ```java
-OAuthTokens renewed = client.oauth.refreshToken("your-client-id", "your-client-secret", storedRefreshToken);
+OAuthTokens renewed = client.oauth.refreshToken("your-client-id", "your-client-secret", store.load());
 store.save(renewed.getRefreshToken());   // before using anything else in the response
+
+// A client keeps the token it was built with: call the API through one built with the renewed token.
+asUser = new AssinafyClient(new AssinafyClientOptions().setToken(renewed.getAccessToken()));
 ```
 
 Every refresh issues a new refresh token and retires the old one. A reused refresh token cannot be told apart
-from a stolen one being replayed, so it ends the whole connection: treat a timeout as "maybe it worked",
-re-read your saved token instead of retrying blindly, and refresh one at a time per connection.
+from a stolen one being replayed, so it ends the whole connection. Refresh one at a time per connection, and
+never re-send a refresh token after a failure that may have reached the server — a timeout, a dropped
+connection, a 5xx — because the first attempt may already have retired it; the SDK itself never re-sends it.
+Re-read your storage instead: continue only if it holds a different, newer token; if it still holds the one you
+sent, the outcome is unknown, so ask the user to reconnect. Only a failure that provably happened before sending
+is safe to retry: a `NetworkException` caused by an `UnknownHostException` (DNS), a `ConnectException`
+(connection refused), or an `SSLHandshakeException`. `refreshToken` returns only when the response carries a new
+refresh token; otherwise it throws `ValidationException`, and the user has to reconnect.
 
 **5. Handle the two OAuth failures.** A missing permission answers 403 with a challenge naming it; the SDK
 surfaces both parts.
@@ -680,8 +692,9 @@ tokens can never reach.
 ```java
 OAuthUserInfo who = asUser.oauth.userInfo();   // needs openid; name needs profile, email needs email
 
-// On disconnect, revoke rather than only forgetting the token. Every token outcome answers 200.
-client.oauth.revoke("your-client-id", "your-client-secret", storedRefreshToken, "refresh_token");
+// On disconnect, revoke rather than only forgetting the token, and revoke the refresh token saved most recently:
+// every refresh retired the one before it, and every token outcome answers 200, a retired token included.
+client.oauth.revoke("your-client-id", "your-client-secret", store.load(), "refresh_token");
 ```
 
 `client.oauth.protectedResourceMetadata()` reads the RFC 9728 document at the API host root, naming the

@@ -4,6 +4,7 @@
 
 - Java 25 or later (the artifact is compiled to Java 25 bytecode)
 - Maven 3.9.16 or newer 3.x (the wrapper pins 3.9.16); use a Gradle release that supports JDK 25
+- TLS 1.2 or later: the client refuses TLS 1.0 and 1.1
 
 The artifact runs on Java 25 and every later compatible JDK. The included wrapper pins Maven 3.9.16, and CI
 compiles, tests, and packages the release artifacts on the current JDK 25 LTS.
@@ -16,7 +17,7 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.5.1</version>
+    <version>2.6.0</version>
 </dependency>
 ```
 
@@ -34,7 +35,7 @@ the repository-pinned Maven release: `./mvnw verify`.
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:2.5.1'
+    implementation 'com.assinafy:webforms-java-client-sdk:2.6.0'
 }
 ```
 
@@ -42,7 +43,7 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:2.5.1")
+    implementation("com.assinafy:webforms-java-client-sdk:2.6.0")
 }
 ```
 

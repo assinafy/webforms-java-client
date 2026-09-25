@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+## [2.6.0] - 2026-09-25
+
+### Fixed
+- OAuth token and revoke requests are sent as `application/x-www-form-urlencoded`, as the OAuth guide
+  specifies, instead of JSON.
+- `client.oauth` sends each token and revoke request once. OkHttp no longer re-sends one on its own — after a
+  connection failure, a `408`, a `503` with `Retry-After: 0`, or a redirect, which `client.oauth` no longer
+  follows — because a re-sent refresh replays a refresh token the first attempt may already have retired, which
+  ends the user's connection. A dropped call now raises `NetworkException`, and such a response `ApiException`
+  with its status.
+- `refreshToken(...)` throws `ValidationException` when a successful response carries no new refresh token —
+  missing, blank, or the one sent — instead of returning a token set with nothing safe to store. Migration:
+  handle it like `invalid_grant` and ask the user to reconnect.
+- `authorizationUrl(...)` rejects a `setResource(...)` value other than the client's API origin, the value
+  `exchangeAuthorizationCode(...)` sends; a mismatch always failed at the token endpoint with `invalid_target`.
+- Docs: a refresh token is valid for 30 days and every refresh returns a new one with a fresh 30 days; a
+  connection only expires after 30 days without a refresh. The old "30 days from approval, reconnect monthly"
+  statement was wrong.
+- Docs: after a refresh, the examples call the API through a client built with the renewed access token and
+  revoke the most recently saved refresh token. Never re-send a refresh token after a failure that may have
+  reached the server: re-read storage, continue only if it holds a newer token, and otherwise ask the user to
+  reconnect. Only a DNS failure, a refused connection, or a failed TLS handshake is safe to retry.
+
+### Added
+- `DocumentVerification.getAgreementCode()` exposes `agreement_code`, the agreement code printed on the
+  document certificate.
+
 ## [2.5.1] - 2026-09-25
 
 ### Security

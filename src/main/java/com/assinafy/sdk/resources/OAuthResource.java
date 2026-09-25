@@ -6,17 +6,20 @@ import com.assinafy.sdk.models.OAuthAuthorizationRequest;
 import com.assinafy.sdk.models.OAuthProtectedResource;
 import com.assinafy.sdk.models.OAuthTokens;
 import com.assinafy.sdk.models.OAuthUserInfo;
+import okhttp3.FormBody;
 import okhttp3.HttpUrl;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
+import okhttp3.RequestBody;
+import okio.BufferedSink;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Base64;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -28,7 +31,8 @@ import java.util.regex.Pattern;
  * ({@code https://auth.assinafy.com.br}); the token, revoke, and userinfo endpoints live on this API. This
  * resource builds the first URL and calls the rest.</p>
  *
- * <p>The three endpoints below answer with flat JSON rather than the API's {@code {status,message,data}}
+ * <p>The token and revoke requests are sent as {@code application/x-www-form-urlencoded} fields. The three
+ * endpoints below answer with flat JSON rather than the API's {@code {status,message,data}}
  * envelope, because no standard OAuth client would look for {@code access_token} or {@code error} inside a
  * {@code data} key. A failure still surfaces as {@link com.assinafy.sdk.exceptions.ApiException}, whose
  * {@code getOAuthError()} carries the RFC 6749 error code.</p>
@@ -67,13 +71,19 @@ public final class OAuthResource extends BaseResource {
     private static final Pattern CODE_VERIFIER = Pattern.compile("[A-Za-z0-9._~-]{43,128}");
 
     /**
-     * Creates an instance.
+     * Creates an instance. Requests go through a copy of {@code httpClient} that neither retries after a
+     * connection failure nor follows redirects, and the token and revoke bodies are one-shot, so OkHttp never
+     * sends them twice — not even for a {@code 408} or a {@code 503} with {@code Retry-After: 0}, which it would
+     * otherwise repeat. Replaying a token request the server already processed would reuse a retired refresh
+     * token and end the user's connection.
      *
      * @param httpClient shared HTTP client
      * @param baseUrl API base URL
      */
     public OAuthResource(OkHttpClient httpClient, String baseUrl) {
-        super(httpClient, baseUrl, null);
+        super(httpClient != null
+                ? httpClient.newBuilder().retryOnConnectionFailure(false).followRedirects(false).build()
+                : null, baseUrl, null);
     }
 
     /**
@@ -121,6 +131,12 @@ public final class OAuthResource extends BaseResource {
         if (scopes == null || scopes.isEmpty()) {
             throw new ValidationException("At least one scope is required");
         }
+        String resource = apiOrigin();
+        if (request.getResource() != null && !request.getResource().isBlank()
+                && !resource.equals(request.getResource())) {
+            throw new ValidationException("Resource must be " + resource
+                    + ", the value the code exchange sends; any other value fails with invalid_target");
+        }
 
         String endpoint = request.getAuthorizationEndpoint() != null
                 && !request.getAuthorizationEndpoint().isBlank()
@@ -141,7 +157,7 @@ public final class OAuthResource extends BaseResource {
                 .addQueryParameter("state", request.getState())
                 .addQueryParameter("code_challenge", codeChallenge(request.getCodeVerifier()))
                 .addQueryParameter("code_challenge_method", "S256")
-                .addQueryParameter("resource", resourceIndicator(request.getResource()));
+                .addQueryParameter("resource", resource);
         if (request.getNonce() != null && !request.getNonce().isBlank()) {
             builder.addQueryParameter("nonce", request.getNonce());
         }
@@ -167,50 +183,70 @@ public final class OAuthResource extends BaseResource {
         requireRedirectUri(redirectUri);
         requireCodeVerifier(codeVerifier);
 
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("grant_type", "authorization_code");
-        body.put("code", code);
-        body.put("redirect_uri", redirectUri);
-        body.put("code_verifier", codeVerifier);
-        body.put("client_id", clientId);
-        putIfPresent(body, "client_secret", clientSecret);
-        body.put("resource", resourceIndicator(null));
-        return httpPost("/oauth/token", body, OAuthTokens.class);
+        FormBody.Builder body = new FormBody.Builder()
+                .add("grant_type", "authorization_code")
+                .add("code", code)
+                .add("redirect_uri", redirectUri)
+                .add("code_verifier", codeVerifier)
+                .add("client_id", clientId);
+        addIfPresent(body, "client_secret", clientSecret);
+        body.add("resource", apiOrigin());
+        return httpPost("/oauth/token", sendOnce(body), OAuthTokens.class);
     }
 
     /**
      * {@code POST /oauth/token} — trades the current refresh token for a new token set, without the user.
      *
-     * <p>Every refresh returns a <em>new</em> refresh token and retires the old one. Store the new value
-     * before doing anything else with the response, refresh one at a time per connection, and never retry
-     * blindly with the old token after a timeout: a replayed refresh token cannot be told apart from a stolen
-     * one, so it ends the whole connection and the user has to reconnect.</p>
+     * <p>Every refresh returns a <em>new</em> refresh token and retires the old one. A replayed refresh token
+     * cannot be told apart from a stolen one, so it ends the whole connection and the user has to reconnect.
+     * Store the new value before doing anything else with the response, and refresh one at a time per
+     * connection.</p>
+     *
+     * <p>The SDK sends this request once and never re-sends it on its own. Never re-send the token yourself
+     * after a failure that may have reached the server — a timeout, a dropped connection, a {@code 5xx} — since
+     * the first attempt may already have retired it. Re-read your storage instead: continue only if it holds a
+     * different, newer refresh token; if it still holds the one you sent, the outcome is unknown, so ask the
+     * user to reconnect. Only a failure that provably happened before sending is safe to retry: a
+     * {@link com.assinafy.sdk.exceptions.NetworkException} caused by an {@code UnknownHostException} (DNS), a
+     * {@code ConnectException} (connection refused), or an {@code SSLHandshakeException}.</p>
      *
      * @param clientId required application identifier
      * @param clientSecret secret of a confidential application, or {@code null} for a public one
      * @param refreshToken required current refresh token
-     * @return the issued token set, carrying the replacement refresh token
-     * @throws ValidationException when a required field is absent
+     * @return the issued token set, whose refresh token differs from the one sent
+     * @throws ValidationException when a required field is absent, or a successful response carries no new
+     *         refresh token (missing, blank, or the one sent); the token sent may already be retired, so ask the
+     *         user to reconnect
      */
     public OAuthTokens refreshToken(String clientId, String clientSecret, String refreshToken) {
         requireValue(clientId, "Client ID");
         requireValue(refreshToken, "Refresh token");
 
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("grant_type", "refresh_token");
-        body.put("refresh_token", refreshToken);
-        body.put("client_id", clientId);
-        putIfPresent(body, "client_secret", clientSecret);
-        return httpPost("/oauth/token", body, OAuthTokens.class);
+        FormBody.Builder body = new FormBody.Builder()
+                .add("grant_type", "refresh_token")
+                .add("refresh_token", refreshToken)
+                .add("client_id", clientId);
+        addIfPresent(body, "client_secret", clientSecret);
+        OAuthTokens tokens = httpPost("/oauth/token", sendOnce(body), OAuthTokens.class);
+        // The server retired the token just sent, so a response without a new one leaves nothing safe to store:
+        // returning it would let the caller save null or keep the retired token.
+        String renewed = tokens != null ? tokens.getRefreshToken() : null;
+        if (renewed == null || renewed.isBlank() || renewed.equals(refreshToken)) {
+            throw new ValidationException("The token endpoint returned no new refresh token, and the one sent may "
+                    + "already be retired; ask the user to reconnect");
+        }
+        return tokens;
     }
 
     /**
      * {@code POST /oauth/revoke} — revokes an access or refresh token when a user disconnects, rather than
-     * only forgetting it locally.
+     * only forgetting it locally. Revoking a refresh token ends the whole connection; revoke the one saved most
+     * recently, never an older copy, because every refresh retires the token it was sent.
      *
      * <p>Every token outcome answers HTTP 200, including a token that is unknown, malformed, or already
-     * revoked, so the endpoint cannot be used to probe whether a token exists. Only failed client
-     * authentication answers 401.</p>
+     * revoked, so the endpoint cannot be used to probe whether a token exists — nor tell you that the token you
+     * revoked was a retired one while the connection stays active. Only failed client authentication answers
+     * 401.</p>
      *
      * @param clientId required application identifier
      * @param clientSecret secret of a confidential application, or {@code null} for a public one
@@ -226,12 +262,11 @@ public final class OAuthResource extends BaseResource {
             throw new ValidationException("Token type hint must be 'access_token' or 'refresh_token'");
         }
 
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("token", token);
-        putIfPresent(body, "token_type_hint", tokenTypeHint);
-        body.put("client_id", clientId);
-        putIfPresent(body, "client_secret", clientSecret);
-        httpPostVoid("/oauth/revoke", body);
+        FormBody.Builder body = new FormBody.Builder().add("token", token);
+        addIfPresent(body, "token_type_hint", tokenTypeHint);
+        body.add("client_id", clientId);
+        addIfPresent(body, "client_secret", clientSecret);
+        httpPostVoid("/oauth/revoke", sendOnce(body));
     }
 
     /**
@@ -273,10 +308,6 @@ public final class OAuthResource extends BaseResource {
         return origin.endsWith("/") ? origin.substring(0, origin.length() - 1) : origin;
     }
 
-    private String resourceIndicator(String override) {
-        return override != null && !override.isBlank() ? override : apiOrigin();
-    }
-
     private static String randomToken(int byteCount) {
         byte[] bytes = new byte[byteCount];
         RANDOM.nextBytes(bytes);
@@ -293,9 +324,23 @@ public final class OAuthResource extends BaseResource {
         }
     }
 
-    private static void putIfPresent(Map<String, Object> body, String key, String value) {
+    /**
+     * Builds the form as a one-shot body, which OkHttp never sends twice. {@code retryOnConnectionFailure(false)}
+     * alone does not stop OkHttp repeating a request answered {@code 503} with {@code Retry-After: 0}.
+     */
+    private static RequestBody sendOnce(FormBody.Builder form) {
+        RequestBody body = form.build();
+        return new RequestBody() {
+            @Override public MediaType contentType() { return body.contentType(); }
+            @Override public long contentLength() throws IOException { return body.contentLength(); }
+            @Override public void writeTo(BufferedSink sink) throws IOException { body.writeTo(sink); }
+            @Override public boolean isOneShot() { return true; }
+        };
+    }
+
+    private static void addIfPresent(FormBody.Builder body, String key, String value) {
         if (value != null && !value.isBlank()) {
-            body.put(key, value);
+            body.add(key, value);
         }
     }
 

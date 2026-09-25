@@ -192,8 +192,13 @@ https://auth.assinafy.com.br/oauth/authorize
 
 ```java
 // On https://myapp.example/oauth/callback?code=...&state=...&iss=https://auth.assinafy.com.br
+// (or ?error=access_denied&error_description=...&state=...&iss=... — check state and iss first there too)
 if (!storedState.equals(returnedState) || !"https://auth.assinafy.com.br".equals(returnedIss)) {
     throw new IllegalStateException("Authorization response is not ours");
+}
+if (returnedError != null) {
+    // access_denied, invalid_scope, invalid_request, unsupported_response_type or invalid_target: no code.
+    throw new IllegalStateException("Connection not approved: " + returnedError);
 }
 
 OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
@@ -201,18 +206,17 @@ OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
     code, "https://myapp.example/oauth/callback", storedVerifier);
 ```
 
-Request `POST /oauth/token`:
+Request `POST /oauth/token` (`Content-Type: application/x-www-form-urlencoded`; shown unencoded, one field per
+line):
 
-```json
-{
-  "grant_type": "authorization_code",
-  "code": "<one-time code, valid 60 seconds>",
-  "redirect_uri": "https://myapp.example/oauth/callback",
-  "code_verifier": "<the stored verifier>",
-  "client_id": "your-client-id",
-  "client_secret": "your-client-secret",
-  "resource": "https://api.assinafy.com.br"
-}
+```
+grant_type=authorization_code
+&code=<one-time code, valid 60 seconds>
+&redirect_uri=https://myapp.example/oauth/callback
+&code_verifier=<the stored verifier>
+&client_id=your-client-id
+&client_secret=your-client-secret
+&resource=https://api.assinafy.com.br
 ```
 
 Response — a flat object, not the `{status,message,data}` envelope:
@@ -249,10 +253,18 @@ workspace separately and keep tokens per workspace.
 ### 4. Refresh, and handle a missing scope
 
 ```java
-// Access tokens last one hour. Save the NEW refresh token before doing anything else with the response:
-// every refresh retires the previous one, and replaying a retired token ends the whole connection.
-OAuthTokens renewed = client.oauth.refreshToken("your-client-id", "your-client-secret", storedRefreshToken);
+// Access tokens last one hour. Refresh with the refresh token saved most recently, and save the NEW one before
+// doing anything else with the response: every refresh retires the previous one, and replaying a retired token
+// ends the whole connection. If the call fails after it may have reached the server (a timeout, a dropped
+// connection, a 5xx), never re-send that token: continue only if the store now holds a newer one, and otherwise
+// ask the user to reconnect.
+OAuthTokens renewed = client.oauth.refreshToken("your-client-id", "your-client-secret", store.load());
 store.save(renewed.getRefreshToken());
+
+// A client keeps the token it was built with: call the API through one built with the renewed access token.
+asUser = new AssinafyClient(new AssinafyClientOptions()
+    .setToken(renewed.getAccessToken())
+    .setAccountId(workspaceId));
 
 try {
     asUser.documents.upload(new File("contract.pdf"));
@@ -273,9 +285,10 @@ try {
 OAuthUserInfo who = asUser.oauth.userInfo();        // GET /oauth/userinfo
 String subject = who.getSub();
 
-// When the user disconnects in your product, revoke rather than only forgetting the token.
-// Every token outcome answers 200, so this never reveals whether a token existed.
-client.oauth.revoke("your-client-id", "your-client-secret", storedRefreshToken, "refresh_token");
+// When the user disconnects in your product, revoke rather than only forgetting the token, and revoke the
+// refresh token saved most recently: every refresh retired the one before it. Every token outcome answers 200 —
+// a retired token too, while the connection stays active — so this never reveals whether a token existed.
+client.oauth.revoke("your-client-id", "your-client-secret", store.load(), "refresh_token");
 ```
 
 Discovery, if you configure endpoints dynamically:
@@ -423,7 +436,8 @@ are strings):
 
 ```json
 {
-  "hash": "FE32EDDA...", "id": "63ddb172402799bfc991d10d", "status": "certificated",
+  "hash": "FE32EDDA...", "id": "63ddb172402799bfc991d10d",
+  "agreement_code": "550E8400-E29B-41D4-A716-446655440000", "status": "certificated",
   "page_count": "1", "signer_count": "1", "completed_count": 1,
   "completed_at": "2026-01-27T19:27:44Z", "verified_at": "2026-01-27T19:27:46Z",
   "is_valid": true, "message": ""

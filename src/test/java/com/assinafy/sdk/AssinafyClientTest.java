@@ -1,5 +1,6 @@
 package com.assinafy.sdk;
 
+import com.assinafy.sdk.exceptions.ApiException;
 import com.assinafy.sdk.exceptions.NetworkException;
 import com.assinafy.sdk.models.DocumentStatus;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesOptions;
@@ -22,6 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 class AssinafyClientTest {
 
@@ -298,6 +300,33 @@ class AssinafyClientTest {
             assertThat(server.getRequestCount()).isEqualTo(1);
         } finally {
             server.shutdown();
+        }
+    }
+
+    @Test
+    void oauthTokenRequestIsSentOnceWhateverTheResponse() throws Exception {
+        // OkHttp repeats a request answered 408, or 503 with Retry-After: 0, and follows redirects. The second
+        // response is what a re-sent refresh would receive, after the first may already have retired the token.
+        for (int status : new int[] {302, 307, 308, 408, 503}) {
+            MockWebServer server = new MockWebServer();
+            server.start();
+            try {
+                server.enqueue(new MockResponse().setResponseCode(status)
+                        .setHeader("Retry-After", "0")
+                        .setHeader("Location", "/v1/oauth/token"));
+                server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                        .setBody("{\"access_token\":\"at2\",\"refresh_token\":\"rt2\"}"));
+                AssinafyClient client = new AssinafyClient(
+                        new AssinafyClientOptions().setBaseUrl(server.url("/v1").toString()));
+
+                Throwable thrown = catchThrowable(() -> client.oauth.refreshToken("client-1", null, "rt1"));
+
+                assertThat(server.getRequestCount()).as("requests after HTTP %d", status).isEqualTo(1);
+                assertThat(thrown).isInstanceOfSatisfying(ApiException.class,
+                        failure -> assertThat(failure.getStatusCode()).isEqualTo(status));
+            } finally {
+                server.shutdown();
+            }
         }
     }
 

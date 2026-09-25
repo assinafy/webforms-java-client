@@ -1,6 +1,7 @@
 package com.assinafy.sdk.resources;
 
 import com.assinafy.sdk.exceptions.ApiException;
+import com.assinafy.sdk.exceptions.NetworkException;
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.OAuthAuthorizationRequest;
 import com.assinafy.sdk.models.OAuthProtectedResource;
@@ -12,19 +13,23 @@ import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import okhttp3.mockwebserver.SocketPolicy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
 class OAuthResourceTest {
 
@@ -57,6 +62,18 @@ class OAuthResourceTest {
     private String origin() {
         HttpUrl url = server.url("/");
         return url.scheme() + "://" + url.host() + ":" + url.port();
+    }
+
+    /** Decodes an {@code application/x-www-form-urlencoded} body, the encoding the OAuth guide specifies. */
+    private static Map<String, String> form(RecordedRequest request) {
+        assertThat(request.getHeader("Content-Type")).startsWith("application/x-www-form-urlencoded");
+        Map<String, String> fields = new LinkedHashMap<>();
+        for (String pair : request.getBody().readUtf8().split("&")) {
+            String[] parts = pair.split("=", 2);
+            fields.put(URLDecoder.decode(parts[0], StandardCharsets.UTF_8),
+                    URLDecoder.decode(parts[1], StandardCharsets.UTF_8));
+        }
+        return fields;
     }
 
     @Test
@@ -111,12 +128,21 @@ class OAuthResourceTest {
                         .setState("state-1")
                         .setCodeVerifier(VERIFIER)
                         .setAuthorizationEndpoint("https://auth.example/oauth/authorize")
-                        .setResource("https://api.example"));
+                        .setResource(origin()));
 
         HttpUrl parsed = HttpUrl.get(url);
         assertThat(parsed.host()).isEqualTo("auth.example");
-        assertThat(parsed.queryParameter("resource")).isEqualTo("https://api.example");
+        assertThat(parsed.queryParameter("resource")).isEqualTo(origin());
         assertThat(parsed.queryParameter("nonce")).isNull();
+    }
+
+    @Test
+    void authorizationUrl_rejectsAResourceTheCodeExchangeWouldNotRepeat() {
+        // The exchange always sends the API origin; any other authorize-time value ends in invalid_target.
+        assertThatThrownBy(() -> resource.authorizationUrl(new OAuthAuthorizationRequest("client-1", REDIRECT_URI)
+                .setScopes(List.of("documents:read")).setState("state-1").setCodeVerifier(VERIFIER)
+                .setResource("https://mcp.example")))
+                .isInstanceOf(ValidationException.class).hasMessageContaining(origin());
     }
 
     @Test
@@ -150,10 +176,11 @@ class OAuthResourceTest {
         RecordedRequest request = server.takeRequest();
         assertThat(request.getMethod()).isEqualTo("POST");
         assertThat(request.getPath()).isEqualTo("/oauth/token");
-        assertThat(request.getBody().readUtf8()).isEqualTo("{\"grant_type\":\"authorization_code\","
-                + "\"code\":\"the-code\",\"redirect_uri\":\"" + REDIRECT_URI + "\","
-                + "\"code_verifier\":\"" + VERIFIER + "\",\"client_id\":\"client-1\","
-                + "\"client_secret\":\"secret-1\",\"resource\":\"" + origin() + "\"}");
+        assertThat(form(request)).containsExactly(
+                entry("grant_type", "authorization_code"), entry("code", "the-code"),
+                entry("redirect_uri", REDIRECT_URI), entry("code_verifier", VERIFIER),
+                entry("client_id", "client-1"), entry("client_secret", "secret-1"),
+                entry("resource", origin()));
         assertThat(tokens.getAccessToken()).isEqualTo("at");
         assertThat(tokens.getTokenType()).isEqualTo("Bearer");
         assertThat(tokens.getExpiresIn()).isEqualTo(3600);
@@ -168,7 +195,7 @@ class OAuthResourceTest {
 
         resource.exchangeAuthorizationCode("client-1", null, "the-code", REDIRECT_URI, VERIFIER);
 
-        assertThat(server.takeRequest().getBody().readUtf8()).doesNotContain("client_secret");
+        assertThat(form(server.takeRequest())).doesNotContainKey("client_secret");
     }
 
     @Test
@@ -193,9 +220,41 @@ class OAuthResourceTest {
 
         RecordedRequest request = server.takeRequest();
         assertThat(request.getPath()).isEqualTo("/oauth/token");
-        assertThat(request.getBody().readUtf8()).isEqualTo("{\"grant_type\":\"refresh_token\","
-                + "\"refresh_token\":\"rt1\",\"client_id\":\"client-1\",\"client_secret\":\"secret-1\"}");
+        assertThat(form(request)).containsExactly(
+                entry("grant_type", "refresh_token"), entry("refresh_token", "rt1"),
+                entry("client_id", "client-1"), entry("client_secret", "secret-1"));
         assertThat(tokens.getRefreshToken()).isEqualTo("rt2");
+    }
+
+    @Test
+    void refreshToken_isNotReplayedWhenTheConnectionDropsAfterTheRequestWasSent() throws Exception {
+        // Seed the pool, then drop that pooled connection once the refresh has reached the server. The server may
+        // already have rotated the token, so a silent replay would reuse a retired one and end the connection.
+        server.enqueue(json(200, Map.of("sub", "user-1")));
+        server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST));
+        server.enqueue(json(200, Map.of("access_token", "at2", "refresh_token", "rt2")));
+        resource.userInfo();
+
+        assertThatThrownBy(() -> resource.refreshToken("client-1", null, "rt1"))
+                .isInstanceOf(NetworkException.class);
+        assertThat(server.getRequestCount()).isEqualTo(2);
+    }
+
+    @Test
+    void refreshToken_rejectsASuccessWithoutANewRefreshToken() throws Exception {
+        // The server retired the token sent: returning would let the caller store null or keep a retired token.
+        server.enqueue(json(200, Map.of("access_token", "at2")));
+        server.enqueue(json(200, Map.of("access_token", "at2", "refresh_token", " ")));
+        server.enqueue(json(200, Map.of("access_token", "at2", "refresh_token", "sent-refresh-token")));
+        server.enqueue(new MockResponse().setResponseCode(200));
+
+        for (int i = 0; i < 4; i++) {
+            assertThatThrownBy(() -> resource.refreshToken("client-1", null, "sent-refresh-token"))
+                    .isInstanceOf(ValidationException.class)
+                    .hasMessageContaining("no new refresh token")
+                    .hasMessageNotContaining("sent-refresh-token");
+        }
+        assertThat(server.getRequestCount()).isEqualTo(4);
     }
 
     @Test
@@ -207,9 +266,9 @@ class OAuthResourceTest {
         RecordedRequest request = server.takeRequest();
         assertThat(request.getMethod()).isEqualTo("POST");
         assertThat(request.getPath()).isEqualTo("/oauth/revoke");
-        assertThat(request.getBody().readUtf8()).isEqualTo("{\"token\":\"rt1\","
-                + "\"token_type_hint\":\"refresh_token\",\"client_id\":\"client-1\","
-                + "\"client_secret\":\"secret-1\"}");
+        assertThat(form(request)).containsExactly(
+                entry("token", "rt1"), entry("token_type_hint", "refresh_token"),
+                entry("client_id", "client-1"), entry("client_secret", "secret-1"));
     }
 
     @Test

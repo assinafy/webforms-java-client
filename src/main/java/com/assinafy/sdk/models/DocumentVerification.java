@@ -19,6 +19,10 @@ public final class DocumentVerification {
 
     private String hash;
     private String id;
+
+    @JsonProperty("agreement_code")
+    private String agreementCode;
+
     private String status;
 
     @JsonProperty("page_count")
@@ -68,6 +72,20 @@ public final class DocumentVerification {
      * @param id matching document identifier
      */
     public void setId(String id) { this.id = id; }
+
+    /**
+     * Returns the agreement code printed on the document certificate, or {@code null} when not verified.
+     *
+     * @return the agreement code printed on the document certificate, or {@code null} when not verified
+     */
+    public String getAgreementCode() { return agreementCode; }
+
+    /**
+     * Sets value of {@code agreement_code}.
+     *
+     * @param agreementCode value of {@code agreement_code}
+     */
+    public void setAgreementCode(String agreementCode) { this.agreementCode = agreementCode; }
 
     /**
      * Returns matching document status, or {@code null} when not verified.

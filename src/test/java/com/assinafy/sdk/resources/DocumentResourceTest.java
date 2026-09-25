@@ -389,6 +389,7 @@ class DocumentResourceTest {
     void verify_callsHashPathAndParsesTypedResult() throws Exception {
         server.enqueue(okJson(Map.of(
                 "hash", "hash-abc",
+                "agreement_code", "550E8400-E29B-41D4-A716-446655440000",
                 "status", "certificated",
                 "is_valid", true,
                 "page_count", "1",
@@ -400,6 +401,7 @@ class DocumentResourceTest {
         assertThat(server.takeRequest().getPath()).isEqualTo("/documents/hash-abc/verify");
         assertThat(result.getIsValid()).isTrue();
         assertThat(result.getHash()).isEqualTo("hash-abc");
+        assertThat(result.getAgreementCode()).isEqualTo("550E8400-E29B-41D4-A716-446655440000");
         assertThat(result.getPageCount()).isEqualTo("1");
     }
 

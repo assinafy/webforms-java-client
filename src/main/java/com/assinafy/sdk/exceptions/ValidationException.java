@@ -4,7 +4,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Thrown before a request when caller-supplied data cannot satisfy the SDK/API contract. */
+/**
+ * Thrown when caller-supplied data cannot satisfy the SDK/API contract, normally before any request is sent, or
+ * when a successful response lacks a value the SDK requires.
+ */
 public class ValidationException extends AssinafyException {
 
     private static final long serialVersionUID = 1L;

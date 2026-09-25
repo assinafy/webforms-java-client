@@ -103,7 +103,7 @@ notifications, or signatures.
 An asterisk marks a required field. Jackson omits null optional properties unless a method explicitly uses
 null to clear a value.
 
-| Name / Java input | JSON or multipart request |
+| Name / Java input | JSON, multipart, or form request |
 |---|---|
 | `AccountPayload` | `name*` on create (`string`), `name` on update; `notification_sender_type` (`User` or `Account`) |
 | Account delete | `{ "force": boolean }`; `true` also cancels an active paid subscription |
@@ -135,9 +135,9 @@ null to clear a value.
 | `CreateTagPayload` | `{ "name": string*, "color": six-digit-hex\|null? }`; name is at most 64 characters |
 | `UpdateTagPayload` | Any of `name`, `color`; `clearColor()` deliberately sends `"color": null` |
 | Signature image upload | Raw PNG bytes; query `type=signature\|initial`, optional `reuse=true\|false` |
-| OAuth token exchange | `{ "grant_type": "authorization_code"*, "code": string*, "redirect_uri": string*, "code_verifier": string*, "client_id": string*, "client_secret": string?, "resource": string }` |
-| OAuth token refresh | `{ "grant_type": "refresh_token"*, "refresh_token": string*, "client_id": string*, "client_secret": string? }` |
-| OAuth token revocation | `{ "token": string*, "token_type_hint": "access_token"\|"refresh_token"?, "client_id": string*, "client_secret": string? }` |
+| OAuth token exchange | `application/x-www-form-urlencoded` with `grant_type=authorization_code`*, `code`*, `redirect_uri`*, `code_verifier`*, `client_id`*, `client_secret`?, `resource` |
+| OAuth token refresh | `application/x-www-form-urlencoded` with `grant_type=refresh_token`*, `refresh_token`*, `client_id`*, `client_secret`? |
+| OAuth token revocation | `application/x-www-form-urlencoded` with `token`*, `token_type_hint` (`access_token`\|`refresh_token`)?, `client_id`*, `client_secret`? |
 
 Document tag requests carry tag IDs; the SDK forwards the supplied strings without rewriting them. The SDK also
 exposes environment-specific request forms in [SDK extensions](#sdk-extensions).
@@ -238,9 +238,10 @@ String url = client.oauth.authorizationUrl(
 ```
 
 `authorizationUrl` fixes `response_type=code` and `code_challenge_method=S256`, derives `code_challenge` as the
-base64url SHA-256 of the verifier, and defaults `resource` to the origin of the client's base URL. Override the
-endpoint with `setAuthorizationEndpoint(...)` and the resource indicator with `setResource(...)`; add
-`setNonce(...)` when requesting `openid`.
+base64url SHA-256 of the verifier, and sends the origin of the client's base URL as `resource`
+(`https://api.assinafy.com.br` in production) — the same value the code exchange sends, so the two cannot
+disagree (`invalid_target`). `setResource(...)` accepts only that value. Override the endpoint with
+`setAuthorizationEndpoint(...)`; add `setNonce(...)` when requesting `openid`.
 
 | Scope | Grants |
 |---|---|
@@ -267,10 +268,20 @@ OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
         "client-id", "client-secret", code, "https://myapp.example/oauth/callback", verifier);
 ```
 
-Access tokens last one hour and a connection lasts 30 days from the user's approval. `refreshToken(...)`
-returns a **new** refresh token and retires the old one, so store the new value before using the response,
-refresh one at a time per connection, and never replay an old token after a timeout — a reused refresh token is
-indistinguishable from a stolen one and ends the whole connection.
+Access tokens last one hour. A refresh token is valid for 30 days and every refresh returns a new one with a
+fresh 30 days, so a connection only expires after 30 days without a refresh. `refreshToken(...)` returns a
+**new** refresh token and retires the old one, so store the new value before using the response and refresh one
+at a time per connection — a reused refresh token is indistinguishable from a stolen one and ends the whole
+connection. A `2xx` response without a new `refresh_token` (missing, blank, or the one sent) raises
+`ValidationException`: the token sent may already be retired, so ask the user to reconnect. A client keeps the
+token it was built with, so call the API through one built with the renewed access token.
+
+The SDK sends each token and revoke request once: `client.oauth` follows no redirects, and OkHttp never re-sends
+one on its own — not after a connection failure, a `408`, or a `503` with `Retry-After: 0`. A dropped call
+raises `NetworkException`, and such a response `ApiException`. Do not re-send a refresh token after a failure
+that may have reached the server either: re-read storage, continue only if it holds a different, newer token,
+and otherwise ask the user to reconnect. Only a `NetworkException` caused by `UnknownHostException`,
+`ConnectException`, or `SSLHandshakeException` happened before sending and is safe to retry.
 
 Redirect URIs must be HTTPS, carry no fragment, and match a registered value character for character; the SDK
 rejects a malformed one before sending a request. A code verifier outside the RFC 7636 grammar of 43 to 128
@@ -408,7 +419,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | Document artifacts | URL map keyed by `original`, `certificated`, `certificate-page`, `pades`, `bundle`, and contextual `thumbnail` |
 | `DocumentPage` | `id`, `number`, `height`, `width`, `download_url` |
 | `DocumentStatus` | `code`, `deletable` |
-| `DocumentVerification` | `hash`, `id?`, `status?`, `page_count?` (string), `signer_count?` (string), `completed_count?`, `completed_at?`, `verified_at`, `is_valid`, `message` |
+| `DocumentVerification` | `hash`, `id?`, `agreement_code?` (printed on the document certificate), `status?`, `page_count?` (string), `signer_count?` (string), `completed_count?`, `completed_at?`, `verified_at`, `is_valid`, `message` |
 | `DocumentActivity` | `id`, `event`, `message`, `payload?`, `origin?`, `created_at`. `payload` is typed `Object` because its shape varies by event — a JSON object for most events, a JSON array for others such as `document_prepared`. `origin` is a JSON object of `ip` and `user-agent`, and is null for server-generated events |
 | `FieldDefinition` | `resource`, `id`, `name`, `type`, `regex?`, `is_pre_defined`, `is_active`, `is_required`, `is_standard`, `is_read_only`, `is_visible` |
 | `FieldTypeInfo` | `type`, `name` |
@@ -425,7 +436,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `AcceptTermsResponse` | Optional response fields `full_name`, `email`, `has_accepted_terms`; the documented success payload has no data, so the Java return may be null |
 | `VerifyEmailResponse` | Optional response fields `message`, `access_token`; the documented success payload has no data, so the Java return may be null |
 | `PaginationMeta` | `current_page`, `per_page`, `total`, `last_page` (built from response headers, not envelope `data`) |
-| `OAuthTokens` | `access_token`, `token_type` (`Bearer`), `expires_in` (seconds), `refresh_token?` (only with `offline_access`), `scope` (space-separated, never contains `offline_access`), `id_token?` (only with `openid`) |
+| `OAuthTokens` | `access_token`, `token_type` (`Bearer`), `expires_in` (seconds), `refresh_token?` (only with `offline_access`; a refresh always returns a new one), `scope` (space-separated, never contains `offline_access`), `id_token?` (only with `openid`) |
 | `OAuthUserInfo` | `sub`, `name?` (needs `profile`), `email?` and `email_verified?` (need `email`) |
 | `OAuthProtectedResource` | `resource`, `authorization_servers[]`, `scopes_supported[]`, `bearer_methods_supported[]` |
 
@@ -538,7 +549,9 @@ The metadata document is served at the API host root rather than under `/v1`, an
 the configured base URL. `POST /oauth/token` is one documented operation with two grant types, which is why
 five SDK methods cover four operations. Every one of them is public except `userinfo`, which reads the client's
 bearer token. Revocation answers 200 for any token outcome — revoked, already revoked, unknown, or malformed —
-so it cannot be used to probe whether a token exists; only failed client authentication answers 401.
+so it cannot be used to probe whether a token exists; only failed client authentication answers 401. Revoke the
+refresh token saved most recently: every refresh retires the one it was sent, and revoking a retired one also
+answers 200 while the connection stays active.
 
 ### Signers — 5 operations
 

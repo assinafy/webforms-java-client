@@ -106,7 +106,10 @@ public final class OAuthTokens {
 
     /**
      * Returns wire {@code id_token}, a signed RS256 OpenID Connect assertion. Present only when the
-     * {@code openid} scope was granted.
+     * {@code openid} scope was granted. The SDK does not validate it: before trusting its claims, check it with
+     * an OpenID Connect library (RS256 key from {@code https://auth.assinafy.com.br/.well-known/jwks.json}
+     * matched by {@code kid}, {@code iss} {@code https://auth.assinafy.com.br}, {@code aud} your client ID,
+     * {@code exp} in the future, and {@code nonce} if you sent one).
      *
      * @return wire {@code id_token}, or {@code null}
      */

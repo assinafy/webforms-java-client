@@ -216,7 +216,8 @@ public abstract class BaseResource {
      *
      * @param <T> response model type
      * @param path API path beginning with {@code /}
-     * @param body request body, or {@code null} for an empty body
+     * @param body request body serialized as JSON, a prebuilt {@link RequestBody} sent as-is, or {@code null}
+     *        for an empty body
      * @param dataType response model class
      * @return unwrapped response data, or {@code null} for null/empty data
      */
@@ -364,7 +365,8 @@ public abstract class BaseResource {
      * Executes a JSON POST without query parameters and validates its success response.
      *
      * @param path API path beginning with {@code /}
-     * @param body request body, or {@code null} for an empty body
+     * @param body request body serialized as JSON, a prebuilt {@link RequestBody} sent as-is, or {@code null}
+     *        for an empty body
      */
     protected void httpPostVoid(String path, Object body) {
         executeVoid(buildRequest("POST", path, body));
@@ -523,7 +525,10 @@ public abstract class BaseResource {
 
     private Request buildRequest(String method, String path, Object body, Map<String, String> queryParams) {
         RequestBody requestBody = null;
-        if (body != null) {
+        if (body instanceof RequestBody prebuilt) {
+            // Already encoded, e.g. the form body the OAuth endpoints take; sent as-is rather than as JSON.
+            requestBody = prebuilt;
+        } else if (body != null) {
             try {
                 String json = MAPPER.writeValueAsString(body);
                 requestBody = RequestBody.create(json, JSON);
