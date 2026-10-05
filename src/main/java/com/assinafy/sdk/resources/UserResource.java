@@ -74,6 +74,7 @@ public final class UserResource extends BaseResource {
     }
 
     /**
+     * {@code GET /users/self/stats}.
      * Returns user-wide monthly document KPI rows.
      *
      * @return user-wide monthly document KPI rows

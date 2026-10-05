@@ -84,7 +84,7 @@ class LiveSmokeTest {
 
     @BeforeEach
     void paceSandboxRequests() throws InterruptedException {
-        Thread.sleep(1_000);
+        Thread.sleep(3_000);
     }
 
     private static AssinafyClient client() {
@@ -92,7 +92,7 @@ class LiveSmokeTest {
         if (!DEFAULT_SANDBOX_BASE_URL.equals(baseUrl.replaceFirst("/+$", ""))) {
             throw new IllegalStateException("LiveSmokeTest only runs against the Assinafy sandbox");
         }
-        return AssinafyClient.create(API_KEY, ACCOUNT_ID, opts -> opts.setBaseUrl(baseUrl));
+        return AssinafyClient.create(API_KEY, ACCOUNT_ID, opts -> opts.setBaseUrl(baseUrl).setMaxRetries(2));
     }
 
     @Test

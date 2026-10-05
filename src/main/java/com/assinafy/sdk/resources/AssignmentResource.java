@@ -53,6 +53,7 @@ public final class AssignmentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /assignments}.
      * Returns default account's assignment page.
      *
      * @param params optional list filters and pagination query values
@@ -63,6 +64,7 @@ public final class AssignmentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /assignments}.
      * Returns default account's first assignment page.
      *
      * @return default account's first assignment page
@@ -120,6 +122,7 @@ public final class AssignmentResource extends BaseResource {
     }
 
     /**
+     * {@code POST /documents/{documentId}/assignments/{assignmentId}}.
      * Strongly typed variant of {@link #sign(String, String, String, List)}.
      *
      * @param documentId required document identifier

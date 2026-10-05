@@ -41,6 +41,7 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{accountId}/signers and POST /accounts/{accountId}/signers}.
      * Finds a signer by email or creates one when no exact match exists.
      *
      * <p>This is the explicit idempotent alternative to {@link #create(CreateSignerPayload, String)}. Existing
@@ -82,6 +83,7 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{accountId}/signers and POST /accounts/{accountId}/signers}.
      * Finds or creates a signer in the default account.
      *
      * @param payload required signer fields
@@ -92,6 +94,7 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/signers}.
      * Creates a signer in the default account.
      *
      * @param payload required signer fields
@@ -119,6 +122,7 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/signers/{signer_id}}.
      * Returns signer details in the default account.
      *
      * @param signerId required signer identifier
@@ -143,6 +147,7 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/signers}.
      * Returns default account's signer page.
      *
      * @param params optional search and pagination values
@@ -153,6 +158,7 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/signers}.
      * Returns default account's first signer page.
      *
      * @return default account's first signer page
@@ -183,6 +189,7 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
+     * {@code PUT /accounts/{account_id}/signers/{signer_id}}.
      * Returns updated signer in the default account.
      *
      * @param signerId required signer identifier
@@ -206,6 +213,7 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
+     * {@code DELETE /accounts/{account_id}/signers/{signer_id}}.
      * Deletes the selected resource.
      *
      * @param signerId required signer identifier in the default account
@@ -246,6 +254,7 @@ public final class SignerResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/signers}.
      * Returns matching signer in the default account, or {@code null}.
      *
      * @param email required email address

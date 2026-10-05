@@ -93,10 +93,12 @@ Paginated methods return `PaginatedResult<T>`. `getData()` is the response `data
 `X-Pagination-Per-Page`, `X-Pagination-Total-Count`, and `X-Pagination-Page-Count`. Query maps may use
 `per-page`, `per_page`, or `perPage`; the SDK sends `per-page`.
 
-`maxRetries` defaults to zero. When enabled, the client retries only safe `GET`, `HEAD`, and `OPTIONS` requests
+`maxRetries` defaults to zero and controls additional SDK retries. OkHttp may recover connections and retry
+safe reads independently. When enabled, the SDK retries only safe `GET`, `HEAD`, and `OPTIONS` requests
 that receive 429 or 503. It honors numeric `Retry-After` or `X-Rate-Limit-Reset`, caps the wait at 30 seconds,
 and preserves thread interruption. It never automatically replays uploads, creates, updates, deletes,
-notifications, or signatures.
+notifications, or signatures. Mutating requests follow no redirects, including HTTP 302, 307, and 308;
+the original response is surfaced as `ApiException`.
 
 ## Request payload catalog
 
@@ -203,8 +205,8 @@ CreateAssignmentPayload collect = new CreateAssignmentPayload()
 ```
 
 The estimate endpoint accepts `method`, `signers`, and `entries` pricing inputs. A virtual estimate requires
-non-empty `signers`; a collect estimate requires non-empty `entries`. Signer IDs within estimate signer entries
-are optional. Invitation-only `message`, `expires_at`, and `copy_receivers` are not part of that contract.
+non-empty `signers`; a collect estimate requires non-empty `signers` and `entries`.
+Signer IDs within estimate signer entries are optional. Invitation-only `message`, `expires_at`, and `copy_receivers` are not part of that contract.
 
 Verification and notification are coupled. If neither is supplied both default to `Email`; supplying only one
 lets the API infer the other. `Email` verification pairs with `Email`, `Whatsapp` with `Whatsapp`, and
@@ -377,7 +379,7 @@ keys are:
 | Paginated lists | `page`, `per-page` (maximum 100 where enforced) |
 | Documents list | `status`, `method` (`virtual\|collect`), `search`, comma-separated tag IDs in `tags` (all IDs must match), `sort` (`name` or `updated_at`), pagination |
 | Document search | `search`, `status`, pagination |
-| Assignments list | `page`, `per-page` |
+| Assignments list | `accountId` (set from the account override or client default), `page`, `per-page` |
 | Fields list | `include_inactive`, `include_standard` |
 | Signers list | `search`, pagination |
 | Templates list | `search`, pagination |
@@ -436,7 +438,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `AcceptTermsResponse` | Optional response fields `full_name`, `email`, `has_accepted_terms`; the documented success payload has no data, so the Java return may be null |
 | `VerifyEmailResponse` | Optional response fields `message`, `access_token`; the documented success payload has no data, so the Java return may be null |
 | `PaginationMeta` | `current_page`, `per_page`, `total`, `last_page` (built from response headers, not envelope `data`) |
-| `OAuthTokens` | `access_token`, `token_type` (`Bearer`), `expires_in` (seconds), `refresh_token?` (only with `offline_access`; a refresh always returns a new one), `scope` (space-separated, never contains `offline_access`), `id_token?` (only with `openid`) |
+| `OAuthTokens` | `access_token`, `token_type` (`Bearer`), `expires_in` (seconds), `refresh_token?` (only with `offline_access`; a refresh always returns a new one), `scope` (space-separated, never contains `offline_access`), `id_token?` (only with `openid`), `issued_token_type?` (RFC 8693 token type URI, when supplied) |
 | `OAuthUserInfo` | `sub`, `name?` (needs `profile`), `email?` and `email_verified?` (need `email`) |
 | `OAuthProtectedResource` | `resource`, `authorization_servers[]`, `scopes_supported[]`, `bearer_methods_supported[]` |
 

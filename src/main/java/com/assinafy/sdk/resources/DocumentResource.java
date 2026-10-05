@@ -66,6 +66,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/documents}.
      * Returns created document in the default account.
      *
      * @param file required readable PDF
@@ -76,6 +77,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/documents}.
      * Uploads an in-memory PDF.
      *
      * @param bytes required PDF bytes, at most 25 MB
@@ -90,6 +92,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/documents}.
      * Returns created document in the default account.
      *
      * @param bytes required PDF bytes, at most 25 MB
@@ -168,6 +171,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/documents}.
      * Returns default account's document page.
      *
      * @param params optional filters, sorting, and pagination values
@@ -178,6 +182,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/documents}.
      * Returns default account's first document page.
      *
      * @return default account's first document page
@@ -203,6 +208,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/documents/search}.
      * Returns default account's lightweight document page.
      *
      * @param params optional search, status, and pagination values
@@ -233,6 +239,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /documents/{document_id}}.
      * Alias for {@link #details(String)}.
      *
      * @param documentId required document identifier
@@ -288,6 +295,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /documents/{document_id}}.
      * Waits up to 30 seconds, polling every two seconds.
      *
      * @param documentId required document identifier
@@ -316,6 +324,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /documents/{document_id}/download/{artifact_name}}.
      * Convenience for {@link #download(String, String)} with the {@code "certificated"} artifact — the final
      * signed PDF. Use {@code download(id, "original")} to fetch the originally uploaded PDF instead.
      *
@@ -424,6 +433,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/templates/{template_id}/documents}.
      * Generates from a template in the client's default account.
      *
      * @param templateId required template identifier
@@ -437,6 +447,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/templates/{template_id}/documents}.
      * Generates from a template with no optional values in the client's default account.
      *
      * @param templateId required template identifier
@@ -469,6 +480,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/templates/{template_id}/documents/estimate-cost}.
      * Returns default account's template-generation credit estimate.
      *
      * @param templateId required template identifier
@@ -546,6 +558,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/documents/{document_id}/tags}.
      * Returns tags attached in the default account.
      *
      * @param documentId required document identifier
@@ -572,6 +585,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code PUT /accounts/{account_id}/documents/{document_id}/tags}.
      * Returns attached tags after replacement in the default account.
      *
      * @param documentId required document identifier
@@ -599,6 +613,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/documents/{document_id}/tags}.
      * Returns attached tags after append in the default account.
      *
      * @param documentId required document identifier
@@ -630,6 +645,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code DELETE /accounts/{account_id}/documents/{document_id}/tags/{tag_id}}.
      * Returns response {@code detached} flag in the default account.
      *
      * @param documentId required document identifier
@@ -641,6 +657,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /documents/{document_id}}.
      * Checks the certificated status or strict signer-count equality.
      *
      * @param documentId required document identifier
@@ -663,6 +680,7 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
+     * {@code GET /documents/{document_id}}.
      * Calculates completion counts and percentage from document assignment data.
      *
      * @param documentId required document identifier

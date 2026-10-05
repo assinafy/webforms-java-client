@@ -8,24 +8,8 @@ platform.
 Covers all 93 operations in the official API contract: accounts, users, authentication, OAuth, documents,
 signers, assignments, fields, templates, tags, webhooks, and the signer-facing signing flows.
 
-> **Two Java clients for the same API.** Assinafy ships two. `com.assinafy:assinafy-sdk` is the current one
-> and where a **new** integration should start. This artifact is the older client, maintained for integrations
-> already on it. Both expose `com.assinafy.sdk.AssinafyClient` and both cover every documented operation, but
-> they are not drop-in equivalents:
->
-> | | `assinafy-sdk` | `webforms-java-client-sdk` (this one) |
-> |---|---|---|
-> | Configuration | `AssinafyClientOptions.builder().apiKey(...)` | `new AssinafyClientOptions().setApiKey(...)` |
-> | `timeoutMs` | `long` | `int` |
-> | Pluggable `Logger` | yes | no |
-> | `SANDBOX_BASE_URL` constant | yes | no |
-> | Automatic retry on 429/503 | no | yes, via `maxRetries` |
->
-> Porting to `assinafy-sdk` therefore means rewriting client construction, and re-implementing backoff
-> yourself if you rely on `maxRetries`.
->
-> The `webforms` in the artifact name is historical. It carries no webforms-specific API, and is unrelated to
-> Oracle Forms, for which "WebForms Java client" is the more common meaning of the phrase.
+> This artifact uses `new AssinafyClientOptions().setApiKey(...)`. The `webforms` name is historical;
+> the SDK serves the Assinafy API. Assinafy recommends `com.assinafy:assinafy-sdk` for new integrations.
 
 This README follows one document from installation to a signed, downloaded PDF. Each section is the next step
 of that journey, so reading top to bottom gives you the whole integration; jumping to a heading gives you one
@@ -47,14 +31,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.6.0</version>
+    <version>2.6.1</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.6.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.6.1'
 ```
 
 The artifact is published to GitHub Packages, so the repository must be declared once in your build. See
@@ -373,8 +357,9 @@ The 2-credit charge appears in the estimate under `SignatureDigitalCertificate`.
 
 The ordinary signing endpoint **rejects** certificate signers: their signature comes from a two-step handshake
 with the Web PKI extension (`POST /v1/signers/certificate/start`, then `.../complete`). Those two routes are
-deployed on production only, are not in the published OpenAPI document, and are therefore not wrapped by this
-server-side SDK. Once the flow completes, the qualified PDF is `client.documents.download(documentId, "pades")`.
+browser certificate operations without published OpenAPI request/response schemas, so this
+server-side SDK does not wrap them. Once the flow completes, download the qualified PDF with
+`client.documents.download(documentId, "pades")`.
 
 **Signing order.** `step` sequences the signers: everyone sharing a step signs in parallel, and the next step
 is notified only after the previous one completes. If you use it, every signer needs one, and the values must
@@ -522,7 +507,7 @@ client.webhooks.retryDispatch(dispatchId);
 ```
 
 Once the document reaches `certificated`, its artifacts are available. `original` is the uploaded PDF,
-`certificated` is the signed one, `certificate-page` is the audit page, `pades` exists only when a
+`certificated` is the signed one, `certificate-page` is the signature evidence page, `pades` exists only when a
 digital-certificate signer took part, and `bundle` is a zip of the rest.
 
 ```java
@@ -748,8 +733,8 @@ The standard error body is `{ "status": integer, "message": string, "data": obje
 | Sandbox | `https://sandbox.assinafy.com.br/v1` — set it with `setBaseUrl(...)`; this artifact exposes no sandbox constant |
 
 The sandbox trails production. A route the sandbox router answers 404 for while `api.assinafy.com.br` serves it
-is deployment lag, not a missing route — today that covers the OAuth endpoints and the two digital-certificate
-routes.
+can indicate deployment lag. OAuth endpoints are available in the sandbox; production apps and
+authorizations use production credentials and workspaces.
 
 ---
 

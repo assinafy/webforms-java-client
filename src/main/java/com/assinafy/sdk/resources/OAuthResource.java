@@ -8,12 +8,10 @@ import com.assinafy.sdk.models.OAuthTokens;
 import com.assinafy.sdk.models.OAuthUserInfo;
 import okhttp3.FormBody;
 import okhttp3.HttpUrl;
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
-import okhttp3.RequestBody;
-import okio.BufferedSink;
 
-import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -108,7 +106,8 @@ public final class OAuthResource extends BaseResource {
     }
 
     /**
-     * Builds the authorization URL the user's browser is sent to. Use a full page navigation, not an AJAX
+     * Builds the browser URL for {@code GET /oauth/authorize} on the authorization server.
+     * Use a full page navigation, not an AJAX
      * call. {@code response_type=code} and {@code code_challenge_method=S256} are fixed, and the challenge is
      * the SHA-256 of the supplied verifier, so the two can never disagree.
      *
@@ -130,6 +129,9 @@ public final class OAuthResource extends BaseResource {
         List<String> scopes = request.getScopes();
         if (scopes == null || scopes.isEmpty()) {
             throw new ValidationException("At least one scope is required");
+        }
+        if (scopes.stream().anyMatch(scope -> scope == null || !scope.matches("[\\x21\\x23-\\x5B\\x5D-\\x7E]+"))) {
+            throw new ValidationException("Each scope must be a non-empty OAuth scope token");
         }
         String resource = apiOrigin();
         if (request.getResource() != null && !request.getResource().isBlank()
@@ -191,7 +193,7 @@ public final class OAuthResource extends BaseResource {
                 .add("client_id", clientId);
         addIfPresent(body, "client_secret", clientSecret);
         body.add("resource", apiOrigin());
-        return httpPost("/oauth/token", sendOnce(body), OAuthTokens.class);
+        return httpPost("/oauth/token", body.build(), OAuthTokens.class);
     }
 
     /**
@@ -227,7 +229,7 @@ public final class OAuthResource extends BaseResource {
                 .add("refresh_token", refreshToken)
                 .add("client_id", clientId);
         addIfPresent(body, "client_secret", clientSecret);
-        OAuthTokens tokens = httpPost("/oauth/token", sendOnce(body), OAuthTokens.class);
+        OAuthTokens tokens = httpPost("/oauth/token", body.build(), OAuthTokens.class);
         // The server retired the token just sent, so a response without a new one leaves nothing safe to store:
         // returning it would let the caller save null or keep the retired token.
         String renewed = tokens != null ? tokens.getRefreshToken() : null;
@@ -266,10 +268,11 @@ public final class OAuthResource extends BaseResource {
         addIfPresent(body, "token_type_hint", tokenTypeHint);
         body.add("client_id", clientId);
         addIfPresent(body, "client_secret", clientSecret);
-        httpPostVoid("/oauth/revoke", sendOnce(body));
+        httpPostVoid("/oauth/revoke", body.build());
     }
 
     /**
+     * {@code POST /oauth/revoke}.
      * Revokes a token without a type hint.
      *
      * @param clientId required application identifier
@@ -324,20 +327,6 @@ public final class OAuthResource extends BaseResource {
         }
     }
 
-    /**
-     * Builds the form as a one-shot body, which OkHttp never sends twice. {@code retryOnConnectionFailure(false)}
-     * alone does not stop OkHttp repeating a request answered {@code 503} with {@code Retry-After: 0}.
-     */
-    private static RequestBody sendOnce(FormBody.Builder form) {
-        RequestBody body = form.build();
-        return new RequestBody() {
-            @Override public MediaType contentType() { return body.contentType(); }
-            @Override public long contentLength() throws IOException { return body.contentLength(); }
-            @Override public void writeTo(BufferedSink sink) throws IOException { body.writeTo(sink); }
-            @Override public boolean isOneShot() { return true; }
-        };
-    }
-
     private static void addIfPresent(FormBody.Builder body, String key, String value) {
         if (value != null && !value.isBlank()) {
             body.add(key, value);
@@ -352,8 +341,15 @@ public final class OAuthResource extends BaseResource {
 
     private static void requireRedirectUri(String redirectUri) {
         requireValue(redirectUri, "Redirect URI");
-        if (!redirectUri.startsWith("https://") || redirectUri.contains("#")) {
-            throw new ValidationException("Redirect URI must be an HTTPS URL without a fragment");
+        try {
+            URI uri = new URI(redirectUri);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
+                    || uri.getRawFragment() != null || uri.getRawUserInfo() != null) {
+                throw new ValidationException(
+                        "Redirect URI must be an HTTPS URL without user information or a fragment");
+            }
+        } catch (URISyntaxException e) {
+            throw new ValidationException("Redirect URI must be a valid HTTPS URL", e);
         }
     }
 

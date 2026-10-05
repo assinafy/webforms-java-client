@@ -8,7 +8,7 @@ Worked end-to-end examples for the SDK. The [API reference](API_REFERENCE.md) co
 Every JSON Assinafy API response is wrapped in a JSON envelope:
 
 ```json
-{ "status": 200, "message": "", "data": { /* ... */ } }
+{ "status": 200, "message": "", "data": { "id": "document-id" } }
 ```
 
 - `status` — the logical status (normally mirrors the HTTP status). A value `>= 400` is raised as an `ApiException`,
@@ -234,6 +234,9 @@ Response — a flat object, not the `{status,message,data}` envelope:
 
 `scope` is what you actually received; read it instead of assuming. `refresh_token` is present only when
 `offline_access` was requested and consented, and `id_token` only when `openid` was granted.
+`issued_token_type` is optional and belongs to the platform’s RFC 8693 token-exchange response;
+`OAuthTokens.getIssuedTokenType()` preserves it when supplied. The SDK exposes authorization-code
+and refresh grants for app integrations.
 
 ### 3. Call the API as the user
 
@@ -251,6 +254,20 @@ Calling a different workspace — even another one the same user belongs to — 
 workspace separately and keep tokens per workspace.
 
 ### 4. Refresh, and handle a missing scope
+
+Request — `POST /oauth/token`, `application/x-www-form-urlencoded`:
+
+```text
+grant_type=refresh_token
+&refresh_token=<most recently stored refresh token>
+&client_id=your-client-id
+&client_secret=your-client-secret
+&resource=https://api.assinafy.com.br
+```
+
+Public apps omit `client_secret`. The response has the same token fields as the authorization-code
+response above, including a new `refresh_token`; persist it before using the returned access token.
+
 
 ```java
 // Access tokens last one hour. Refresh with the refresh token saved most recently, and save the NEW one before
@@ -291,6 +308,30 @@ String subject = who.getSub();
 client.oauth.revoke("your-client-id", "your-client-secret", store.load(), "refresh_token");
 ```
 
+`GET /oauth/userinfo` has no request body and uses the OAuth bearer token. Its flat response
+contains these claims; `name` requires `profile`, and `email`/`email_verified` require `email`:
+
+```json
+{
+  "sub": "user-id",
+  "name": "Example User",
+  "email": "user@example.com",
+  "email_verified": true
+}
+```
+
+`POST /oauth/revoke` uses a form body:
+
+```text
+token=<most recently stored refresh token>
+&token_type_hint=refresh_token
+&client_id=your-client-id
+&client_secret=your-client-secret
+```
+
+`token_type_hint` and `client_secret` are optional. Success is HTTP 200 with no response payload
+required by the SDK. Revoking an unknown or retired token also returns HTTP 200.
+
 Discovery, if you configure endpoints dynamically:
 
 ```java
@@ -299,6 +340,20 @@ OAuthProtectedResource metadata = client.oauth.protectedResourceMetadata();
 metadata.getResource();              // "https://api.assinafy.com.br"
 metadata.getAuthorizationServers();  // ["https://auth.assinafy.com.br"]
 metadata.getScopesSupported();
+```
+
+The metadata request has no body and requires no credentials. Its complete flat response is:
+
+```json
+{
+  "resource": "https://api.assinafy.com.br",
+  "authorization_servers": ["https://auth.assinafy.com.br"],
+  "scopes_supported": [
+    "documents:read", "documents:write", "templates:read", "templates:write",
+    "account:read", "webhooks:write", "openid", "profile", "email"
+  ],
+  "bearer_methods_supported": ["header"]
+}
 ```
 
 Most OAuth libraries need only the issuer, `https://auth.assinafy.com.br`, and read the authorize, token,

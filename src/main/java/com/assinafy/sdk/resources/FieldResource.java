@@ -44,6 +44,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/fields}.
      * Returns created field definition in the default account.
      *
      * @param payload required field definition
@@ -69,6 +70,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/fields}.
      * Returns default account's matching fields.
      *
      * @param params optional inclusion filters
@@ -79,6 +81,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/fields}.
      * Returns default account's active custom field definitions.
      *
      * @return default account's active custom field definitions
@@ -101,6 +104,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/fields/{field_id}}.
      * Returns field definition in the default account.
      *
      * @param fieldId required field identifier
@@ -125,6 +129,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code PUT /accounts/{account_id}/fields/{field_id}}.
      * Returns updated field definition in the default account.
      *
      * @param fieldId required field identifier
@@ -148,6 +153,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code DELETE /accounts/{account_id}/fields/{field_id}}.
      * Deletes the selected resource.
      *
      * @param fieldId required field identifier in the default account
@@ -179,6 +185,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/fields/{field_id}/validate}.
      * Returns validation result in the default account.
      *
      * @param fieldId required field identifier
@@ -191,6 +198,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/fields/{field_id}/validate}.
      * Returns validation result in the default account.
      *
      * @param fieldId required field identifier
@@ -227,6 +235,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/fields/validate-multiple}.
      * Returns validation results in the default account.
      *
      * @param values one or more field/value pairs
@@ -239,6 +248,7 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/fields/validate-multiple}.
      * Returns validation results in the default account.
      *
      * @param values one or more field/value pairs

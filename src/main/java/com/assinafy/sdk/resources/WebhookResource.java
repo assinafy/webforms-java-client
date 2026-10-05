@@ -75,6 +75,7 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
+     * {@code PUT /accounts/{account_id}/webhooks/subscriptions}.
      * Returns created or replaced subscription in the default account.
      *
      * @param payload required subscription values
@@ -85,6 +86,7 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
+     * {@code PUT /accounts/{account_id}/webhooks/subscriptions}.
      * Alias for {@link #register(RegisterWebhookPayload, String)}. The subscription uses one create-or-replace
      * {@code PUT}, so registering and updating invoke the same operation.
      *
@@ -97,6 +99,7 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
+     * {@code PUT /accounts/{accountId}/webhooks/subscriptions}.
      * Returns created or replaced subscription in the default account.
      *
      * @param payload required subscription values
@@ -120,6 +123,7 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/webhooks/subscriptions}.
      * Returns default account's webhook subscription.
      *
      * @return default account's webhook subscription
@@ -142,6 +146,7 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
+     * {@code PUT /accounts/{account_id}/webhooks/inactivate}.
      * Returns default account's inactive subscription.
      *
      * @return default account's inactive subscription
@@ -175,6 +180,7 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/webhooks}.
      * Returns default account's webhook-dispatch page.
      *
      * @param params optional typed filters and pagination values
@@ -185,6 +191,7 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/webhooks}.
      * Returns default account's first webhook-dispatch page.
      *
      * @return default account's first webhook-dispatch page
@@ -207,6 +214,7 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/webhooks/{dispatch_id}/retry}.
      * Returns updated dispatch record in the default account.
      *
      * @param dispatchId required dispatch identifier

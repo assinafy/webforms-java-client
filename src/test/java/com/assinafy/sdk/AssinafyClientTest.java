@@ -331,6 +331,37 @@ class AssinafyClientTest {
     }
 
     @Test
+    void mutationsAreSentOnceWhateverTheResponse() throws Exception {
+        for (int status : new int[] {302, 307, 308, 408, 503}) {
+            for (String operation : List.of("json", "multipart", "binary", "delete")) {
+                try (MockWebServer server = new MockWebServer()) {
+                    server.start();
+                    server.enqueue(new MockResponse().setResponseCode(status)
+                            .setHeader("Retry-After", "0").setHeader("Location", "/v1/accounts/acc"));
+                    server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":{\"id\":\"doc\"}}"));
+                    AssinafyClient client = AssinafyClient.create("k", "acc",
+                            opts -> opts.setBaseUrl(server.url("/v1").toString()).setMaxRetries(2));
+
+                    Throwable thrown = catchThrowable(() -> {
+                        switch (operation) {
+                            case "json" -> client.accounts.create(new com.assinafy.sdk.models.AccountPayload("Acme"));
+                            case "multipart" -> client.documents.upload(new byte[] {1}, "contract.pdf");
+                            case "binary" -> client.signerSelf.uploadSignature("code",
+                                    new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff}, "signature");
+                            case "delete" -> client.documents.delete("doc");
+                            default -> throw new AssertionError(operation);
+                        }
+                    });
+
+                    assertThat(server.getRequestCount()).as("%s after HTTP %d", operation, status).isEqualTo(1);
+                    assertThat(thrown).isInstanceOfSatisfying(ApiException.class,
+                            failure -> assertThat(failure.getStatusCode()).isEqualTo(status));
+                }
+            }
+        }
+    }
+
+    @Test
     void retryInterruptionStopsImmediatelyAndPreservesInterrupt() throws Exception {
         MockWebServer server = new MockWebServer();
         server.start();

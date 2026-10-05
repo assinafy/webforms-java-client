@@ -1,0 +1,50 @@
+name: Sandbox live tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      send_notifications:
+        description: Send real notification email to the configured test recipients
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assinafy-sandbox-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: sandbox
+    env:
+      ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
+      ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
+      ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
+      ASSINAFY_TEST_EMAIL: ${{ secrets.ASSINAFY_TEST_EMAIL }}
+      ASSINAFY_SECOND_TEST_EMAIL: ${{ secrets.ASSINAFY_SECOND_TEST_EMAIL }}
+      ASSINAFY_LIVE_EMAILS: ${{ inputs.send_notifications }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up JDK 25 LTS
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Validate sandbox test configuration
+        shell: bash
+        run: |
+          for name in ASSINAFY_API_KEY ASSINAFY_ACCOUNT_ID ASSINAFY_TEST_EMAIL ASSINAFY_SECOND_TEST_EMAIL; do
+            test -n "${!name}" || { echo "$name sandbox secret is required"; exit 1; }
+          done
+      - name: Run sandbox live tests
+        run: ./mvnw --batch-mode --no-transfer-progress -Dtest=LiveSmokeTest test

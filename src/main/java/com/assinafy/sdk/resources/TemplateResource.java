@@ -36,6 +36,7 @@ public final class TemplateResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/templates}.
      * Returns default account's template page.
      *
      * @param params optional search and pagination values
@@ -46,6 +47,7 @@ public final class TemplateResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/templates}.
      * Returns default account's first template page.
      *
      * @return default account's first template page
@@ -69,6 +71,7 @@ public final class TemplateResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/templates/{template_id}}.
      * Returns full template details in the default account.
      *
      * @param templateId required template identifier

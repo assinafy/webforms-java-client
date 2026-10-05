@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-10-05
+
+### Fixed
+- Mutating requests are sent once, including uploads, signatures, updates, and deletes. Redirects and
+  automatic HTTP 408/503 replay no longer repeat a request that can produce side effects.
+- OAuth authorization rejects malformed HTTPS callbacks, callbacks containing user information or fragments,
+  and invalid individual scope tokens before sending a request.
+
+### Added
+- `OAuthTokens.getIssuedTokenType()` exposes the optional `issued_token_type` response field.
+
+### Documentation
+- Resource overloads include their HTTP method and path in Javadoc.
+- OAuth examples include refresh, revocation, userinfo, and protected-resource request/response payloads.
+
 ## [2.6.0] - 2026-09-25
 
 ### Fixed
@@ -18,8 +33,7 @@
 - `authorizationUrl(...)` rejects a `setResource(...)` value other than the client's API origin, the value
   `exchangeAuthorizationCode(...)` sends; a mismatch always failed at the token endpoint with `invalid_target`.
 - Docs: a refresh token is valid for 30 days and every refresh returns a new one with a fresh 30 days; a
-  connection only expires after 30 days without a refresh. The old "30 days from approval, reconnect monthly"
-  statement was wrong.
+  connection only expires after 30 days without a refresh.
 - Docs: after a refresh, the examples call the API through a client built with the renewed access token and
   revoke the most recently saved refresh token. Never re-send a refresh token after a failure that may have
   reached the server: re-read storage, continue only if it holds a newer token, and otherwise ask the user to
@@ -119,10 +133,7 @@
 - `README.md` and the POM describe what this client wraps as the Assinafy API, which is what the API calls
   itself; there is no separately named "Assinafy Webforms API". The `webforms` in the artifact name is
   historical and the README says so.
-- `README.md` compares this client against the current `com.assinafy:assinafy-sdk`. Both cover all 89
-  operations behind the same `AssinafyClient`, but they are not drop-in equivalents: configuration differs,
-  and automatic retry on 429/503 exists only here while a pluggable logger and a sandbox-URL constant exist
-  only there.
+- `README.md` documents setter-style client configuration and installation guidance for Java integrations.
 - `README.md` adds the release-profile command that gates Javadoc separately from `verify`.
 
 ### Test Suite
@@ -135,10 +146,8 @@
 ## [2.1.0] - 2026-08-27
 
 ### Changed
-- **`signers.create(...)` now always sends the creation request.** It previously looked the signer up by email
-  first and returned the existing record instead of creating one, so the same call meant "create" or "fetch"
-  depending on workspace state. Creating a signer whose email already exists now raises `ApiException`. Call
-  `signers.findOrCreate(payload[, accountId])` where the previous find-then-create behaviour is what you want;
+- **`signers.create(...)` now always sends the creation request.** Creating a signer whose email already exists raises
+  `ApiException`. Call `signers.findOrCreate(payload[, accountId])` to reuse a matching signer;
   `uploadAndRequestSignatures(...)` uses it internally, so that workflow is unchanged.
 - `DocumentStatsRow` exposes the full KPI set returned by the stats endpoints: notification counts
   (`email`, `whatsapp`, `bypass`), verification counts (`email`, `whatsapp`, `bypass`,
@@ -236,19 +245,17 @@ were corrected.
 ### Fixed
 - **`signerSelf.acceptTerms(...)` and `signerSelf.verifyEmail(...)` now send the `signer-access-code` as the
   required query parameter** instead of in the JSON body. Per the API's security scheme the code is a query
-  parameter, so the previous body placement failed authentication against the real API. `verifyEmail` sends
+  parameter, so body placement fails authentication. `verifyEmail` sends
   only `{"verification-code": ...}` in the body; `acceptTerms` sends no body.
 - **`fields.validateMultiple(...)` now serializes a `null` value** as `{"field_id": ..., "value": null}`
   instead of dropping the `value` key (`@JsonInclude(NON_NULL)` was removed from `FieldValidationPayload`). The
-  API requires the key to be present, so a `null` value previously produced an HTTP 400 — inconsistent with the
-  single `validate(...)` path, which already worked.
+  API requires the key to be present, so both validation methods send an explicit `null` value.
 - **The void and binary transport paths now surface an error envelope returned under HTTP 200.**
   `executeVoid`/`executeBinary` inspect the envelope status (as the typed path already did), so a
   `{"status": 4xx, ...}` body under HTTP 200 on a delete/download raises `ApiException` instead of being
   swallowed (or returned as if it were the artifact).
-- **`ApiException.getRetryAfterSeconds()` is only populated on retryable statuses (429/503).** It previously
-  fell back to the always-present `X-Rate-Limit-Reset` header on every error, so a permanent 400/401 wrongly
-  reported a retry hint. A caller keying retries on its presence no longer backs off on non-retryable failures.
+- **`ApiException.getRetryAfterSeconds()` is only populated on retryable statuses (429/503).** Permanent 400/401
+  failures carry no retry hint, even when `X-Rate-Limit-Reset` is present.
 
 ### Added
 - **New endpoint coverage:**
@@ -317,8 +324,7 @@ were corrected.
   `{"value": null}` to the API.
 - Binary endpoints (document/page/thumbnail/signature download) now surface the server's error message and
   body via `ApiException`, instead of a generic "API request failed with status N".
-- `SignerResource.create` duplicate-email recovery now also handles HTTP 400 for a duplicate (previously only
-  409). Removed a redundant `toLowerCase` in `findByEmail`.
+- `SignerResource.create` duplicate-email recovery now also handles HTTP 400 and 409 for a duplicate. Removed a redundant `toLowerCase` in `findByEmail`.
 
 ### Added
 - `current_signer`, `page_count`, and `created_by` fields on `DocumentDetails` (signer-facing and public
@@ -328,8 +334,7 @@ were corrected.
   delivery history.
 - Opt-in retry: `AssinafyClientOptions.setMaxRetries(int)` retries HTTP 429/503 honoring `Retry-After`.
   `ApiException.getRetryAfterSeconds()` surfaces the server's hint regardless.
-- Per-method Javadoc (HTTP verb + path) on every public resource method (previously missing on the Signer,
-  Field, Template, Webhook, and most Document methods).
+- Per-method Javadoc (HTTP verb + path) on public resource methods.
 - `docs/EXAMPLES.md` now documents every method with full request and response JSON payloads.
 
 ### Changed

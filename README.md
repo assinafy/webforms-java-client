@@ -8,25 +8,8 @@ de assinatura eletrônica.
 Cobre as 93 operações do contrato oficial da API: contas, usuários, autenticação, OAuth, documentos,
 signatários, assignments, campos, templates, tags, webhooks e os fluxos de assinatura do signatário.
 
-> **Dois clientes Java para a mesma API.** A Assinafy publica dois. O `com.assinafy:assinafy-sdk` é o
-> atual e é onde uma integração **nova** deve começar. Este artefato é o cliente mais antigo, mantido
-> para integrações que já o utilizam. Ambos expõem `com.assinafy.sdk.AssinafyClient` e ambos cobrem
-> todas as operações documentadas, mas **não** são equivalentes drop-in:
->
-> | | `assinafy-sdk` | `webforms-java-client-sdk` (este) |
-> |---|---|---|
-> | Configuração | `AssinafyClientOptions.builder().apiKey(...)` | `new AssinafyClientOptions().setApiKey(...)` |
-> | `timeoutMs` | `long` | `int` |
-> | `Logger` plugável | sim | não |
-> | Constante `SANDBOX_BASE_URL` | sim | não |
-> | Retry automático em 429/503 | não | sim, via `maxRetries` |
->
-> Portar para o `assinafy-sdk` significa, portanto, reescrever a construção do cliente e
-> re-implementar o backoff por conta própria, se você depende de `maxRetries`.
->
-> O `webforms` no nome do artefato é histórico. Ele não carrega nenhuma API específica de webforms, e
-> não tem relação com Oracle Forms — para o qual "WebForms Java client" é o significado mais comum da
-> expressão.
+> Este artefato usa `new AssinafyClientOptions().setApiKey(...)`. O nome `webforms` é histórico;
+> o SDK atende a API Assinafy. Para novas integrações, a Assinafy recomenda `com.assinafy:assinafy-sdk`.
 
 Este documento acompanha **um documento do começo ao fim**: da instalação até o PDF assinado e baixado.
 Cada seção é o passo seguinte dessa jornada, então ler de cima a baixo dá a integração inteira, e pular
@@ -49,14 +32,14 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.6.0</version>
+    <version>2.6.1</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.6.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.6.1'
 ```
 
 O artefato é publicado no GitHub Packages, então o repositório precisa ser declarado uma vez no seu
@@ -415,8 +398,8 @@ POST /v1/signers/certificate/start     → data.token   (token da operação Web
 POST /v1/signers/certificate/complete  → data.signerName
 ```
 
-> Essas duas rotas são extensões implantadas **somente em produção**: o sandbox não as expõe e elas não
-> constam do documento OpenAPI publicado, então este SDK não as embrulha. Concluído o fluxo, baixar o
+> Essas duas rotas usam o fluxo de certificado no navegador e não têm operações com schemas no
+> documento OpenAPI publicado, então este SDK não as embrulha. Concluído o fluxo, baixar o
 > artefato `pades` devolve a assinatura PAdES qualificada.
 
 ### O atalho de uma chamada
@@ -787,8 +770,8 @@ cada bloqueio.
 | Sandbox | `https://sandbox.assinafy.com.br/v1` — defina via `setBaseUrl(...)`; este artefato não expõe constante de sandbox |
 
 O sandbox acompanha a produção com atraso. Uma rota que responde 404 no roteador do sandbox mas funciona
-em `api.assinafy.com.br` é atraso de implantação, não rota inexistente — hoje é o caso dos endpoints
-OAuth e das duas rotas de certificado digital.
+em `api.assinafy.com.br` pode indicar atraso de implantação. Os endpoints OAuth estão disponíveis
+no sandbox; apps e autorizações de produção usam as credenciais e o workspace de produção.
 
 ---
 

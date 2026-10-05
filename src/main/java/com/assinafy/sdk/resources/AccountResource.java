@@ -61,6 +61,7 @@ public final class AccountResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{accountId}}.
      * Returns default workspace.
      *
      * @return default workspace
@@ -81,6 +82,7 @@ public final class AccountResource extends BaseResource {
     }
 
     /**
+     * {@code PUT /accounts/{accountId}}.
      * Returns updated default workspace.
      *
      * @param payload required fields to update
@@ -101,6 +103,7 @@ public final class AccountResource extends BaseResource {
     }
 
     /**
+     * {@code DELETE /accounts/{accountId}}.
      * Deletes the selected resource.
      *
      * @param force whether to cancel an active subscription first
@@ -119,6 +122,7 @@ public final class AccountResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{accountId}/theme}.
      * Returns default account's theme.
      *
      * @return default account's theme
@@ -137,6 +141,7 @@ public final class AccountResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{accountId}/logo}.
      * Returns default account's logo image bytes.
      *
      * @return default account's logo image bytes
@@ -165,6 +170,7 @@ public final class AccountResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{accountId}/logo}.
      * Uploads the supplied logo.
      *
      * @param bytes required image bytes
@@ -182,7 +188,7 @@ public final class AccountResource extends BaseResource {
         httpDelete("/accounts/" + id + "/logo");
     }
 
-    /** Removes the default account's current logo. */
+    /** {@code DELETE /accounts/{accountId}/logo}. Removes the default account's current logo. */
     public void deleteLogo() { deleteLogo(null); }
 
     /**
@@ -200,6 +206,7 @@ public final class AccountResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{accountId}/stats}.
      * Returns default account's KPI rows.
      *
      * @param params optional statistics query values
@@ -208,6 +215,7 @@ public final class AccountResource extends BaseResource {
     public List<DocumentStatsRow> stats(Map<String, String> params) { return stats(params, null); }
 
     /**
+     * {@code GET /accounts/{accountId}/stats}.
      * Returns default account's monthly KPI rows.
      *
      * @return default account's monthly KPI rows

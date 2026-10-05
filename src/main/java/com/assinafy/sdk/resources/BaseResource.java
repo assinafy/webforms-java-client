@@ -17,6 +17,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import okio.BufferedSink;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -41,6 +42,7 @@ public abstract class BaseResource {
 
     /** Shared HTTP client configured by {@link com.assinafy.sdk.AssinafyClient}. */
     protected final OkHttpClient httpClient;
+    private final OkHttpClient mutationClient;
 
     /** Normalized API base URL without a trailing slash. */
     protected final String baseUrl;
@@ -68,6 +70,8 @@ public abstract class BaseResource {
             throw new ValidationException("HTTP client is required");
         }
         this.httpClient = httpClient;
+        this.mutationClient = httpClient.newBuilder()
+                .retryOnConnectionFailure(false).followRedirects(false).build();
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.defaultAccountId = defaultAccountId;
     }
@@ -544,8 +548,33 @@ public abstract class BaseResource {
                 .build();
     }
 
+    private Response executeRequest(Request request) throws IOException {
+        if ("GET".equals(request.method()) || "HEAD".equals(request.method()) || "OPTIONS".equals(request.method())) {
+            return httpClient.newCall(request).execute();
+        }
+        RequestBody body = request.body() != null
+                ? request.body() : RequestBody.create(new byte[0], (MediaType) null);
+        return mutationClient.newCall(request.newBuilder().method(request.method(), sendOnce(body)).build()).execute();
+    }
+
+    /**
+     * Prevents OkHttp from replaying a mutating body, including after HTTP 503 with {@code Retry-After: 0}.
+     *
+     * @param body encoded request body
+     * @return body that can be transmitted at most once
+     */
+    private static RequestBody sendOnce(RequestBody body) {
+        if (body.isOneShot()) return body;
+        return new RequestBody() {
+            @Override public MediaType contentType() { return body.contentType(); }
+            @Override public long contentLength() throws IOException { return body.contentLength(); }
+            @Override public void writeTo(BufferedSink sink) throws IOException { body.writeTo(sink); }
+            @Override public boolean isOneShot() { return true; }
+        };
+    }
+
     private <T> T execute(Request request, JavaType dataType) {
-        try (Response response = httpClient.newCall(request).execute()) {
+        try (Response response = executeRequest(request)) {
             ResponseBody responseBody = response.body();
             String json = responseBody != null ? responseBody.string() : "";
             try {
@@ -563,7 +592,7 @@ public abstract class BaseResource {
     }
 
     private void executeVoid(Request request) {
-        try (Response response = httpClient.newCall(request).execute()) {
+        try (Response response = executeRequest(request)) {
             ResponseBody responseBody = response.body();
             String json = responseBody != null ? responseBody.string() : "";
             try {
@@ -586,7 +615,7 @@ public abstract class BaseResource {
     }
 
     private byte[] executeBinary(Request request) {
-        try (Response response = httpClient.newCall(request).execute()) {
+        try (Response response = executeRequest(request)) {
             ResponseBody responseBody = response.body();
             MediaType contentType = responseBody != null ? responseBody.contentType() : null;
             boolean jsonBody = contentType != null
@@ -620,7 +649,7 @@ public abstract class BaseResource {
     }
 
     private <T> PaginatedResult<T> executeList(Request request, JavaType listType) {
-        try (Response response = httpClient.newCall(request).execute()) {
+        try (Response response = executeRequest(request)) {
             ResponseBody responseBody = response.body();
             String json = responseBody != null ? responseBody.string() : "";
             List<T> data;

@@ -40,6 +40,7 @@ public final class TagResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/tags}.
      * Returns default account's tag page.
      *
      * @param params optional search and pagination values
@@ -50,6 +51,7 @@ public final class TagResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/tags}.
      * Returns default account's first tag page.
      *
      * @return default account's first tag page
@@ -72,6 +74,7 @@ public final class TagResource extends BaseResource {
     }
 
     /**
+     * {@code POST /accounts/{account_id}/tags}.
      * Returns created tag in the default account.
      *
      * @param payload required tag fields
@@ -97,6 +100,7 @@ public final class TagResource extends BaseResource {
     }
 
     /**
+     * {@code PUT /accounts/{account_id}/tags/{tag_id}}.
      * Returns updated tag in the default account.
      *
      * @param tagId required tag identifier
@@ -128,6 +132,7 @@ public final class TagResource extends BaseResource {
     }
 
     /**
+     * {@code DELETE /accounts/{account_id}/tags/{tag_id}}.
      * Returns response {@code deleted} flag in the default account.
      *
      * @param tagId required tag identifier
@@ -139,6 +144,7 @@ public final class TagResource extends BaseResource {
     }
 
     /**
+     * {@code DELETE /accounts/{account_id}/tags/{tag_id}}.
      * Returns response {@code deleted} flag without forced detachment.
      *
      * @param tagId required tag identifier

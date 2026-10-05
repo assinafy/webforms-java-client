@@ -18,6 +18,9 @@ public final class OAuthTokens {
     @JsonProperty("token_type")
     private String tokenType;
 
+    @JsonProperty("issued_token_type")
+    private String issuedTokenType;
+
     @JsonProperty("expires_in")
     private Integer expiresIn;
 
@@ -59,6 +62,20 @@ public final class OAuthTokens {
      * @param tokenType wire {@code token_type}
      */
     public void setTokenType(String tokenType) { this.tokenType = tokenType; }
+
+    /**
+     * Returns the optional RFC 8693 token-type identifier in a token-exchange response.
+     *
+     * @return wire {@code issued_token_type}, or {@code null} for authorization-code and refresh grants
+     */
+    public String getIssuedTokenType() { return issuedTokenType; }
+
+    /**
+     * Sets wire {@code issued_token_type}.
+     *
+     * @param issuedTokenType token-type identifier
+     */
+    public void setIssuedTokenType(String issuedTokenType) { this.issuedTokenType = issuedTokenType; }
 
     /**
      * Returns wire {@code expires_in}, the access token's lifetime in seconds.

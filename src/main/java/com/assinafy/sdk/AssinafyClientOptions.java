@@ -13,7 +13,7 @@ public final class AssinafyClientOptions {
     private int timeoutMs = 30_000;
     private int maxRetries = 0;
 
-    /** Creates options with production URL, 30-second timeout, and retries disabled. */
+    /** Creates options with production URL, 30-second timeout, and SDK retries disabled. */
     public AssinafyClientOptions() {}
 
     /**
@@ -92,8 +92,8 @@ public final class AssinafyClientOptions {
     public AssinafyClientOptions setTimeoutMs(int timeoutMs) { this.timeoutMs = timeoutMs; return this; }
 
     /**
-     * Maximum number of automatic retries for safe read requests on a rate-limit/temporary error (HTTP 429 or
-     * 503). Defaults to {@code 0}. Mutating requests are never replayed because doing so could duplicate an
+     * Maximum number of additional SDK retries for safe reads on HTTP 429 or 503. Defaults to {@code 0}.
+     * OkHttp can independently recover connections and retry safe reads. Mutating requests are never replayed because doing so could duplicate an
      * upload, notification, signature, or other side effect. Retry waits honor the server hint and are capped.
      *
      * @return configured safe-read retry limit

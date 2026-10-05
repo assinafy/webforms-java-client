@@ -26,5 +26,5 @@ CLAUDE.md
 # Local Maven repo cache (used by GitLab CI's MAVEN_OPTS)
 .m2/
 
-# Local audit/scratch artifacts (never commit; may contain sandbox credentials)
+# Local scratch artifacts (never commit; may contain sandbox credentials)
 .audit/

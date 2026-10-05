@@ -190,12 +190,40 @@ class OAuthResourceTest {
     }
 
     @Test
+    void authorizationUrlRejectsMalformedRedirectsAndScopeTokens() {
+        for (String redirect : List.of("https://", "https:///callback", "https://app.example/has space",
+                "https://app.example/callback#fragment", "https://user:secret@app.example/callback")) {
+            assertThatThrownBy(() -> resource.authorizationUrl(new OAuthAuthorizationRequest("client-1", redirect)
+                    .setScopes(List.of("documents:read")).setState("state-1").setCodeVerifier(VERIFIER)))
+                    .isInstanceOf(ValidationException.class).hasMessageContaining("HTTPS");
+            assertThatThrownBy(() -> resource.exchangeAuthorizationCode("client-1", null, "code", redirect, VERIFIER))
+                    .isInstanceOf(ValidationException.class).hasMessageContaining("HTTPS");
+        }
+        for (String scope : java.util.Arrays.asList(null, "", " ", "documents:read documents:write", "bad\"scope")) {
+            assertThatThrownBy(() -> resource.authorizationUrl(new OAuthAuthorizationRequest("client-1", REDIRECT_URI)
+                    .setScopes(java.util.Arrays.asList(scope)).setState("state-1").setCodeVerifier(VERIFIER)))
+                    .isInstanceOf(ValidationException.class).hasMessageContaining("scope");
+        }
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
     void exchangeAuthorizationCode_omitsTheSecretForAPublicClient() throws Exception {
         server.enqueue(json(200, Map.of("access_token", "at")));
 
         resource.exchangeAuthorizationCode("client-1", null, "the-code", REDIRECT_URI, VERIFIER);
 
         assertThat(form(server.takeRequest())).doesNotContainKey("client_secret");
+    }
+
+    @Test
+    void tokenModelPreservesOptionalIssuedTokenType() throws Exception {
+        OAuthTokens tokens = MAPPER.readValue(
+                "{\"access_token\":\"at\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:access_token\"}",
+                OAuthTokens.class);
+        assertThat(tokens.getIssuedTokenType()).isEqualTo("urn:ietf:params:oauth:token-type:access_token");
+        assertThat(MAPPER.readTree(MAPPER.writeValueAsString(tokens)).get("issued_token_type").asText())
+                .isEqualTo(tokens.getIssuedTokenType());
     }
 
     @Test

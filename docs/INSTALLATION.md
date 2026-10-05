@@ -17,7 +17,7 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.6.0</version>
+    <version>2.6.1</version>
 </dependency>
 ```
 
@@ -35,7 +35,7 @@ the repository-pinned Maven release: `./mvnw verify`.
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:2.6.0'
+    implementation 'com.assinafy:webforms-java-client-sdk:2.6.1'
 }
 ```
 
@@ -43,7 +43,7 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:2.6.0")
+    implementation("com.assinafy:webforms-java-client-sdk:2.6.1")
 }
 ```
 
@@ -123,4 +123,4 @@ The SDK pulls in:
 | `com.fasterxml.jackson.core:jackson-databind` | 2.22.2 | JSON data binding |
 | `com.fasterxml.jackson.core:jackson-core` | 2.22.2 | JSON streaming |
 | `com.fasterxml.jackson.core:jackson-annotations` | 2.22 | JSON model annotations |
-| `com.squareup.okio:okio-jvm` | 3.18.1 | OkHttp I/O runtime (transitive) |
+| `com.squareup.okio:okio-jvm` | 3.18.2 | OkHttp I/O runtime |

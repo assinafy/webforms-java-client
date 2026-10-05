@@ -63,6 +63,7 @@ public final class SignerSelfResource extends BaseResource {
     }
 
     /**
+     * {@code GET /sign}.
      * Returns signer-facing document and assignment details.
      *
      * @param signerAccessCode required signer access code
