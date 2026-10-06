@@ -32,14 +32,14 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.6.1</version>
+    <version>2.6.2</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.6.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.6.2'
 ```
 
 O artefato é publicado no GitHub Packages, então o repositório precisa ser declarado uma vez no seu

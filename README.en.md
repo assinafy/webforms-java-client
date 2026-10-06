@@ -31,14 +31,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.6.1</version>
+    <version>2.6.2</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.6.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.6.2'
 ```
 
 The artifact is published to GitHub Packages, so the repository must be declared once in your build. See
