@@ -23,6 +23,11 @@
 - The webhook subscription operations (`register`, `getSubscription`, `inactivate`) act on the account's oldest
   webhook endpoint.
 
+## [2.6.2] - 2026-10-05
+
+### Changed
+- Live sandbox tests run locally; GitHub Actions runs the mock-backed verification and release builds.
+
 ## [2.6.1] - 2026-10-05
 
 ### Fixed
