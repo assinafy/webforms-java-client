@@ -5,7 +5,7 @@
 Java client SDK for the [Assinafy API](https://api.assinafy.com.br/v1/docs), the Brazilian digital signature
 platform.
 
-Covers all 93 operations in the official API contract: accounts, users, authentication, OAuth, documents,
+Covers all 106 operations in the official API contract: accounts, users, authentication, OAuth, documents,
 signers, assignments, fields, templates, tags, webhooks, and the signer-facing signing flows.
 
 > This artifact uses `new AssinafyClientOptions().setApiKey(...)`. The `webforms` name is historical;
@@ -31,14 +31,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.6.1</version>
+    <version>2.7.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.6.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.7.0'
 ```
 
 The artifact is published to GitHub Packages, so the repository must be declared once in your build. See
@@ -256,7 +256,8 @@ how many contracts they sign.
 // Strict create: always sends POST and reports a duplicate email as an ApiException.
 Signer signer = client.signers.create(
     new CreateSignerPayload("John Doe", "john@example.com")
-        .setWhatsappPhoneNumber("+5548999990000"));
+        .setWhatsappPhoneNumber("+5548999990000")
+        .setGovernmentId("52998224725"));    // CPF, optional
 
 // Explicit reuse policy: search by exact case-insensitive email, POST only when absent.
 // It does not update an existing signer's fields.
@@ -486,24 +487,64 @@ List<DocumentStatsRow> accountStats = client.accounts.stats(Map.of("granularity"
 List<DocumentStatsRow> allAccountStats = client.users.stats(Map.of("granularity", "monthly"));
 ```
 
-The workspace has a single webhook subscription, updated with a create-or-replace `PUT`. There is no
-hard-delete endpoint; `inactivate()` stops deliveries and keeps the configuration.
+An account registers one webhook endpoint, or up to three on paid plans. Each endpoint has its own URL, event
+list, and signing setting, and every active endpoint subscribed to an event receives it. Creating an endpoint
+past the plan's limit returns `403`; reusing another endpoint's URL returns `400`.
 
 ```java
-WebhookSubscription sub = client.webhooks.register(
-    new RegisterWebhookPayload("https://example.com/webhooks", "admin@example.com")
-        .setEvents(List.of("document_ready", "signer_signed_document"))
-        .setActive(true));
+List<String> events = List.of("document_ready", "signer_signed_document");
+WebhookEndpoint endpoint = client.webhooks.createEndpoint(new WebhookEndpointPayload()
+    .setUrl("https://example.com/webhooks/assinafy")
+    .setEmail("ops@example.com")
+    .setEvents(events)
+    .setName("ERP")
+    .setSigningEnabled(true));            // sign every delivery (Standard Webhooks)
 
-client.webhooks.getSubscription();
-client.webhooks.update(new RegisterWebhookPayload(sub.getUrl(), sub.getEmail())
-    .setEvents(sub.getEvents()).setActive(sub.isActive()));
-client.webhooks.inactivate();
+List<WebhookEndpoint> endpoints = client.webhooks.listEndpoints();          // oldest first
+client.webhooks.getEndpoint(endpoint.id());
+client.webhooks.updateEndpoint(endpoint.id(), new WebhookEndpointPayload().setActive(false)); // only what changed
+client.webhooks.deleteEndpoint(endpoint.id());                               // frees the slot
 
 List<WebhookEventTypeInfo> eventTypes = client.webhooks.listEventTypes();
 PaginatedResult<WebhookDispatch> dispatches = client.webhooks.listDispatches(
-    new ListDispatchesParams().setEvent("document_ready").setDelivered(false));
+    new ListDispatchesParams().setEndpointId(endpoint.id()).setEvent("document_ready").setDelivered(false));
 client.webhooks.retryDispatch(dispatchId);
+```
+
+With `signing_enabled`, every delivery carries the `webhook-id`, `webhook-timestamp`, and `webhook-signature`
+headers. The endpoint's secret (`whsec_...`) comes from `getEndpointSecret`, and only an API key or a user
+session can read it — an OAuth application cannot. `WebhookVerifier` checks the signature in constant time,
+rejects deliveries more than five minutes from the local clock (replays), and returns the typed body. Pass the
+**raw** body exactly as received; re-serialized JSON does not verify.
+
+```java
+WebhookVerifier verifier = new WebhookVerifier(client.webhooks.getEndpointSecret(endpoint.id()));
+
+// In the HTTP receiver:
+WebhookEvent event = verifier.verify(
+    request.getHeader("webhook-id"),
+    request.getHeader("webhook-timestamp"),
+    request.getHeader("webhook-signature"),
+    rawBody);                             // byte[] or String; throws ValidationException when it does not verify
+if (alreadyProcessed(request.getHeader("webhook-id"))) return;  // the same id repeats on the retry
+handle(event.event(), event.object());
+
+// Rotation takes effect immediately: later deliveries use only the new secret.
+verifier = new WebhookVerifier(client.webhooks.rotateEndpointSecret(endpoint.id()));
+```
+
+Answer `2xx` quickly and process afterwards. Each event gets up to two attempts, three seconds apart; after ten
+consecutive failed events the endpoint enters a circuit breaker until a delivery succeeds.
+
+The older subscription operations (`register`, `getSubscription`, `inactivate`) keep working and act on the
+account's oldest endpoint:
+
+```java
+WebhookSubscription sub = client.webhooks.register(
+    new RegisterWebhookPayload("https://example.com/webhooks", "ops@example.com")
+        .setEvents(events).setActive(true));
+client.webhooks.getSubscription();
+client.webhooks.inactivate();             // stops deliveries and keeps the configuration
 ```
 
 Once the document reaches `certificated`, its artifacts are available. `original` is the uploaded PDF,
@@ -536,13 +577,17 @@ if (deletable) {
 
 ---
 
-## 10. Sessions, passwords, and API keys
+## 10. Sessions, passwords, two-factor authentication, and API keys
 
 The `auth` resource covers the credential lifecycle itself. The password-reset routes are public; the rest need
 a bearer token or an API key.
 
 ```java
 AuthenticationResult session = client.auth.login("user@example.com", "password");
+if (session.getMfaToken() != null) {
+    // Two-factor user: login returns a single-use challenge valid for 5 minutes.
+    session = client.auth.verifyMfa(session.getMfaToken(), authenticatorCode); // or a recovery code
+}
 String accessToken = session.getAccessToken();
 
 AuthenticationResult googleSession = client.auth.socialLogin(
@@ -556,6 +601,15 @@ tokenClient.auth.deleteApiKey();
 
 tokenClient.auth.linkSocialLogin("google", googleToken);
 tokenClient.auth.changePassword("user@example.com", "old-password", "new-password");
+
+// Two-factor authentication (authenticator app, TOTP).
+TotpEnrollment enrollment = tokenClient.auth.startTotpEnrollment("My phone");
+// Render enrollment.provisioningUri() as a QR code; the secret is returned only by this call.
+List<String> recoveryCodes = tokenClient.auth.confirmTotpEnrollment(
+    enrollment.id(), codeFromNewDevice, null, null);  // store the codes: they are shown only once
+MfaMethods methods = tokenClient.auth.listMfaMethods();
+List<String> freshCodes = tokenClient.auth.regenerateRecoveryCodes("password", null);
+boolean stillEnabled = tokenClient.auth.removeMfaMethod(methods.methods().get(0).id(), "password", null);
 
 AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
 publicClient.auth.requestPasswordReset("user@example.com");
@@ -600,7 +654,7 @@ sent back to you: the authorization server shows an error on its own page.
 | `documents:write` | Create documents and send them for signature |
 | `templates:read` / `templates:write` | Read, and create or change, templates |
 | `account:read` | Read the workspace profile, theme, and logo |
-| `webhooks:write` | Configure and deactivate the workspace webhook subscription |
+| `webhooks:write` | Create, change, and remove the workspace webhook endpoints (the signing secret needs an API key) |
 | `openid` / `profile` / `email` | Identify the user, and read their name and email |
 | `offline_access` | Receive a refresh token, so the app keeps working while the user is away |
 

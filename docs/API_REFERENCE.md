@@ -1,6 +1,6 @@
 # Assinafy Java SDK API Reference
 
-This reference maps the Java SDK to the 93 operations documented at the
+This reference maps the Java SDK to the 106 operations documented at the
 [Assinafy API documentation](https://api.assinafy.com.br/v1/docs). Paths below omit the `/v1` prefix, except
 for the OAuth protected-resource metadata, which the API serves at its host root.
 
@@ -112,6 +112,10 @@ null to clear a value.
 | Account logo upload | `multipart/form-data` with binary image `file*` |
 | Document upload | `multipart/form-data` with PDF `file*`, at most 25 MB and 2,000 pages |
 | Login | `{ "email": string*, "password": string* }` |
+| Two-factor login | `{ "mfa_token": string*, "code": string* }`; `code` is a 6-digit authenticator code or a recovery code |
+| Authenticator enrollment | `{ "label": string? }` |
+| Authenticator confirmation | `{ "id": string*, "code": string*, "password": string?, "reauth_code": string? }`; `password` or `reauth_code` only when replacing a confirmed method |
+| Recovery-code regeneration, two-factor method removal | `{ "password": string?, "code": string? }`; at least one is required |
 | `SocialLoginPayload` | `{ "provider": "google"*, "token": string*, "has_accepted_terms": boolean* }` |
 | Link social login | `{ "provider": "google"*, "token": string* }` |
 | Password-reset request | `{ "email": string* }` |
@@ -121,7 +125,7 @@ null to clear a value.
 | Document rename | `{ "name": string* }`, maximum 255 characters |
 | Document tag replace/append | `{ "tags": [tagId, ...] }` |
 | Public token | `{ "recipient": string*, "channel": "email"\|"whatsapp"* }` |
-| `CreateSignerPayload` | `{ "full_name": string*, "email": string?, "whatsapp_phone_number": E.164? }` |
+| `CreateSignerPayload` | `{ "full_name": string*, "email": string?, "whatsapp_phone_number": E.164?, "government_id": CPF? }` |
 | `UpdateSignerPayload` | Any non-empty subset of `full_name`, `email`, `whatsapp_phone_number`, `government_id` (CPF/CNPJ) |
 | Assignment expiration | `{ "expires_at": ISO-8601 date-time }` |
 | Assignment decline | `{ "decline_reason": string* }` |
@@ -351,7 +355,27 @@ merged on top. Use `new TemplateEditorField(fieldId, value)` with `setTemplateEd
 ```
 
 `is_active` defaults to true when it is not set in the Java payload. At least one event, a URL, and an email
-are required.
+are required. The subscription operations act on the account's oldest webhook endpoint.
+
+### Webhook endpoint
+
+`WebhookEndpointPayload` serves create and update. Unset properties are omitted, so an update changes only what
+is set. Create requires `url`, `email`, and at least one event:
+
+```json
+{
+  "url": "https://example.com/webhooks/assinafy",
+  "email": "ops@example.com",
+  "events": ["document_ready", "signer_signed_document"],
+  "name": "ERP",
+  "is_active": true,
+  "signing_enabled": true
+}
+```
+
+`url` must be an absolute HTTP or HTTPS URL that no other endpoint of the account uses. `is_active` defaults to
+`true` and `signing_enabled` to `false` on create. Enabling signing generates a secret when the endpoint has
+none and keeps the current one otherwise; disabling it discards the secret.
 
 ### Notification preferences
 
@@ -389,7 +413,7 @@ keys are:
 | Tag delete | `force=true\|false` |
 | Signing view | optional `has_accepted_terms=true\|false` |
 | Signature upload | `type`, optional `reuse` |
-| Webhook history | `event`, `delivered`, Unix timestamps `from`/`to`, pagination |
+| Webhook history | `endpoint_id`, `event`, `delivered`, Unix timestamps `from`/`to`, pagination |
 
 ## Response payload catalog
 
@@ -399,8 +423,12 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 |---|---|
 | `WorkspaceAccount` / Account | `resource`, `id`, `name`, `primary_color?`, `secondary_color?`, `notification_sender_type` (`User\|Account`), `roles[]`, `is_delete_allowed`, `created_at` |
 | `AccountTheme` | `account_name`, `primary_color`, `secondary_color?`, `logo` |
-| `User` | `id`, `name`, `email`, `telephone?`, `government_id?`, `is_email_verified`, `has_accepted_terms`, `is_password_set` (`false` for a social-login-only account), `created_at`, `to_be_deleted_at?` |
-| `AuthenticationResult` | `access_token`, `user` (`User`), `accounts[]` (stored as `WorkspaceAccount`; authentication populates `id`, `name`, `roles`, `is_delete_allowed`, `created_at`) |
+| `User` | `id`, `name`, `email`, `telephone?`, `government_id?`, `is_email_verified`, `has_accepted_terms`, `is_password_set` (`false` for a social-login-only account), `is_mfa_enabled`, `created_at`, `to_be_deleted_at?` |
+| `AuthenticationResult` | `access_token`, `user` (`User`), `accounts[]` (stored as `WorkspaceAccount`; authentication populates `id`, `name`, `roles`, `is_delete_allowed`, `created_at`); a login for a user with two-factor authentication carries `mfa_token` instead of `access_token` |
+| `MfaMethods` | `methods[]` (`MfaMethods.Method`: `id`, `type` such as `Totp`, `label?`, `confirmed_at?`, `last_used_at?`), `recovery_codes_remaining` |
+| `TotpEnrollment` | `id`, `secret` (base32, returned only once), `provisioning_uri` (`otpauth://` URI for a QR code) |
+| Recovery codes | `{ "recovery_codes": [string, ...] }`; the SDK returns the list. Shown only once |
+| Two-factor method removal | `{ "is_mfa_enabled": boolean }`; the SDK returns the boolean |
 | `ApiKeyResponse` | `api_key` (full only on creation, masked on read, null when none exists) |
 | `EmailResponse` | `email` |
 | `NotificationPreferences` | The nine boolean keys listed above |
@@ -433,7 +461,10 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `TemplateFieldPlacement` | `id`, `field_id`, `role_id`, `label`, `display_settings`, `created_at`, `updated_at` |
 | `TemplateRole` | `id`, `name`, `assignment_type`, `created_at`, `updated_at` |
 | `WebhookSubscription` | `events[]`, `is_active`, `url?`, `email?`, `updated_at?` |
-| `WebhookDispatch` | `resource`, `id`, `event`, `activity_id`, `endpoint?`, `payload?`, `delivered`, `http_status?`, `response_body?`, `error?`, `created_at`, `updated_at` |
+| `WebhookEndpoint` | `id`, `name?`, `url`, `email`, `events[]`, `is_active`, `signing_enabled`, `created_at`, `updated_at` |
+| Webhook endpoint secret | `{ "secret": "whsec_..." }`; the SDK returns the string |
+| `WebhookEvent` | Webhook delivery body; see [Webhook deliveries](#webhook-deliveries) |
+| `WebhookDispatch` | `resource`, `id`, `event`, `activity_id`, `endpoint?`, `endpoint_id?`, `payload?`, `delivered`, `http_status?`, `response_body?`, `error?`, `created_at`, `updated_at` |
 | `WebhookEventTypeInfo` | `id`, `description` |
 | `AcceptTermsResponse` | Optional response fields `full_name`, `email`, `has_accepted_terms`; the documented success payload has no data, so the Java return may be null |
 | `VerifyEmailResponse` | Optional response fields `message`, `access_token`; the documented success payload has no data, so the Java return may be null |
@@ -487,11 +518,17 @@ documented error codes; the platform may additionally return global transport st
 | **PUT** `/documents/{documentId}/assignments/{assignmentId}/reset-expiration` | `assignments.resetExpiration(documentId, assignmentId, expiresAt)` | Assignment expiration | `Assignment` | 200, 400, 401, 404, 500 |
 | **GET** `/documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications` | `assignments.whatsappNotifications(documentId, assignmentId)` | — | `List<WhatsappNotification>` | 200, 401, 500 |
 
-### Authentication — 9 operations
+### Authentication — 15 operations
 
 | Operation | SDK method | Request | Return | Statuses |
 |---|---|---|---|---|
 | **POST** `/login` | `auth.login(email, password)` | Login | `AuthenticationResult` | 200, 400, 500 |
+| **POST** `/authentication/mfa/verify` | `auth.verifyMfa(mfaToken, code)` | Two-factor login | `AuthenticationResult` | 200, 400, 401, 500 |
+| **GET** `/users/self/mfa` | `auth.listMfaMethods()` | — | `MfaMethods` | 200, 401, 500 |
+| **POST** `/users/self/mfa/totp` | `auth.startTotpEnrollment(label)` | Authenticator enrollment | `TotpEnrollment` | 200, 401, 500 |
+| **PUT** `/users/self/mfa/totp/confirm` | `auth.confirmTotpEnrollment(methodId, code, password, reauthCode)` | Authenticator confirmation | `List<String>` recovery codes | 200, 400, 401, 404, 500 |
+| **POST** `/users/self/mfa/recovery-codes` | `auth.regenerateRecoveryCodes(password, code)` | Recovery-code regeneration | `List<String>` recovery codes | 200, 400, 401, 500 |
+| **DELETE** `/users/self/mfa/{customId}` | `auth.removeMfaMethod(methodId, password, code)` | Two-factor method removal | `boolean` `is_mfa_enabled` | 200, 400, 401, 404, 500 |
 | **POST** `/authentication/social-login` | `auth.socialLogin(payload)` | `SocialLoginPayload` | `AuthenticationResult` | 200, 400, 500 |
 | **POST** `/auth/link-social-login` | `auth.linkSocialLogin(provider, token)` | Link social login | `void` | 200, 400, 401, 500 |
 | **PUT** `/authentication/request-password-reset` | `auth.requestPasswordReset(email)` | Password-reset request | `EmailResponse` | 200, 500 |
@@ -617,13 +654,20 @@ official documentation categorizes them.
 | **PUT** `/users/self/notification-preferences` | `users.updateNotificationPreferences(preferences)` | Partial `NotificationPreferences` | Complete `NotificationPreferences` | 200, 400, 401, 500 |
 | **GET** `/users/self/stats` | `users.stats([params])` | Stats query | `List<DocumentStatsRow>` | 200, 400, 401, 500 |
 
-### Webhooks — 6 operations
+### Webhooks — 13 operations
 
 | Operation | SDK method | Request | Return | Statuses |
 |---|---|---|---|---|
 | **GET** `/accounts/{accountId}/webhooks/subscriptions` | `webhooks.getSubscription([accountId])` | — | `WebhookSubscription` | 200, 401, 500 |
 | **PUT** `/accounts/{accountId}/webhooks/subscriptions` | `webhooks.register(payload[, accountId])` / `update(...)` | Webhook subscription | `WebhookSubscription` | 200, 400, 401, 500 |
 | **PUT** `/accounts/{accountId}/webhooks/inactivate` | `webhooks.inactivate([accountId])` | — | `WebhookSubscription` | 200, 401, 500 |
+| **GET** `/accounts/{accountId}/webhooks/endpoints` | `webhooks.listEndpoints([accountId])` | — | `List<WebhookEndpoint>`, oldest first | 200, 401, 500 |
+| **POST** `/accounts/{accountId}/webhooks/endpoints` | `webhooks.createEndpoint(payload[, accountId])` | Webhook endpoint | `WebhookEndpoint` | 200, 400, 401, 403 (plan limit), 500 |
+| **GET** `/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `webhooks.getEndpoint(endpointId[, accountId])` | — | `WebhookEndpoint` | 200, 401, 404, 500 |
+| **PUT** `/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `webhooks.updateEndpoint(endpointId, payload[, accountId])` | Partial webhook endpoint | `WebhookEndpoint` | 200, 400, 401, 404, 500 |
+| **DELETE** `/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `webhooks.deleteEndpoint(endpointId[, accountId])` | — | `void` | 200, 401, 404, 500 |
+| **GET** `/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` | `webhooks.getEndpointSecret(endpointId[, accountId])` | — | `String` secret | 200, 400 (signing disabled), 401, 404, 500 |
+| **POST** `/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | `webhooks.rotateEndpointSecret(endpointId[, accountId])` | — | `String` new secret | 200, 400 (signing disabled), 401, 404, 500 |
 | **GET** `/webhooks/event-types` | `webhooks.listEventTypes()` | — | `List<WebhookEventTypeInfo>` | 200, 401, 500 |
 | **GET** `/accounts/{accountId}/webhooks` | `webhooks.listDispatches([params][, accountId])` | Webhook-history query | `PaginatedResult<WebhookDispatch>` | 200, 401, 500 |
 | **POST** `/accounts/{accountId}/webhooks/{historyId}/retry` | `webhooks.retryDispatch(historyId[, accountId])` | — | `WebhookDispatch` | 200, 400, 401, 404, 500 |
@@ -652,6 +696,7 @@ These public methods compose official operations, provide typed aliases, or expo
 | `WhatsappNotification.buttons[].url` | Additional response field retained by the Java model when present |
 | Concise `DocumentStatsRow` accessors | Java-only aliases for canonical notification/verification counters; historical input names deserialize without changing serialized JSON |
 | `webhooks.update(...)` | Alias for create-or-replace `register(...)` |
+| `new WebhookVerifier(secret).verify(id, timestamp, signature, body)` | Verifies a signed delivery's Standard Webhooks signature and timestamp, then returns the parsed `WebhookEvent`; makes no HTTP request |
 | `templates.get(templateId[, accountId])` | Calls `GET /accounts/{accountId}/templates/{templateId}` and returns `TemplateDetails`; this detail route is outside the official operation list |
 | `OAuthResource.generateCodeVerifier()` | Returns a fresh 43-character RFC 7636 PKCE verifier from `SecureRandom` |
 | `OAuthResource.generateState()` | Returns a fresh opaque `state` value for CSRF protection on the redirect URI |
@@ -669,18 +714,49 @@ individual resource methods for collect or digital-certificate assignments.
 
 ## Webhook deliveries
 
-Assinafy sends an HTTP `POST` with `Content-Type: application/json` to the subscription URL. Any 2xx response
-is successful. Delivery is attempted at most twice (initial attempt plus one retry) with a three-second wait.
-After ten consecutive failed events the circuit breaker pauses normal delivery and probes about five percent
-of events until a delivery succeeds. The history stores the first 2,000 characters of the receiver response.
+An account registers one webhook endpoint, or up to three on paid plans. Assinafy sends an HTTP `POST` with
+`Content-Type: application/json` to every active endpoint subscribed to the event; each endpoint is delivered
+to independently and has its own failure count. Any 2xx response is successful. Delivery is attempted at most
+twice (initial attempt plus one retry) with a three-second wait. After ten consecutive failed events the circuit
+breaker pauses normal delivery and probes about five percent of events until a delivery succeeds. The history
+stores the first 2,000 characters of the receiver response.
 
-Every body has this shape:
+| Header | Value |
+|---|---|
+| `webhook-id` | Message ID, identical on every attempt of the same event to the same endpoint. Deduplicate on it |
+| `webhook-timestamp` | Unix seconds of the attempt |
+| `webhook-signature` | Present only when the endpoint has `signing_enabled`; one or more space-separated `v1,<base64>` entries |
+
+### Verifying signatures
+
+Signatures follow [Standard Webhooks](https://www.standardwebhooks.com): the HMAC-SHA256 of
+`{webhook-id}.{webhook-timestamp}.{raw body}`, keyed with the base64-decoded part of the secret after
+`whsec_`. `WebhookVerifier` implements it:
+
+```java
+WebhookVerifier verifier = new WebhookVerifier(client.webhooks.getEndpointSecret(endpointId));
+
+WebhookEvent event = verifier.verify(
+        request.getHeader("webhook-id"),
+        request.getHeader("webhook-timestamp"),
+        request.getHeader("webhook-signature"),
+        rawBodyBytes);
+```
+
+`verify` throws `ValidationException` when a header is missing, the timestamp is more than five minutes
+(`WebhookVerifier.TOLERANCE`) from the local clock, no signature entry matches (compared in constant time), or
+the body is not a webhook event. Pass the body exactly as received; re-serialized JSON does not verify. Rotating
+the secret takes effect immediately, so replace the verifier when calling `rotateEndpointSecret`.
+
+### Delivery body
+
+Every body has this shape, parsed as `WebhookEvent`:
 
 ```json
 {
   "id": 12345,
   "event": "signer_signed_document",
-  "message": "Signer completed the document",
+  "message": null,
   "payload": { "signer_full_name": "Example Signer" },
   "origin": { "ip": "203.0.113.10", "user-agent": "Example Client" },
   "created_at": 1787241600,
@@ -690,10 +766,10 @@ Every body has this shape:
 }
 ```
 
-`message`, `payload`, and `origin` may be null. `created_at` is Unix seconds. `subject` and `object` are
-polymorphic and include `type` (`User`, `Signer`, `Account`, `Document`, or `Template`) followed by that
-resource's fields. Document objects include expanded assignment/pages. Account objects omit integration
-dispatch history.
+`message` is reserved and currently null; `payload` and `origin` may be null. `created_at`, and the `*_at`
+fields inside `subject` and `object`, are Unix seconds. `subject` and `object` are polymorphic and include
+`type` (`User`, `Signer`, `Account`, `Document`, or `Template`) followed by that resource's fields. Document
+objects include expanded assignment/pages. Account objects omit integration dispatch history.
 
 The current event catalog contains 18 values:
 
@@ -705,11 +781,11 @@ The current event catalog contains 18 values:
 | `assignment_created` | User | Document | `user_name`, `user_email`, `user_telephone` |
 | `document_ready` | Account | Document | — |
 | `document_processing_failed` | Account | Document | `error_message` |
-| `signature_requested` | User | Document | `signer_email`, `signer_full_name`, or `signer_whatsapp_phone_number`, depending on channel |
+| `signature_requested` | User | Document | `signer_full_name`, `signer_email`, `signer_whatsapp_phone_number`, `notification_method` |
 | `signer_created` | User | Signer | `signer_full_name` |
-| `signer_email_verified` | Signer | Document | `signer_email` |
-| `signer_whatsapp_verified` | Signer | Document | `signer_whatsapp_phone_number` |
-| `signer_data_confirmed` | Signer | Document | `signer_email` |
+| `signer_email_verified` | Signer | Document | `signer_full_name`, `signer_email` |
+| `signer_whatsapp_verified` | Signer | Document | `signer_full_name`, `signer_whatsapp_phone_number` |
+| `signer_data_confirmed` | Signer | Document | `signer_full_name`, `signer_email`, `signer_whatsapp_phone_number`, `verification_method` |
 | `signer_viewed_document` | Signer | Document | `signer_full_name` |
 | `signer_signed_document` | Signer | Document | `signer_full_name` |
 | `signer_rejected_document` | Signer | Document | `signer_full_name` |
@@ -719,4 +795,5 @@ The current event catalog contains 18 values:
 | `template_processing_failed` | Account | Template | `error_message` |
 
 `assignment_created` and `document_metadata_ready` have no guaranteed order. Consumers should deduplicate on
-the event `id`, tolerate retries, and ignore unknown fields and future event values.
+the `webhook-id` header, which also tells deliveries of the same event to different endpoints apart, tolerate
+retries, and ignore unknown fields and future event values.

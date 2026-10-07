@@ -87,6 +87,18 @@ class SignerResourceTest {
     }
 
     @Test
+    void create_sendsGovernmentId() throws Exception {
+        server.enqueue(okJson(Map.of("id", "123", "full_name", "Test", "government_id", "52998224725")));
+
+        Signer signer = resource.create(new CreateSignerPayload("Test", "test@example.com")
+                .setGovernmentId("52998224725"));
+
+        assertThat(server.takeRequest().getBody().readUtf8()).isEqualTo(
+                "{\"full_name\":\"Test\",\"email\":\"test@example.com\",\"government_id\":\"52998224725\"}");
+        assertThat(signer.getGovernmentId()).isEqualTo("52998224725");
+    }
+
+    @Test
     void create_usesDefaultAccountId() throws Exception {
         server.enqueue(okJson(Map.of("id", "123", "full_name", "Test", "email", "test@example.com")));
 

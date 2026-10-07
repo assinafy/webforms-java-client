@@ -2,7 +2,9 @@ package com.assinafy.sdk.resources;
 
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.AuthenticationResult;
+import com.assinafy.sdk.models.MfaMethods;
 import com.assinafy.sdk.models.SocialLoginPayload;
+import com.assinafy.sdk.models.TotpEnrollment;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
@@ -195,5 +197,125 @@ class AuthenticationResourceTest {
         assertThatThrownBy(() -> resource.socialLogin(new SocialLoginPayload("google", "token", null)))
                 .isInstanceOf(ValidationException.class);
         assertThatThrownBy(() -> resource.createApiKey("")).isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void login_exposesTheTwoFactorChallenge() throws Exception {
+        server.enqueue(okJson(Map.of("mfa_token", "challenge")));
+
+        AuthenticationResult result = resource.login("me@example.com", "secret");
+
+        assertThat(result.getAccessToken()).isNull();
+        assertThat(result.getMfaToken()).isEqualTo("challenge");
+    }
+
+    @Test
+    void verifyMfa_postsTheChallengeAndCode() throws Exception {
+        server.enqueue(okJson(Map.of("access_token", "jwt")));
+
+        assertThat(resource.verifyMfa("challenge", "123456").getAccessToken()).isEqualTo("jwt");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath()).isEqualTo("/authentication/mfa/verify");
+        assertThat(MAPPER.readTree(req.getBody().readUtf8()))
+                .isEqualTo(MAPPER.valueToTree(Map.of("mfa_token", "challenge", "code", "123456")));
+    }
+
+    @Test
+    void verifyMfa_requiresBothValuesBeforeRequest() {
+        assertThatThrownBy(() -> resource.verifyMfa(" ", "123456")).isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.verifyMfa("challenge", null)).isInstanceOf(ValidationException.class);
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void listMfaMethods_parsesMethodsAndRemainingCodes() throws Exception {
+        server.enqueue(okJson(Map.of("methods", List.of(Map.of("id", "m1", "type", "Totp", "label", "Phone",
+                "confirmed_at", "2026-09-09T14:21:03Z", "last_used_at", "2026-09-09T18:02:44Z")),
+                "recovery_codes_remaining", 8)));
+
+        MfaMethods methods = resource.listMfaMethods();
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("GET");
+        assertThat(req.getPath()).isEqualTo("/users/self/mfa");
+        assertThat(methods.recoveryCodesRemaining()).isEqualTo(8);
+        assertThat(methods.methods()).containsExactly(new MfaMethods.Method("m1", "Totp", "Phone",
+                "2026-09-09T14:21:03Z", "2026-09-09T18:02:44Z"));
+    }
+
+    @Test
+    void listMfaMethods_normalisesMissingMethods() throws Exception {
+        server.enqueue(okJson(Map.of("recovery_codes_remaining", 0)));
+        assertThat(resource.listMfaMethods().methods()).isEmpty();
+    }
+
+    @Test
+    void startTotpEnrollment_postsTheLabelAndParsesTheSecret() throws Exception {
+        server.enqueue(okJson(Map.of("id", "m1", "secret", "GEZDGNBV",
+                "provisioning_uri", "otpauth://totp/x?secret=GEZDGNBV")));
+
+        TotpEnrollment enrollment = resource.startTotpEnrollment("Phone");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath()).isEqualTo("/users/self/mfa/totp");
+        assertThat(req.getBody().readUtf8()).isEqualTo("{\"label\":\"Phone\"}");
+        assertThat(enrollment).isEqualTo(new TotpEnrollment("m1", "GEZDGNBV", "otpauth://totp/x?secret=GEZDGNBV"));
+    }
+
+    @Test
+    void startTotpEnrollment_sendsAnEmptyObjectWithoutLabel() throws Exception {
+        server.enqueue(okJson(Map.of("id", "m1")));
+        resource.startTotpEnrollment(null);
+        assertThat(server.takeRequest().getBody().readUtf8()).isEqualTo("{}");
+    }
+
+    @Test
+    void confirmTotpEnrollment_putsTheCodeAndReturnsRecoveryCodes() throws Exception {
+        server.enqueue(okJson(Map.of("recovery_codes", List.of("ABCD-EFGH-JKMN", "PQRS-TUVW-XYZA"))));
+
+        List<String> codes = resource.confirmTotpEnrollment("m1", "123456", null, "654321");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PUT");
+        assertThat(req.getPath()).isEqualTo("/users/self/mfa/totp/confirm");
+        assertThat(MAPPER.readTree(req.getBody().readUtf8()))
+                .isEqualTo(MAPPER.valueToTree(Map.of("id", "m1", "code", "123456", "reauth_code", "654321")));
+        assertThat(codes).containsExactly("ABCD-EFGH-JKMN", "PQRS-TUVW-XYZA");
+    }
+
+    @Test
+    void regenerateRecoveryCodes_postsTheProof() throws Exception {
+        server.enqueue(okJson(Map.of("recovery_codes", List.of("ABCD-EFGH-JKMN"))));
+
+        assertThat(resource.regenerateRecoveryCodes("pw", null)).containsExactly("ABCD-EFGH-JKMN");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath()).isEqualTo("/users/self/mfa/recovery-codes");
+        assertThat(req.getBody().readUtf8()).isEqualTo("{\"password\":\"pw\"}");
+    }
+
+    @Test
+    void removeMfaMethod_deletesWithProofAndReturnsRemainingState() throws Exception {
+        server.enqueue(okJson(Map.of("is_mfa_enabled", false)));
+
+        assertThat(resource.removeMfaMethod("m1", null, "123456")).isFalse();
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("DELETE");
+        assertThat(req.getPath()).isEqualTo("/users/self/mfa/m1");
+        assertThat(req.getBody().readUtf8()).isEqualTo("{\"code\":\"123456\"}");
+    }
+
+    @Test
+    void reauthenticatedMfaCallsRequireAPasswordOrCode() {
+        assertThatThrownBy(() -> resource.regenerateRecoveryCodes(null, " "))
+                .isInstanceOf(ValidationException.class).hasMessageContaining("password");
+        assertThatThrownBy(() -> resource.removeMfaMethod("m1", null, null))
+                .isInstanceOf(ValidationException.class);
+        assertThat(server.getRequestCount()).isZero();
     }
 }

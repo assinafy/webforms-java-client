@@ -34,6 +34,9 @@ import com.assinafy.sdk.models.UpdateTagPayload;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesOptions;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesResult;
 import com.assinafy.sdk.models.UploadAndRequestSignaturesSigner;
+import com.assinafy.sdk.models.ListDispatchesParams;
+import com.assinafy.sdk.models.WebhookEndpoint;
+import com.assinafy.sdk.models.WebhookEndpointPayload;
 import com.assinafy.sdk.models.WebhookEventTypeInfo;
 import com.assinafy.sdk.models.WebhookSubscription;
 import com.assinafy.sdk.exceptions.ApiException;
@@ -484,7 +487,7 @@ class LiveSmokeTest {
 
     @Test
     @Order(26)
-    @DisplayName("Disposable account covers account, logo, and webhook mutations")
+    @DisplayName("Disposable account covers account, logo, webhook endpoint, and subscription mutations")
     void disposableAccountRoundTrip() {
         AssinafyClient client = client();
         String accountId = null;
@@ -507,6 +510,9 @@ class LiveSmokeTest {
             client.accounts.deleteLogo(accountId);
 
             String event = client.webhooks.listEventTypes().get(0).getId();
+            if (webhookEndpointsDeployed(client, accountId)) {
+                webhookEndpointLifecycle(client, accountId, event);
+            }
             RegisterWebhookPayload webhook = new RegisterWebhookPayload(
                     "https://example.com/assinafy-sdk-smoke", testEmail())
                     .setEvents(List.of(event)).setActive(true);
@@ -795,6 +801,43 @@ class LiveSmokeTest {
 
     private static String testEmail() {
         return requiredEnvironment("ASSINAFY_TEST_EMAIL");
+    }
+
+    /** Covers the endpoint lifecycle in a fresh account, leaving its single free endpoint slot empty again. */
+    private static void webhookEndpointLifecycle(AssinafyClient client, String accountId, String event) {
+        WebhookEndpoint created = client.webhooks.createEndpoint(new WebhookEndpointPayload()
+                .setUrl("https://example.com/assinafy-sdk-endpoint").setEmail(testEmail())
+                .setEvents(List.of(event)).setName("SDK smoke").setSigningEnabled(true), accountId);
+        assertThat(created.active()).isTrue();
+        assertThat(created.signingEnabled()).isTrue();
+        assertThat(client.webhooks.getEndpoint(created.id(), accountId).events()).containsExactly(event);
+
+        String secret = client.webhooks.getEndpointSecret(created.id(), accountId);
+        assertThat(secret).startsWith("whsec_");
+        new WebhookVerifier(secret);
+        assertThat(client.webhooks.rotateEndpointSecret(created.id(), accountId))
+                .startsWith("whsec_").isNotEqualTo(secret);
+
+        WebhookEndpoint updated = client.webhooks.updateEndpoint(created.id(),
+                new WebhookEndpointPayload().setActive(false), accountId);
+        assertThat(updated.active()).isFalse();
+        assertThat(updated.name()).isEqualTo("SDK smoke");
+        assertThat(client.webhooks.listDispatches(new ListDispatchesParams().setEndpointId(created.id()),
+                accountId).getData()).isNotNull();
+
+        client.webhooks.deleteEndpoint(created.id(), accountId);
+        assertThat(client.webhooks.listEndpoints(accountId)).isEmpty();
+    }
+
+    /** Whether the sandbox serves the webhook endpoint routes; it trails production. */
+    private static boolean webhookEndpointsDeployed(AssinafyClient client, String accountId) {
+        try {
+            client.webhooks.listEndpoints(accountId);
+            return true;
+        } catch (ApiException e) {
+            if (e.getStatusCode() == 404 && "Página não encontrada.".equals(e.getMessage())) return false;
+            throw e;
+        }
     }
 
     private static String secondTestEmail() {

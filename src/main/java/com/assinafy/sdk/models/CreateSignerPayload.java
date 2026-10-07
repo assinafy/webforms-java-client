@@ -15,6 +15,9 @@ public final class CreateSignerPayload {
     @JsonProperty("whatsapp_phone_number")
     private String whatsappPhoneNumber;
 
+    @JsonProperty("government_id")
+    private String governmentId;
+
     /**
      * Creates a signer without an email; set a WhatsApp number when that is the contact channel.
      *
@@ -70,6 +73,26 @@ public final class CreateSignerPayload {
      */
     public CreateSignerPayload setWhatsappPhoneNumber(String whatsappPhoneNumber) {
         this.whatsappPhoneNumber = whatsappPhoneNumber;
+        return this;
+    }
+
+    /**
+     * Returns the optional CPF serialized as {@code government_id}.
+     *
+     * @return the optional CPF serialized as {@code government_id}
+     */
+    public String getGovernmentId() {
+        return governmentId;
+    }
+
+    /**
+     * Sets the signer's CPF, serialized as {@code government_id}.
+     *
+     * @param governmentId signer CPF
+     * @return this payload
+     */
+    public CreateSignerPayload setGovernmentId(String governmentId) {
+        this.governmentId = governmentId;
         return this;
     }
 }

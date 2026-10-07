@@ -8,6 +8,7 @@ public final class ListDispatchesParams {
 
     private Integer page;
     private Integer perPage;
+    private String endpointId;
     private String event;
     private Boolean delivered;
     private Long from;
@@ -42,6 +43,21 @@ public final class ListDispatchesParams {
      * @return this parameter object
      */
     public ListDispatchesParams setPerPage(Integer perPage) { this.perPage = perPage; return this; }
+
+    /**
+     * Returns webhook-endpoint filter, or {@code null} for deliveries to every endpoint.
+     *
+     * @return webhook-endpoint filter, or {@code null} for deliveries to every endpoint
+     */
+    public String getEndpointId() { return endpointId; }
+
+    /**
+     * Sets the webhook endpoint whose deliveries are listed, sent as {@code endpoint_id}.
+     *
+     * @param endpointId webhook endpoint identifier
+     * @return this parameter object
+     */
+    public ListDispatchesParams setEndpointId(String endpointId) { this.endpointId = endpointId; return this; }
 
     /**
      * Returns webhook event-type filter, or {@code null} for all events.

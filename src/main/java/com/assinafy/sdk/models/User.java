@@ -24,6 +24,9 @@ public final class User {
     @JsonProperty("is_password_set")
     private Boolean passwordSet;
 
+    @JsonProperty("is_mfa_enabled")
+    private Boolean mfaEnabled;
+
     @JsonProperty("created_at")
     private String createdAt;
 
@@ -137,6 +140,19 @@ public final class User {
      * @param passwordSet wire {@code is_password_set}
      */
     public void setPasswordSet(Boolean passwordSet) { this.passwordSet = passwordSet; }
+
+    /**
+     * Returns wire {@code is_mfa_enabled}: whether every login requires a second factor.
+     *
+     * @return wire {@code is_mfa_enabled}, or {@code null} when the response omits it
+     */
+    public Boolean getMfaEnabled() { return mfaEnabled; }
+    /**
+     * Sets wire {@code is_mfa_enabled}.
+     *
+     * @param mfaEnabled wire {@code is_mfa_enabled}
+     */
+    public void setMfaEnabled(Boolean mfaEnabled) { this.mfaEnabled = mfaEnabled; }
 
     /**
      * Returns wire {@code created_at} timestamp.

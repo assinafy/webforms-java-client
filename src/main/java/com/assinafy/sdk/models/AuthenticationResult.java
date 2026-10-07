@@ -15,6 +15,9 @@ public final class AuthenticationResult {
     @JsonProperty("access_token")
     private String accessToken;
 
+    @JsonProperty("mfa_token")
+    private String mfaToken;
+
     private User user;
     private List<WorkspaceAccount> accounts;
 
@@ -31,6 +34,22 @@ public final class AuthenticationResult {
      * @param accessToken value of {@code access_token}
      */
     public void setAccessToken(String accessToken) { this.accessToken = accessToken; }
+
+    /**
+     * Returns the two-factor challenge from {@code mfa_token}. A login for a user with two-factor
+     * authentication enabled carries this instead of an access token; pass it to
+     * {@code AuthenticationResource.verifyMfa} within five minutes.
+     *
+     * @return single-use two-factor challenge, or {@code null} when no second factor is required
+     */
+    public String getMfaToken() { return mfaToken; }
+
+    /**
+     * Sets value of {@code mfa_token}.
+     *
+     * @param mfaToken value of {@code mfa_token}
+     */
+    public void setMfaToken(String mfaToken) { this.mfaToken = mfaToken; }
 
     /**
      * Returns the authenticated user.

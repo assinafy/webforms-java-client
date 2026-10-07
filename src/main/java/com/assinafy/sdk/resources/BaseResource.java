@@ -339,6 +339,19 @@ public abstract class BaseResource {
     }
 
     /**
+     * Executes a DELETE carrying a JSON request body and unwraps its JSON {@code data}.
+     *
+     * @param <T> response model type
+     * @param path API path beginning with {@code /}
+     * @param body request body
+     * @param dataType response model class
+     * @return unwrapped response data, or {@code null} for null/empty data
+     */
+    protected <T> T httpDelete(String path, Object body, Class<T> dataType) {
+        return execute(buildRequest("DELETE", path, body), MAPPER.getTypeFactory().constructType(dataType));
+    }
+
+    /**
      * Executes a DELETE and unwraps a generic JSON response.
      *
      * @param <T> response type

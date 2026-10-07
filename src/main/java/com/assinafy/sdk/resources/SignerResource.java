@@ -285,6 +285,9 @@ public final class SignerResource extends BaseResource {
         if (payload.getWhatsappPhoneNumber() != null && !payload.getWhatsappPhoneNumber().isBlank()) {
             body.put("whatsapp_phone_number", payload.getWhatsappPhoneNumber());
         }
+        if (payload.getGovernmentId() != null && !payload.getGovernmentId().isBlank()) {
+            body.put("government_id", payload.getGovernmentId());
+        }
         return body;
     }
 

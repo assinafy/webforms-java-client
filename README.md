@@ -5,7 +5,7 @@
 SDK cliente Java para a [API Assinafy](https://api.assinafy.com.br/v1/docs) — plataforma brasileira
 de assinatura eletrônica.
 
-Cobre as 93 operações do contrato oficial da API: contas, usuários, autenticação, OAuth, documentos,
+Cobre as 106 operações do contrato oficial da API: contas, usuários, autenticação, OAuth, documentos,
 signatários, assignments, campos, templates, tags, webhooks e os fluxos de assinatura do signatário.
 
 > Este artefato usa `new AssinafyClientOptions().setApiKey(...)`. O nome `webforms` é histórico;
@@ -32,14 +32,14 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.6.1</version>
+    <version>2.7.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.6.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.7.0'
 ```
 
 O artefato é publicado no GitHub Packages, então o repositório precisa ser declarado uma vez no seu
@@ -263,7 +263,8 @@ registro, não importa quantos contratos ela assine.
 // Criação estrita: sempre envia POST e reporta e-mail duplicado como ApiException.
 Signer signer = client.signers.create(
     new CreateSignerPayload("João da Silva", "joao@example.com")
-        .setWhatsappPhoneNumber("+5548999990000"));
+        .setWhatsappPhoneNumber("+5548999990000")
+        .setGovernmentId("52998224725"));    // CPF, opcional
 
 // Política de reuso explícita: busca por e-mail exato (case-insensitive) e só faz POST se não existir.
 // Não atualiza os campos de um signatário existente.
@@ -511,24 +512,64 @@ List<DocumentStatsRow> statsUsuario = client.users.stats(Map.of("granularity", "
 As atividades de um documento devolvem todos os eventos registrados, cada um com um snapshot do `payload`
 do evento e a `origin` da requisição (`ip`, `user-agent`).
 
-O workspace tem uma única assinatura de webhook, atualizada com um `PUT` de criar-ou-substituir. Não
-existe endpoint de exclusão definitiva; `inactivate()` para as entregas e mantém a configuração.
+Uma conta registra um endpoint de webhook, ou até três nos planos pagos. Cada endpoint tem URL, lista de
+eventos e assinatura de entregas próprias, e todo endpoint ativo inscrito num evento o recebe. Criar um
+endpoint além do limite do plano devolve `403`; repetir a URL de outro endpoint devolve `400`.
 
 ```java
-WebhookSubscription sub = client.webhooks.register(
-    new RegisterWebhookPayload("https://example.com/webhooks", "admin@example.com")
-        .setEvents(List.of("document_ready", "signer_signed_document"))
-        .setActive(true));
+List<String> eventos = List.of("document_ready", "signer_signed_document");
+WebhookEndpoint endpoint = client.webhooks.createEndpoint(new WebhookEndpointPayload()
+    .setUrl("https://example.com/webhooks/assinafy")
+    .setEmail("ops@example.com")
+    .setEvents(eventos)
+    .setName("ERP")
+    .setSigningEnabled(true));            // assina cada entrega (Standard Webhooks)
 
-client.webhooks.getSubscription();
-client.webhooks.update(new RegisterWebhookPayload(sub.getUrl(), sub.getEmail())
-    .setEvents(sub.getEvents()).setActive(sub.isActive()));
-client.webhooks.inactivate();
+List<WebhookEndpoint> endpoints = client.webhooks.listEndpoints();          // do mais antigo ao mais novo
+client.webhooks.getEndpoint(endpoint.id());
+client.webhooks.updateEndpoint(endpoint.id(), new WebhookEndpointPayload().setActive(false)); // só o que mudou
+client.webhooks.deleteEndpoint(endpoint.id());                               // libera a vaga
 
 List<WebhookEventTypeInfo> tiposDeEvento = client.webhooks.listEventTypes();
 PaginatedResult<WebhookDispatch> entregas = client.webhooks.listDispatches(
-    new ListDispatchesParams().setEvent("document_ready").setDelivered(false));
+    new ListDispatchesParams().setEndpointId(endpoint.id()).setEvent("document_ready").setDelivered(false));
 client.webhooks.retryDispatch(dispatchId);
+```
+
+Com `signing_enabled`, cada entrega leva os cabeçalhos `webhook-id`, `webhook-timestamp` e
+`webhook-signature`. O segredo do endpoint (`whsec_...`) vem de `getEndpointSecret`, e só uma chave de API ou
+sessão de usuário o lê — uma aplicação OAuth não. O `WebhookVerifier` confere a assinatura em tempo constante,
+recusa entregas com mais de cinco minutos de diferença do relógio local (replay) e devolve o corpo já
+tipado. Passe o corpo **cru**, exatamente como chegou; JSON re-serializado não confere.
+
+```java
+WebhookVerifier verificador = new WebhookVerifier(client.webhooks.getEndpointSecret(endpoint.id()));
+
+// No receptor HTTP:
+WebhookEvent evento = verificador.verify(
+    request.getHeader("webhook-id"),
+    request.getHeader("webhook-timestamp"),
+    request.getHeader("webhook-signature"),
+    corpoCru);                            // byte[] ou String; lança ValidationException se não conferir
+if (jaProcessado(request.getHeader("webhook-id"))) return;  // o mesmo id se repete na nova tentativa
+tratar(evento.event(), evento.object());
+
+// A rotação vale na hora: entregas seguintes usam só o segredo novo.
+verificador = new WebhookVerifier(client.webhooks.rotateEndpointSecret(endpoint.id()));
+```
+
+Responda `2xx` rápido e processe depois. Cada evento tem até duas tentativas, com três segundos entre elas;
+depois de dez eventos seguidos com falha, o endpoint entra em circuit breaker até uma entrega dar certo.
+
+As operações antigas de assinatura (`register`, `getSubscription`, `inactivate`) continuam funcionando e
+agem sobre o endpoint mais antigo da conta:
+
+```java
+WebhookSubscription sub = client.webhooks.register(
+    new RegisterWebhookPayload("https://example.com/webhooks", "ops@example.com")
+        .setEvents(eventos).setActive(true));
+client.webhooks.getSubscription();
+client.webhooks.inactivate();             // para as entregas e mantém a configuração
 ```
 
 Quando o documento chega a `certificated`, seus artefatos ficam disponíveis:
@@ -567,13 +608,17 @@ if (deletavel) {
 
 ---
 
-## 10. Sessões, senhas e chaves de API
+## 10. Sessões, senhas, dois fatores e chaves de API
 
 O recurso `auth` cobre o ciclo de vida da credencial em si. As rotas de redefinição de senha são
 públicas; o resto precisa de um token bearer ou de uma chave de API.
 
 ```java
 AuthenticationResult sessao = client.auth.login("user@example.com", "senha");
+if (sessao.getMfaToken() != null) {
+    // Usuário com autenticação em dois fatores: o login devolve um desafio de uso único, válido por 5 minutos.
+    sessao = client.auth.verifyMfa(sessao.getMfaToken(), codigoDoAutenticador); // ou um código de recuperação
+}
 String accessToken = sessao.getAccessToken();
 
 AuthenticationResult sessaoGoogle = client.auth.socialLogin(
@@ -587,6 +632,15 @@ tokenClient.auth.deleteApiKey();
 
 tokenClient.auth.linkSocialLogin("google", googleToken);
 tokenClient.auth.changePassword("user@example.com", "senha-antiga", "senha-nova");
+
+// Autenticação em dois fatores (app autenticador, TOTP).
+TotpEnrollment inscricao = tokenClient.auth.startTotpEnrollment("Meu celular");
+// Mostre inscricao.provisioningUri() como QR code; o segredo só é devolvido nesta chamada.
+List<String> codigosDeRecuperacao = tokenClient.auth.confirmTotpEnrollment(
+    inscricao.id(), codigoDoNovoAparelho, null, null);  // guarde os códigos: aparecem uma única vez
+MfaMethods metodos = tokenClient.auth.listMfaMethods();
+List<String> novosCodigos = tokenClient.auth.regenerateRecoveryCodes("senha", null);
+boolean aindaAtivo = tokenClient.auth.removeMfaMethod(metodos.methods().get(0).id(), "senha", null);
 
 AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
 publicClient.auth.requestPasswordReset("user@example.com");
@@ -634,7 +688,7 @@ autorização mostra o erro na própria página dele.
 | `documents:write` | Criar documentos e enviá-los para assinatura |
 | `templates:read` / `templates:write` | Ler, e criar ou alterar, templates |
 | `account:read` | Ler o perfil, o tema e o logo do workspace |
-| `webhooks:write` | Configurar e desativar a assinatura de webhooks do workspace |
+| `webhooks:write` | Criar, alterar e remover os endpoints de webhook do workspace (o segredo de assinatura exige chave de API) |
 | `openid` / `profile` / `email` | Identificar o usuário e ler nome e e-mail |
 | `offline_access` | Receber um refresh token, para seguir funcionando na ausência do usuário |
 

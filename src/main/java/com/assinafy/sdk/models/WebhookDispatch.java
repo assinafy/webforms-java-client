@@ -17,6 +17,10 @@ public final class WebhookDispatch {
     private Long activityId;
 
     private String endpoint;
+
+    @JsonProperty("endpoint_id")
+    private String endpointId;
+
     private Map<String, Object> payload;
     private boolean delivered;
 
@@ -101,6 +105,19 @@ public final class WebhookDispatch {
      * @param endpoint delivery endpoint
      */
     public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
+
+    /**
+     * Returns wire {@code endpoint_id}: the webhook endpoint this delivery was sent to.
+     *
+     * @return wire {@code endpoint_id}, or {@code null} for deliveries without an endpoint record
+     */
+    public String getEndpointId() { return endpointId; }
+    /**
+     * Sets wire {@code endpoint_id}.
+     *
+     * @param endpointId wire {@code endpoint_id}
+     */
+    public void setEndpointId(String endpointId) { this.endpointId = endpointId; }
 
     /**
      * Returns JSON webhook payload.

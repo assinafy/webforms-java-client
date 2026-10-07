@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-07
+
+### Added
+- Webhook endpoints: an account can register one endpoint, or up to three on paid plans.
+  `webhooks.listEndpoints`, `createEndpoint`, `getEndpoint`, `updateEndpoint`, and `deleteEndpoint` manage
+  them with `WebhookEndpointPayload` and `WebhookEndpoint`.
+- Signed webhook deliveries: `webhooks.getEndpointSecret` and `rotateEndpointSecret` return an endpoint's
+  Standard Webhooks secret, and `WebhookVerifier` checks a delivery's `webhook-signature` and
+  `webhook-timestamp` and parses its body into `WebhookEvent`.
+- `ListDispatchesParams.setEndpointId` filters delivery history by endpoint; `WebhookDispatch.getEndpointId`
+  names the endpoint a delivery went to.
+- Two-factor authentication: `auth.verifyMfa` completes a login whose result carries
+  `AuthenticationResult.getMfaToken()`, and `auth.listMfaMethods`, `startTotpEnrollment`,
+  `confirmTotpEnrollment`, `regenerateRecoveryCodes`, and `removeMfaMethod` manage authenticator-app
+  enrollment. `User.getMfaEnabled()` exposes `is_mfa_enabled`.
+- `CreateSignerPayload.setGovernmentId` sends the signer's CPF on creation.
+
+### Changed
+- The webhook subscription operations (`register`, `getSubscription`, `inactivate`) act on the account's oldest
+  webhook endpoint.
+
 ## [2.6.1] - 2026-10-05
 
 ### Fixed

@@ -1,7 +1,7 @@
 # Examples
 
 Worked end-to-end examples for the SDK. The [API reference](API_REFERENCE.md) contains the complete
-93-operation matrix and centralized request/response payload definitions.
+106-operation matrix and centralized request/response payload definitions.
 
 ## Response envelope
 
@@ -121,6 +121,41 @@ Response `data`:
   "accounts": [ { "id": "acc_xxx", "name": "Workspace", "roles": ["owner"],
                     "is_delete_allowed": false, "created_at": "2026-08-20T12:00:00Z" } ]
 }
+```
+
+### Two-factor authentication
+
+A login for a user with two-factor authentication answers with a challenge instead of a session:
+
+```json
+{ "mfa_token": "<single-use challenge, valid for 5 minutes>" }
+```
+
+```java
+if (session.getMfaToken() != null) {
+    // POST /authentication/mfa/verify — { "mfa_token": "...", "code": "123456" }
+    session = client.auth.verifyMfa(session.getMfaToken(), "123456");   // or a recovery code ABCD-EFGH-JKMN
+}
+
+// The remaining calls run as the authenticated user.
+TotpEnrollment enrollment = tokenClient.auth.startTotpEnrollment("My phone"); // POST /users/self/mfa/totp
+// data: { "id": "a1b2...", "secret": "GEZDGNBV...", "provisioning_uri": "otpauth://totp/...?issuer=Assinafy&secret=..." }
+
+List<String> recoveryCodes = tokenClient.auth.confirmTotpEnrollment(  // PUT /users/self/mfa/totp/confirm
+    enrollment.id(), "123456", null, null);
+// Request: { "id": "a1b2...", "code": "123456" }. Replacing a confirmed method also needs
+// "password" or "reauth_code". data: { "recovery_codes": ["ABCD-EFGH-JKMN", ...] }
+
+MfaMethods methods = tokenClient.auth.listMfaMethods();               // GET /users/self/mfa
+// data: { "methods": [ { "id": "a1b2...", "type": "Totp", "label": "My phone",
+//         "confirmed_at": "2026-09-09T14:21:03Z", "last_used_at": "2026-09-09T18:02:44Z" } ],
+//         "recovery_codes_remaining": 8 }
+
+List<String> fresh = tokenClient.auth.regenerateRecoveryCodes("password", null); // POST /users/self/mfa/recovery-codes
+// Request: { "password": "..." } or { "code": "123456" }. data: { "recovery_codes": [ ...ten codes ] }
+
+boolean stillEnabled = tokenClient.auth.removeMfaMethod(methods.methods().get(0).id(), null, "123456");
+// DELETE /users/self/mfa/{id} with { "password": "..." } or { "code": "..." }; data: { "is_mfa_enabled": false }
 ```
 
 ```java
@@ -549,13 +584,15 @@ System.out.printf("Signed: %d/%d (%.1f%%)%n",
 ```java
 // Strict create — POST /accounts/{account_id}/signers
 Signer signer = client.signers.create(
-    new CreateSignerPayload("John Doe", "john@example.com").setWhatsappPhoneNumber("+5548999990000"));
+    new CreateSignerPayload("John Doe", "john@example.com").setWhatsappPhoneNumber("+5548999990000")
+        .setGovernmentId("52998224725"));
 ```
 
 Request:
 
 ```json
-{ "full_name": "John Doe", "email": "john@example.com", "whatsapp_phone_number": "+5548999990000" }
+{ "full_name": "John Doe", "email": "john@example.com", "whatsapp_phone_number": "+5548999990000",
+  "government_id": "52998224725" }
 ```
 
 Response `data`:
@@ -723,6 +760,80 @@ client.assignments.signEntries(documentId, assignmentId, signerAccessCode, List.
 
 ## Webhooks
 
+### Webhook endpoints
+
+An account has one endpoint, or up to three on paid plans.
+
+```java
+// POST /accounts/{account_id}/webhooks/endpoints
+WebhookEndpoint endpoint = client.webhooks.createEndpoint(new WebhookEndpointPayload()
+    .setUrl("https://example.com/webhooks/assinafy")
+    .setEmail("ops@example.com")
+    .setEvents(List.of("document_ready", "signer_signed_document"))
+    .setName("ERP")
+    .setSigningEnabled(true));
+```
+
+Request:
+
+```json
+{
+  "url": "https://example.com/webhooks/assinafy",
+  "email": "ops@example.com",
+  "events": ["document_ready", "signer_signed_document"],
+  "name": "ERP",
+  "signing_enabled": true
+}
+```
+
+Response `data` (also each item of `listEndpoints()` and the result of `getEndpoint` / `updateEndpoint`):
+
+```json
+{
+  "id": "65f1c2a9b3e4d5f60718293a4b5c6d7e",
+  "name": "ERP",
+  "url": "https://example.com/webhooks/assinafy",
+  "email": "ops@example.com",
+  "events": ["document_ready", "signer_signed_document"],
+  "is_active": true,
+  "signing_enabled": true,
+  "created_at": "2026-10-01T12:00:00Z",
+  "updated_at": "2026-10-01T12:00:00Z"
+}
+```
+
+```java
+List<WebhookEndpoint> all = client.webhooks.listEndpoints();          // GET .../webhooks/endpoints, oldest first
+client.webhooks.getEndpoint(endpoint.id());                           // GET .../webhooks/endpoints/{id}
+client.webhooks.updateEndpoint(endpoint.id(),                         // PUT .../webhooks/endpoints/{id}
+    new WebhookEndpointPayload().setActive(false));                   // Request: { "is_active": false }
+String secret = client.webhooks.getEndpointSecret(endpoint.id());     // GET .../{id}/secret → { "secret": "whsec_..." }
+String rotated = client.webhooks.rotateEndpointSecret(endpoint.id()); // POST .../{id}/secret/rotate
+client.webhooks.deleteEndpoint(endpoint.id());                        // DELETE .../webhooks/endpoints/{id}
+```
+
+### Verifying a signed delivery
+
+```java
+WebhookVerifier verifier = new WebhookVerifier(secret);   // build once per endpoint; thread-safe
+
+// Inside the HTTP handler, with the raw body exactly as received:
+WebhookEvent event = verifier.verify(
+    headers.get("webhook-id"), headers.get("webhook-timestamp"), headers.get("webhook-signature"), rawBody);
+switch (event.event()) {
+    case "signer_signed_document" -> onSigned((String) event.object().get("id"));
+    case "document_ready" -> onCertified((String) event.object().get("id"));
+    default -> { }                                        // ignore future event types
+}
+```
+
+`verify` throws `ValidationException` when the signature does not match, the timestamp is more than five minutes
+from the local clock, or a header is missing. Deduplicate on `webhook-id`.
+
+### Legacy subscription
+
+The subscription operations act on the account's oldest endpoint.
+
 ```java
 // Register / replace — PUT /accounts/{account_id}/webhooks/subscriptions
 WebhookSubscription sub = client.webhooks.register(
@@ -760,7 +871,7 @@ client.webhooks.update(new RegisterWebhookPayload(sub.getUrl(), sub.getEmail())
 client.webhooks.inactivate();                                       // PUT .../webhooks/inactivate (stop deliveries)
 List<WebhookEventTypeInfo> types = client.webhooks.listEventTypes();// GET /webhooks/event-types
 PaginatedResult<WebhookDispatch> dispatches = client.webhooks.listDispatches(   // GET /accounts/{id}/webhooks
-    new ListDispatchesParams().setDelivered(false).setPerPage(20));
+    new ListDispatchesParams().setEndpointId(endpointId).setDelivered(false).setPerPage(20));
 client.webhooks.retryDispatch(dispatchId);                          // POST .../webhooks/{dispatchId}/retry
 ```
 
