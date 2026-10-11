@@ -5,6 +5,7 @@ import com.assinafy.sdk.exceptions.NetworkException;
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.PaginationMeta;
+import com.assinafy.sdk.models.Patterns;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JavaType;
@@ -23,6 +24,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -31,8 +33,8 @@ import java.util.regex.Pattern;
 public abstract class BaseResource {
 
     private static final Pattern PATH_SEGMENT = Pattern.compile("[A-Za-z0-9._~-]+");
-    private static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
     private static final Pattern CHALLENGE_PARAMETER = Pattern.compile("([A-Za-z_]+)=\"([^\"]*)\"");
+    private static final String[] ERROR_MESSAGE_KEYS = {"message", "error_description", "error"};
 
     /** JSON request-body media type used by resource methods. */
     protected static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
@@ -156,10 +158,23 @@ public abstract class BaseResource {
      * @throws ValidationException when the value is not a basic email address
      */
     protected String requireEmail(String value, String name) {
-        if (value == null || !EMAIL.matcher(value).matches()) {
+        if (value == null || !Patterns.EMAIL.matcher(value).matches()) {
             throw new ValidationException(name + " must be a valid email address");
         }
         return value;
+    }
+
+    /**
+     * Validates that a required value is present.
+     *
+     * @param value value to validate
+     * @param name human-readable field name used in validation messages
+     * @throws ValidationException when the value is absent or blank
+     */
+    protected static void requireValue(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw new ValidationException(name + " is required");
+        }
     }
 
     /**
@@ -499,6 +514,9 @@ public abstract class BaseResource {
     }
 
     private HttpUrl buildUrl(String path, Map<String, String> queryParams) {
+        if (path == null || !path.startsWith("/")) {
+            throw new ValidationException("API path must begin with '/'");
+        }
         HttpUrl base = HttpUrl.get(baseUrl + path);
         Map<String, String> normalizedParams = normalizeQueryParams(queryParams);
         if (normalizedParams.isEmpty()) {
@@ -565,6 +583,8 @@ public abstract class BaseResource {
         if ("GET".equals(request.method()) || "HEAD".equals(request.method()) || "OPTIONS".equals(request.method())) {
             return httpClient.newCall(request).execute();
         }
+        // A bodyless mutation still gets an empty one-shot body: OkHttp's follow-up logic replays requests
+        // it considers replayable (e.g. after HTTP 503 with Retry-After: 0), and one-shot bodies are exempt.
         RequestBody body = request.body() != null
                 ? request.body() : RequestBody.create(new byte[0], (MediaType) null);
         return mutationClient.newCall(request.newBuilder().method(request.method(), sendOnce(body)).build()).execute();
@@ -577,7 +597,9 @@ public abstract class BaseResource {
      * @return body that can be transmitted at most once
      */
     private static RequestBody sendOnce(RequestBody body) {
-        if (body.isOneShot()) return body;
+        if (body.isOneShot()) {
+            return body;
+        }
         return new RequestBody() {
             @Override public MediaType contentType() { return body.contentType(); }
             @Override public long contentLength() throws IOException { return body.contentLength(); }
@@ -596,8 +618,6 @@ public abstract class BaseResource {
                 throw attachResponseHints(e, response);
             }
         } catch (ApiException e) {
-            throw e;
-        } catch (ValidationException e) {
             throw e;
         } catch (IOException e) {
             throw new NetworkException("Network error: " + e.getMessage(), e);
@@ -634,7 +654,7 @@ public abstract class BaseResource {
             boolean jsonBody = contentType != null
                     && "application".equalsIgnoreCase(contentType.type())
                     && ("json".equalsIgnoreCase(contentType.subtype())
-                    || contentType.subtype().toLowerCase(java.util.Locale.ROOT).endsWith("+json"));
+                    || contentType.subtype().toLowerCase(Locale.ROOT).endsWith("+json"));
 
             // A real binary artifact is never JSON. When the body is JSON (an error envelope returned under
             // HTTP 200) or the HTTP status is an error, route through envelope inspection instead of returning
@@ -651,7 +671,7 @@ public abstract class BaseResource {
                 } catch (ApiException e) {
                     throw attachResponseHints(e, response);
                 }
-                throw new NetworkException("Expected a binary response but received JSON");
+                throw new ApiException(response.code(), "Expected a binary response but received JSON", json);
             }
             return responseBody != null ? responseBody.bytes() : new byte[0];
         } catch (ApiException e) {
@@ -695,9 +715,9 @@ public abstract class BaseResource {
      */
     private ApiException attachResponseHints(ApiException e, Response response) {
         if (e.getStatusCode() == 429 || e.getStatusCode() == 503) {
-            Integer seconds = parseRetryAfterSeconds(response.header("Retry-After"));
+            Integer seconds = parseInt(response.header("Retry-After"));
             if (seconds == null) {
-                seconds = parseRetryAfterSeconds(response.header("X-Rate-Limit-Reset"));
+                seconds = parseInt(response.header("X-Rate-Limit-Reset"));
             }
             if (seconds != null) {
                 e = e.withRetryAfterSeconds(seconds);
@@ -725,17 +745,6 @@ public abstract class BaseResource {
             }
         }
         return null;
-    }
-
-    private Integer parseRetryAfterSeconds(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException ex) {
-            return null;
-        }
     }
 
     @SuppressWarnings("unchecked")
@@ -813,7 +822,7 @@ public abstract class BaseResource {
      * spellings are honoured and neither loses the server's explanation.
      */
     private static String errorMessage(JsonNode root) {
-        for (String key : new String[] {"message", "error_description", "error"}) {
+        for (String key : ERROR_MESSAGE_KEYS) {
             String value = textOrNull(root, key);
             if (value != null) {
                 return value;
@@ -856,8 +865,11 @@ public abstract class BaseResource {
     }
 
     private Integer parseInt(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
         try {
-            return Integer.parseInt(value);
+            return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
             return null;
         }

@@ -272,10 +272,4 @@ public final class AuthenticationResource extends BaseResource {
         if (data != null) data.path("recovery_codes").forEach(code -> codes.add(code.asText()));
         return codes;
     }
-
-    private void requireValue(String value, String name) {
-        if (value == null || value.isBlank()) {
-            throw new ValidationException(name + " is required");
-        }
-    }
 }

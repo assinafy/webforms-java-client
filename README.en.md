@@ -31,14 +31,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.7.1</version>
+    <version>2.7.2</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.7.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.7.2'
 ```
 
 The artifact is published to Maven Central, with no repository configuration or authentication. See
@@ -468,7 +468,7 @@ view, and a request to re-send the one-time access token:
 AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
 DocumentDetails publicInfo = publicClient.documents.getPublic(doc.getId());
 
-// The document must be in pending_signature. channel is "email" or "whatsapp".
+// The document must be in pending_signature. channel is "email".
 publicClient.documents.sendToken(doc.getId(), "signer@example.com", "email");
 ```
 

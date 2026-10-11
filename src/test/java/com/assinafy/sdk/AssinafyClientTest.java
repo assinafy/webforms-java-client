@@ -93,6 +93,73 @@ class AssinafyClientTest {
     }
 
     @Test
+    void fromConfig_sendsBearerHeaderForEveryTokenAlias() throws Exception {
+        for (String alias : List.of("token", "access_token", "accessToken")) {
+            MockWebServer server = new MockWebServer();
+            server.start();
+            try {
+                server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+                AssinafyClient client = AssinafyClient.fromConfig(Map.of(
+                        alias, "secret-token",
+                        "base_url", server.url("/v1").toString()));
+
+                client.documents.statuses();
+
+                RecordedRequest request = server.takeRequest();
+                assertThat(request.getPath()).as("path for alias %s", alias)
+                        .isEqualTo("/v1/documents/statuses");
+                assertThat(request.getHeader("Authorization")).as("Authorization for alias %s", alias)
+                        .isEqualTo("Bearer secret-token");
+                assertThat(request.getHeader("X-Api-Key")).as("X-Api-Key for alias %s", alias).isNull();
+            } finally {
+                server.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void fromConfig_acceptsBothBaseUrlAliases() throws Exception {
+        for (String alias : List.of("base_url", "baseUrl")) {
+            MockWebServer server = new MockWebServer();
+            server.start();
+            try {
+                server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+                AssinafyClient client = AssinafyClient.fromConfig(Map.of(
+                        "token", "t",
+                        alias, server.url("/v1").toString()));
+
+                client.documents.statuses();
+
+                assertThat(server.takeRequest().getPath()).as("path for alias %s", alias)
+                        .isEqualTo("/v1/documents/statuses");
+            } finally {
+                server.shutdown();
+            }
+        }
+    }
+
+    @Test
+    void fromConfig_prefersApiKeyOverToken() throws Exception {
+        MockWebServer server = new MockWebServer();
+        server.start();
+        try {
+            server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":[]}"));
+            AssinafyClient client = AssinafyClient.fromConfig(Map.of(
+                    "api_key", "secret-key",
+                    "token", "secret-token",
+                    "base_url", server.url("/v1").toString()));
+
+            client.documents.statuses();
+
+            RecordedRequest request = server.takeRequest();
+            assertThat(request.getHeader("X-Api-Key")).isEqualTo("secret-key");
+            assertThat(request.getHeader("Authorization")).isNull();
+        } finally {
+            server.shutdown();
+        }
+    }
+
+    @Test
     void apiKey_setsXApiKeyHeader() {
         AssinafyClient client = new AssinafyClient(new AssinafyClientOptions()
                 .setApiKey("my-key")
@@ -122,6 +189,18 @@ class AssinafyClientTest {
                 new AssinafyClientOptions().setMaxRetries(-1)))
                 .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class)
                 .hasMessageContaining("non-negative");
+    }
+
+    @Test
+    void constructorRejectsNonPositiveTimeoutMs() {
+        assertThatThrownBy(() -> new AssinafyClient(
+                new AssinafyClientOptions().setTimeoutMs(0)))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class)
+                .hasMessageContaining("greater than zero");
+        assertThatThrownBy(() -> new AssinafyClient(
+                new AssinafyClientOptions().setTimeoutMs(-1)))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ValidationException.class)
+                .hasMessageContaining("greater than zero");
     }
 
     @Test

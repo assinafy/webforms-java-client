@@ -522,20 +522,21 @@ public final class DocumentResource extends BaseResource {
      * signer. Unauthenticated endpoint used by signer landing pages.
      *
      * <p>The request body is {@code {"recipient": ..., "channel": ...}}, where {@code channel} is {@code "email"}
-     * or {@code "whatsapp"} and {@code recipient} is the target email/phone. The target document must be in
-     * {@code pending_signature} status. The success envelope carries no data.</p>
+     * and {@code recipient} is the target email address. The target document must be in
+     * {@code pending_signature} status. The success envelope's {@code data} payload ({@code document},
+     * {@code channel}, {@code recipient}) is discarded.</p>
      *
      * @param documentId required pending-signature document identifier
-     * @param recipient required email address or phone number
-     * @param channel required {@code email} or {@code whatsapp}
+     * @param recipient required email address
+     * @param channel required {@code email}
      */
     public void sendToken(String documentId, String recipient, String channel) {
         String id = requireId(documentId, "Document ID");
         if (recipient == null || recipient.isBlank()) {
             throw new ValidationException("Recipient is required");
         }
-        if (!"email".equals(channel) && !"whatsapp".equals(channel)) {
-            throw new ValidationException("Channel must be 'email' or 'whatsapp'");
+        if (!"email".equals(channel)) {
+            throw new ValidationException("Channel must be 'email'");
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("recipient", recipient);

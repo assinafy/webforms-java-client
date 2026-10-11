@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-10-11
+
+### Added
+- `com.assinafy.sdk.models.Patterns` exposes the email validation pattern shared by request models and resources.
+
+### Fixed
+- `documents.sendToken` validates `channel` as `email` before sending; the API rejects every other channel with
+  HTTP 400, so invalid channels now fail fast with a `ValidationException`.
+- Plain-HTTP connections are accepted only for loopback base URLs (local test servers); a redirect away from
+  HTTPS can no longer downgrade a request to cleartext against a remote host.
+- A binary endpoint answering with JSON under HTTP 200 now raises `ApiException` instead of `NetworkException`;
+  both extend `AssinafyException`, and the new type matches how every other protocol error surfaces.
+- `AssinafyClient.fromConfig` treats an alias explicitly mapped to `null` as absent and falls through to the
+  next alias (`api_key`/`apiKey`, `token`/`access_token`/`accessToken`, `base_url`/`baseUrl`).
+
+### Security
+- Credential headers remain attached only on same-origin requests, and TLS 1.2+ is now the only transport
+  option for non-loopback base URLs.
+
 ## [2.7.1] - 2026-10-11
 
 ### Added

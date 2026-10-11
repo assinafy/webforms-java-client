@@ -201,7 +201,7 @@ public final class AccountResource extends BaseResource {
      */
     public List<DocumentStatsRow> stats(Map<String, String> params, String accountId) {
         String id = accountId(accountId);
-        return orEmpty(httpGet("/accounts/" + id + "/stats", params != null ? params : Map.of(),
+        return orEmpty(httpGet("/accounts/" + id + "/stats", params,
                 new TypeReference<List<DocumentStatsRow>>() {}));
     }
 

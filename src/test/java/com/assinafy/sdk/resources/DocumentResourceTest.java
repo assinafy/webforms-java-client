@@ -17,8 +17,12 @@ import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -119,6 +123,27 @@ class DocumentResourceTest {
     }
 
     @Test
+    void signingProgressReadsAssignmentSummaryWhenPresent() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "assignment",
+                Map.of("summary", Map.of("signer_count", 3, "completed_count", 1)))));
+
+        SigningProgress progress = resource.getSigningProgress("doc-1");
+
+        assertThat(progress.getSigned()).isEqualTo(1);
+        assertThat(progress.getTotal()).isEqualTo(3);
+        assertThat(progress.getPending()).isEqualTo(2);
+        assertThat(progress.getPercentage()).isEqualTo(33.33);
+    }
+
+    @Test
+    void fullySignedReadsAssignmentSummaryWhenPresent() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "status", "pending_signature", "assignment",
+                Map.of("summary", Map.of("signer_count", 2, "completed_count", 2)))));
+
+        assertThat(resource.isFullySigned("doc-1")).isTrue();
+    }
+
+    @Test
     void waitUntilReady_validatesPollingArguments() {
         assertThatThrownBy(() -> resource.waitUntilReady("doc-1", 0, 1))
                 .isInstanceOf(ValidationException.class)
@@ -127,6 +152,27 @@ class DocumentResourceTest {
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("Poll interval");
         assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void waitUntilReady_returnsTheFirstReadyDocument() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "status", "metadata_ready")));
+
+        DocumentDetails document = resource.waitUntilReady("doc-1", 1_000, 10);
+
+        assertThat(document.getStatus()).isEqualTo("metadata_ready");
+        assertThat(server.takeRequest().getPath()).isEqualTo("/documents/doc-1");
+        assertThat(server.getRequestCount()).isEqualTo(1);
+    }
+
+    @Test
+    void waitUntilReady_rejectsAFailedStatus() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "status", "rejected_by_signer")));
+
+        assertThatThrownBy(() -> resource.waitUntilReady("doc-1", 1_000, 10))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("rejected_by_signer");
+        assertThat(server.getRequestCount()).isEqualTo(1);
     }
 
     @Test
@@ -164,7 +210,7 @@ class DocumentResourceTest {
 
         assertThat(server.takeRequest().getPath())
                 .isEqualTo("/documents/doc-1/download/certificated");
-        assertThat(new String(bytes)).isEqualTo("PDFBYTES");
+        assertThat(new String(bytes, StandardCharsets.UTF_8)).isEqualTo("PDFBYTES");
     }
 
     @Test
@@ -461,6 +507,37 @@ class DocumentResourceTest {
     }
 
     @Test
+    void upload_postsFileFromDiskAsMultipart(@TempDir Path tempDir) throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1", "name", "contract.pdf", "status", "uploaded")));
+        Path file = Files.write(tempDir.resolve("contract.pdf"),
+                "%PDF-1.4 test".getBytes(StandardCharsets.UTF_8));
+
+        DocumentDetails document = resource.upload(file.toFile());
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath()).isEqualTo("/accounts/acc/documents");
+        assertThat(req.getHeader("Content-Type")).startsWith("multipart/form-data");
+        String body = req.getBody().readUtf8();
+        assertThat(body).contains("name=\"file\"");
+        assertThat(body).contains("filename=\"contract.pdf\"");
+        assertThat(document.getId()).isEqualTo("doc-1");
+    }
+
+    @Test
+    void upload_rejectsInvalidFilesBeforeAnyRequest(@TempDir Path tempDir) throws Exception {
+        Files.write(tempDir.resolve("notes.txt"), "data".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> resource.upload(tempDir.resolve("missing.pdf").toFile()))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("does not exist");
+        assertThatThrownBy(() -> resource.upload(tempDir.resolve("notes.txt").toFile()))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Only PDF");
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
     void getPublic_hitsPublicPathAndParsesPageCountAndCreatedBy() throws Exception {
         server.enqueue(okJson(Map.of(
                 "resource", "document",
@@ -609,7 +686,7 @@ class DocumentResourceTest {
                 .setHeader("Content-Type", "application/problem+json"));
 
         assertThatThrownBy(() -> resource.download("doc-1", "certificated"))
-                .isInstanceOf(com.assinafy.sdk.exceptions.NetworkException.class)
+                .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class)
                 .hasMessageContaining("Expected a binary response");
     }
 
@@ -635,6 +712,14 @@ class DocumentResourceTest {
                 .isInstanceOf(ValidationException.class);
         assertThatThrownBy(() -> resource.sendToken("doc-1", "signer@example.com", "sms"))
                 .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void sendToken_rejectsWhatsappChannelBeforeAnyRequest() {
+        assertThatThrownBy(() -> resource.sendToken("doc-1", "+5548999990000", "whatsapp"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Channel must be 'email'");
+        assertThat(server.getRequestCount()).isZero();
     }
 
     @Test

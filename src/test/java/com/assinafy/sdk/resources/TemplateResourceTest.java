@@ -63,6 +63,15 @@ class TemplateResourceTest {
     }
 
     @Test
+    void list_passesExplicitAccountIdInPath() throws Exception {
+        server.enqueue(okJson(List.of()));
+
+        resource.list(Map.of(), "other");
+
+        assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/other/templates");
+    }
+
+    @Test
     void get_returnsParsedTemplate() throws Exception {
         server.enqueue(okJson(Map.of(
                 "id", "tmpl-1",

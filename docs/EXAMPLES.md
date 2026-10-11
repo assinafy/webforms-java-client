@@ -555,7 +555,7 @@ client.documents.sendToken(documentId, "signer@example.com", "email");
 // Request: { "recipient": "signer@example.com", "channel": "email" }
 ```
 
-`channel` is `email` or `whatsapp`, and `recipient` is the matching address or phone number. The document must
+`channel` is `email` and `recipient` is the target email address. The document must
 be in `pending_signature`.
 
 ### Document tags

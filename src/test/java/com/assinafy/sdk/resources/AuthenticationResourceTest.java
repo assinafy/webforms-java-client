@@ -155,9 +155,20 @@ class AuthenticationResourceTest {
         resource.requestPasswordReset("me@example.com");
         resource.resetPassword("me@example.com", "token", "new");
 
-        assertThat(server.takeRequest().getPath()).isEqualTo("/authentication/change-password");
-        assertThat(server.takeRequest().getPath()).isEqualTo("/authentication/request-password-reset");
-        assertThat(server.takeRequest().getPath()).isEqualTo("/authentication/reset-password");
+        RecordedRequest change = server.takeRequest();
+        assertThat(change.getMethod()).isEqualTo("PUT");
+        assertThat(change.getPath()).isEqualTo("/authentication/change-password");
+        assertThat(change.getBody().readUtf8())
+                .isEqualTo("{\"email\":\"me@example.com\",\"password\":\"old\",\"new_password\":\"new\"}");
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getMethod()).isEqualTo("PUT");
+        assertThat(request.getPath()).isEqualTo("/authentication/request-password-reset");
+        assertThat(request.getBody().readUtf8()).isEqualTo("{\"email\":\"me@example.com\"}");
+        RecordedRequest reset = server.takeRequest();
+        assertThat(reset.getMethod()).isEqualTo("PUT");
+        assertThat(reset.getPath()).isEqualTo("/authentication/reset-password");
+        assertThat(reset.getBody().readUtf8())
+                .isEqualTo("{\"email\":\"me@example.com\",\"token\":\"token\",\"new_password\":\"new\"}");
     }
 
     @Test
@@ -308,6 +319,16 @@ class AuthenticationResourceTest {
         assertThat(req.getMethod()).isEqualTo("DELETE");
         assertThat(req.getPath()).isEqualTo("/users/self/mfa/m1");
         assertThat(req.getBody().readUtf8()).isEqualTo("{\"code\":\"123456\"}");
+    }
+
+    @Test
+    void removeMfaMethod_rejectsAnInvalidMethodIdBeforeAnyRequest() {
+        assertThatThrownBy(() -> resource.removeMfaMethod("../admin", "pw", null))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("URL-safe path segment");
+        assertThatThrownBy(() -> resource.removeMfaMethod(" ", "pw", null))
+                .isInstanceOf(ValidationException.class);
+        assertThat(server.getRequestCount()).isZero();
     }
 
     @Test

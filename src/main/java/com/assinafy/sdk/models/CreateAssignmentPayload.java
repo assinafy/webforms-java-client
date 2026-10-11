@@ -2,7 +2,6 @@ package com.assinafy.sdk.models;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * Options for creating an assignment (or estimating its cost). This is a builder-style holder; the resource
@@ -63,7 +62,7 @@ public final class CreateAssignmentPayload {
      * @return this payload
      */
     public CreateAssignmentPayload setSignerStrings(List<String> ids) {
-        return setSigners(ids == null ? null : ids.stream().map(SignerRef::of).collect(Collectors.toList()));
+        return setSigners(ids == null ? null : ids.stream().map(SignerRef::of).toList());
     }
 
     /**
@@ -175,7 +174,7 @@ public final class CreateAssignmentPayload {
             return signers;
         }
         if (signerIds != null && !signerIds.isEmpty()) {
-            return signerIds.stream().map(SignerRef::of).collect(Collectors.toList());
+            return signerIds.stream().map(SignerRef::of).toList();
         }
         return List.of();
     }

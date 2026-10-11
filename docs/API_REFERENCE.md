@@ -124,7 +124,7 @@ null to clear a value.
 | API-key creation | `{ "password": string* }` |
 | Document rename | `{ "name": string* }`, maximum 255 characters |
 | Document tag replace/append | `{ "tags": [tagId, ...] }` |
-| Public token | `{ "recipient": string*, "channel": "email"\|"whatsapp"* }` |
+| Public token | `{ "recipient": string*, "channel": "email"* }` |
 | `CreateSignerPayload` | `{ "full_name": string*, "email": string?, "whatsapp_phone_number": E.164?, "government_id": CPF? }` |
 | `UpdateSignerPayload` | Any non-empty subset of `full_name`, `email`, `whatsapp_phone_number`, `government_id` (CPF/CNPJ) |
 | Assignment expiration | `{ "expires_at": ISO-8601 date-time }` |

@@ -32,14 +32,14 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.7.1</version>
+    <version>2.7.2</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.7.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.7.2'
 ```
 
 O artefato é publicado no Maven Central, sem configuração de repositório nem autenticação. Veja
@@ -490,7 +490,7 @@ uma visão não autenticada do documento e um pedido de reenvio do token de aces
 AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
 DocumentDetails infoPublica = publicClient.documents.getPublic(doc.getId());
 
-// O documento precisa estar em pending_signature. channel é "email" ou "whatsapp".
+// O documento precisa estar em pending_signature. channel é "email".
 publicClient.documents.sendToken(doc.getId(), "signatario@example.com", "email");
 ```
 

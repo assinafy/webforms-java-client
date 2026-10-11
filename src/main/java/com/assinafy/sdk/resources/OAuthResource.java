@@ -333,12 +333,6 @@ public final class OAuthResource extends BaseResource {
         }
     }
 
-    private static void requireValue(String value, String name) {
-        if (value == null || value.isBlank()) {
-            throw new ValidationException(name + " is required");
-        }
-    }
-
     private static void requireRedirectUri(String redirectUri) {
         requireValue(redirectUri, "Redirect URI");
         try {

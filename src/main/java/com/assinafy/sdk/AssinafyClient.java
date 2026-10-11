@@ -25,8 +25,11 @@ import com.assinafy.sdk.resources.UserResource;
 import okhttp3.ConnectionSpec;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import okhttp3.TlsVersion;
 
+import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -42,10 +45,9 @@ import java.util.function.Consumer;
  */
 public final class AssinafyClient {
 
-    /** HTTPS requires TLS 1.2 or later; cleartext remains only for the loopback URLs the base-URL check accepts. */
-    private static final List<ConnectionSpec> CONNECTION_SPECS = List.of(
-            new ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS).tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2).build(),
-            ConnectionSpec.CLEARTEXT);
+    /** HTTPS requires TLS 1.2 or later. */
+    private static final ConnectionSpec TLS_SPEC = new ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+            .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2).build();
 
     private final OkHttpClient httpClient;
     private final String baseUrl;
@@ -98,17 +100,22 @@ public final class AssinafyClient {
                 ? options.getBaseUrl()
                 : AssinafyClientOptions.DEFAULT_BASE_URL);
         final HttpUrl apiOrigin = HttpUrl.get(baseUrl);
+        // Cleartext stays available only to the loopback mock servers local tests use; anywhere else a
+        // redirect to plain HTTP must fail instead of downgrading.
+        final List<ConnectionSpec> connectionSpecs = isLoopbackHost(apiOrigin.host())
+                ? List.of(TLS_SPEC, ConnectionSpec.CLEARTEXT)
+                : List.of(TLS_SPEC);
 
         final int maxRetries = options.getMaxRetries();
         final String apiKey = options.getApiKey();
         final String token = options.getToken();
         this.httpClient = new OkHttpClient.Builder()
-                .connectionSpecs(CONNECTION_SPECS)
+                .connectionSpecs(connectionSpecs)
                 .connectTimeout(options.getTimeoutMs(), TimeUnit.MILLISECONDS)
                 .readTimeout(options.getTimeoutMs(), TimeUnit.MILLISECONDS)
                 .writeTimeout(options.getTimeoutMs(), TimeUnit.MILLISECONDS)
                 .addNetworkInterceptor(chain -> {
-                    okhttp3.Request.Builder requestBuilder = chain.request().newBuilder()
+                    Request.Builder requestBuilder = chain.request().newBuilder()
                             .header("Accept", "application/json")
                             .header("User-Agent", "assinafy-webforms-java-client-sdk");
                     if (sameOrigin(chain.request().url(), apiOrigin)) {
@@ -121,8 +128,8 @@ public final class AssinafyClient {
                     return chain.proceed(requestBuilder.build());
                 })
                 .addInterceptor(chain -> {
-                    okhttp3.Request request = chain.request();
-                    okhttp3.Response response = chain.proceed(request);
+                    Request request = chain.request();
+                    Response response = chain.proceed(request);
 
                     int attempts = 0;
                     while (isRetryable(response.code()) && isRetrySafe(request.method())
@@ -133,7 +140,7 @@ public final class AssinafyClient {
                             Thread.sleep(waitMs);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
-                            throw new java.io.InterruptedIOException("Interrupted while waiting to retry");
+                            throw new InterruptedIOException("Interrupted while waiting to retry");
                         }
                         attempts++;
                         response = chain.proceed(request);
@@ -202,23 +209,37 @@ public final class AssinafyClient {
         }
         AssinafyClientOptions opts = new AssinafyClientOptions();
 
-        String apiKey = config.getOrDefault("api_key", config.get("apiKey"));
+        String apiKey = config.get("api_key");
+        if (apiKey == null) {
+            apiKey = config.get("apiKey");
+        }
         if (apiKey != null && !apiKey.isBlank()) {
             opts.setApiKey(apiKey);
         }
 
         if (opts.getApiKey() == null || opts.getApiKey().isBlank()) {
-            String token = config.getOrDefault("token",
-                    config.getOrDefault("access_token", config.get("accessToken")));
+            String token = config.get("token");
+            if (token == null) {
+                token = config.get("access_token");
+            }
+            if (token == null) {
+                token = config.get("accessToken");
+            }
             if (token != null && !token.isBlank()) {
                 opts.setToken(token);
             }
         }
 
-        String accountId = config.getOrDefault("account_id", config.get("accountId"));
+        String accountId = config.get("account_id");
+        if (accountId == null) {
+            accountId = config.get("accountId");
+        }
         if (accountId != null) opts.setAccountId(accountId);
 
-        String url = config.getOrDefault("base_url", config.get("baseUrl"));
+        String url = config.get("base_url");
+        if (url == null) {
+            url = config.get("baseUrl");
+        }
         if (url != null) opts.setBaseUrl(url);
 
         return new AssinafyClient(opts);
@@ -324,6 +345,10 @@ public final class AssinafyClient {
                 && requestUrl.port() == apiUrl.port();
     }
 
+    private static boolean isLoopbackHost(String host) {
+        return "localhost".equalsIgnoreCase(host) || "::1".equals(host) || host.startsWith("127.");
+    }
+
     private static final long MAX_RETRY_WAIT_MS = 30_000L;
 
     /**
@@ -331,7 +356,7 @@ public final class AssinafyClient {
      * or {@code X-Rate-Limit-Reset} header when present; otherwise falls back to a simple linear backoff. The
      * delay is capped at {@link #MAX_RETRY_WAIT_MS}.
      */
-    private static long retryDelayMs(okhttp3.Response response, int attempt) {
+    private static long retryDelayMs(Response response, int attempt) {
         Long headerSeconds = parseLong(response.header("Retry-After"));
         if (headerSeconds == null) {
             headerSeconds = parseLong(response.header("X-Rate-Limit-Reset"));

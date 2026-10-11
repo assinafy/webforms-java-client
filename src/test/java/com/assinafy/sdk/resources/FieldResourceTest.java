@@ -98,6 +98,34 @@ class FieldResourceTest {
     }
 
     @Test
+    void update_sendsEverySuppliedAttribute() throws Exception {
+        server.enqueue(okJson(Map.of("id", "field-1", "name", "New Name", "type", "text")));
+
+        resource.update("field-1", new UpdateFieldPayload()
+                .setType("text")
+                .setName("New Name")
+                .setRegex("^[a-z]+$")
+                .setRequired(true)
+                .setActive(false));
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PUT");
+        assertThat(req.getPath()).isEqualTo("/accounts/acc/fields/field-1");
+        assertThat(req.getBody().readUtf8()).isEqualTo(
+                "{\"type\":\"text\",\"name\":\"New Name\",\"regex\":\"^[a-z]+$\","
+                        + "\"is_required\":true,\"is_active\":false}");
+    }
+
+    @Test
+    void list_passesExplicitAccountIdInPath() throws Exception {
+        server.enqueue(okJson(List.of()));
+
+        resource.list(Map.of(), "other");
+
+        assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/other/fields");
+    }
+
+    @Test
     void validate_addsSignerAccessCodeWhenProvided() throws Exception {
         server.enqueue(okJson(Map.of("type", "cpf", "success", true, "error_message", "")));
 

@@ -74,6 +74,16 @@ class AccountResourceTest {
         RecordedRequest update = server.takeRequest();
         assertThat(update.getMethod()).isEqualTo("PUT");
         assertThat(update.getPath()).isEqualTo("/accounts/acc");
+        assertThat(update.getBody().readUtf8()).isEqualTo("{\"name\":\"Renamed\"}");
+    }
+
+    @Test
+    void get_passesExplicitAccountIdInPath() throws Exception {
+        server.enqueue(okJson(Map.of("id", "other", "name", "Other Workspace")));
+
+        resource.get("other");
+
+        assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/other");
     }
 
     @Test
@@ -153,5 +163,29 @@ class AccountResourceTest {
                 .isInstanceOf(ValidationException.class);
         assertThatThrownBy(() -> resource.uploadLogo(new byte[0], "logo.png"))
                 .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void validatesAccountPayloadBranchesBeforeAnyRequest() {
+        assertThatThrownBy(() -> resource.create(new AccountPayload(" ")))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Account name is required");
+        assertThatThrownBy(() -> resource.update(new AccountPayload(" ")))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("cannot be blank");
+        assertThatThrownBy(() -> resource.create(new AccountPayload("Acme")
+                .setNotificationSenderType("Bot")))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("'User' or 'Account'");
+        assertThatThrownBy(() -> resource.update(new AccountPayload()))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("At least one account attribute");
+        assertThatThrownBy(() -> resource.uploadLogo(new byte[] {1}, null))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("file name");
+        assertThatThrownBy(() -> resource.uploadLogo(new byte[] {1}, " "))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("file name");
+        assertThat(server.getRequestCount()).isZero();
     }
 }

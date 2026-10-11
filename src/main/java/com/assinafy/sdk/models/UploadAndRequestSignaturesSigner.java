@@ -2,12 +2,8 @@ package com.assinafy.sdk.models;
 
 import com.assinafy.sdk.exceptions.ValidationException;
 
-import java.util.regex.Pattern;
-
 /** A signer created or reused by the high-level upload-and-request workflow. */
 public final class UploadAndRequestSignaturesSigner {
-
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
     private final String name;
     private final String email;
@@ -24,7 +20,7 @@ public final class UploadAndRequestSignaturesSigner {
         if (name == null || name.isBlank()) {
             throw new ValidationException("Signer name is required");
         }
-        if (email == null || !EMAIL_PATTERN.matcher(email).matches()) {
+        if (email == null || !Patterns.EMAIL.matcher(email).matches()) {
             throw new ValidationException("Invalid signer email address");
         }
         this.name = name;

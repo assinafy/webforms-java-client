@@ -165,7 +165,7 @@ public final class TagResource extends BaseResource {
     }
 
     private void assertNameLength(String name) {
-        if (name != null && name.trim().length() > MAX_TAG_NAME_LENGTH) {
+        if (name != null && name.strip().length() > MAX_TAG_NAME_LENGTH) {
             throw new ValidationException("Tag name must be at most " + MAX_TAG_NAME_LENGTH + " characters");
         }
     }
