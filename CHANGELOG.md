@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-10-11
+
+### Added
+- Published to Maven Central as `com.assinafy:webforms-java-client-sdk`. Installing no longer needs a
+  repository entry or a GitHub token; GitHub Packages keeps receiving the same versions.
+
 ## [2.7.0] - 2026-10-07
 
 ### Added

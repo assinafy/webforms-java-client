@@ -31,18 +31,18 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.7.0</version>
+    <version>2.7.1</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.7.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.7.1'
 ```
 
-The artifact is published to GitHub Packages, so the repository must be declared once in your build. See
-[docs/INSTALLATION.md](docs/INSTALLATION.md) for that and for the sources/Javadoc jars.
+The artifact is published to Maven Central, with no repository configuration or authentication. See
+[docs/INSTALLATION.md](docs/INSTALLATION.md) for the Gradle Kotlin DSL, GitHub Packages and the sources/Javadoc jars.
 
 ---
 
@@ -825,8 +825,8 @@ The GitLab manual job uses protected, masked, sandbox-scoped variables; notifica
 cases require an explicit opt-in.
 
 CI runs `./mvnw verify` on the current JDK 25 LTS. GitLab is the source of truth and mirrors to GitHub, where
-the equivalent Actions workflows run. Releases publish to GitHub Packages on a `v*` tag via the `release`
-profile (`-Prelease`, which also builds `-sources` and `-javadoc` jars).
+the equivalent Actions workflows run. Releases publish to Maven Central and GitHub Packages on a `v*` tag via the
+`release` profile (`-Prelease`, which also builds `-sources` and `-javadoc` jars).
 
 ---
 

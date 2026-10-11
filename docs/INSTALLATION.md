@@ -9,6 +9,8 @@
 The artifact runs on Java 25 and every later compatible JDK. The included wrapper pins Maven 3.9.16, and CI
 compiles, tests, and packages the release artifacts on the current JDK 25 LTS.
 
+The artifact is published to Maven Central, so no repository entry or credentials are needed.
+
 ## Maven
 
 Add the dependency to your `pom.xml`:
@@ -17,7 +19,7 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.7.0</version>
+    <version>2.7.1</version>
 </dependency>
 ```
 
@@ -35,7 +37,7 @@ the repository-pinned Maven release: `./mvnw verify`.
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:2.7.0'
+    implementation 'com.assinafy:webforms-java-client-sdk:2.7.1'
 }
 ```
 
@@ -43,13 +45,14 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:2.7.0")
+    implementation("com.assinafy:webforms-java-client-sdk:2.7.1")
 }
 ```
 
 ## GitHub Packages
 
-To install from GitHub Packages, add the repository to your `pom.xml`:
+The same versions are also published to GitHub Packages. To install from there instead, add the repository
+to your `pom.xml`:
 
 ```xml
 <repositories>

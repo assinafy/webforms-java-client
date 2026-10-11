@@ -32,19 +32,19 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.7.0</version>
+    <version>2.7.1</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.7.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.7.1'
 ```
 
-O artefato é publicado no GitHub Packages, então o repositório precisa ser declarado uma vez no seu
-build. Veja [docs/INSTALLATION.md](docs/INSTALLATION.md) para isso e para os jars de sources e
-Javadoc.
+O artefato é publicado no Maven Central, sem configuração de repositório nem autenticação. Veja
+[docs/INSTALLATION.md](docs/INSTALLATION.md) para Gradle Kotlin DSL, para o GitHub Packages e para os
+jars de sources e Javadoc.
 
 ---
 
@@ -854,8 +854,8 @@ ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ASSINAFY_LIVE_EMAILS=true \
 variáveis de ambiente ou segredos de CI, nunca em propriedades do Maven ou em arquivos do repositório.
 
 O CI roda `./mvnw verify` no JDK 25 LTS atual. O GitLab é a fonte da verdade e espelha para o GitHub,
-onde rodam os workflows equivalentes do Actions. Releases publicam no GitHub Packages a partir de uma tag
-`v*`, pelo profile `release`.
+onde rodam os workflows equivalentes do Actions. Releases publicam no Maven Central e no GitHub Packages a
+partir de uma tag `v*`, pelo profile `release`.
 
 ---
 
