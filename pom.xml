@@ -27,6 +27,7 @@
 
     <developers>
         <developer>
+            <id>assinafy</id>
             <name>Assinafy</name>
             <organization>Assinafy</organization>
             <organizationUrl>https://assinafy.com.br</organizationUrl>
@@ -259,6 +260,39 @@
                                 <phase>package</phase>
                                 <goals>
                                     <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--
+          Maven Central signing, used together with `release`. The GitLab publish-release job deploys with
+          `-Prelease,central` into a local directory, bundles it and uploads the bundle to the Central Portal.
+          The key comes from MAVEN_SIGNING_KEY (or -Dgpg.keyFilePath) and its passphrase from
+          MAVEN_SIGNING_PASSWORD.
+        -->
+        <profile>
+            <id>central</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.8</version>
+                        <configuration>
+                            <signer>bc</signer>
+                            <keyEnvName>MAVEN_SIGNING_KEY</keyEnvName>
+                            <passphraseEnvName>MAVEN_SIGNING_PASSWORD</passphraseEnvName>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
                                 </goals>
                             </execution>
                         </executions>
