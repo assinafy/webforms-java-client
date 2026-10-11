@@ -11,11 +11,11 @@
 
     <name>Assinafy Webforms Java Client SDK</name>
     <description>Java client SDK for the Assinafy digital signature API</description>
-    <url>https://github.com/assinafy/webforms-java-client</url>
+    <url>https://www.assinafy.com.br</url>
 
     <organization>
         <name>Assinafy</name>
-        <url>https://assinafy.com.br</url>
+        <url>https://www.assinafy.com.br</url>
     </organization>
 
     <licenses>
