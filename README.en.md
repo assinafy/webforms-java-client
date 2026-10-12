@@ -31,14 +31,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.7.2</version>
+    <version>2.7.3</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.7.2'
+implementation 'com.assinafy:webforms-java-client-sdk:2.7.3'
 ```
 
 The artifact is published to Maven Central, with no repository configuration or authentication. See

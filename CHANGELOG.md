@@ -2,10 +2,9 @@
 
 ## [Unreleased]
 
-## [2.7.2] - 2026-10-12
+## [2.7.3] - 2026-10-12
 
 ### Added
-- `com.assinafy.sdk.models.Patterns` exposes the email validation pattern shared by request models and resources.
 - `documents.sendTokenByEmail(documentId, recipient)` returns the endpoint's `data` as `SendTokenResult`
   (`document`, `channel`, `recipient`). `sendToken` keeps its `void` signature and delegates to it.
 - `ApiException.getRateLimitLimit()`, `getRateLimitRemaining()`, and `getRateLimitReset()` expose the
@@ -27,12 +26,23 @@
   `{role_id, verification_method, notification_methods}`. Signer IDs and steps stay on creation requests.
 
 ### Fixed
-- `documents.sendToken` validates `channel` as `email` before sending; the API rejects every other channel with
-  HTTP 400, so invalid channels now fail fast with a `ValidationException`. The recipient must be the signer's
-  email address.
+- `documents.sendToken` and `sendTokenByEmail` expect the signer's email address as the recipient.
 - Signer decline reasons longer than 2000 characters fail fast in `assignments.decline` and
   `signerSelf.declineMultiple`.
 - `auth.socialLogin` and `auth.linkSocialLogin` accept `google`, the only provider the API supports.
+
+### Security
+- A request carrying a `signer-access-code` is authenticated by that code alone: the client no longer attaches
+  its API key or bearer token to signer-facing requests.
+
+## [2.7.2] - 2026-10-11
+
+### Added
+- `com.assinafy.sdk.models.Patterns` exposes the email validation pattern shared by request models and resources.
+
+### Fixed
+- `documents.sendToken` validates `channel` as `email` before sending; the API rejects every other channel with
+  HTTP 400, so invalid channels now fail fast with a `ValidationException`.
 - Plain-HTTP connections are accepted only for loopback base URLs (local test servers); a redirect away from
   HTTPS can no longer downgrade a request to cleartext against a remote host.
 - A binary endpoint answering with JSON under HTTP 200 now raises `ApiException` instead of `NetworkException`;
@@ -41,8 +51,6 @@
   next alias (`api_key`/`apiKey`, `token`/`access_token`/`accessToken`, `base_url`/`baseUrl`).
 
 ### Security
-- A request carrying a `signer-access-code` is authenticated by that code alone: the client no longer attaches
-  its API key or bearer token to signer-facing requests.
 - Credential headers remain attached only on same-origin requests, and TLS 1.2+ is now the only transport
   option for non-loopback base URLs.
 

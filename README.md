@@ -32,14 +32,14 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.7.2</version>
+    <version>2.7.3</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.7.2'
+implementation 'com.assinafy:webforms-java-client-sdk:2.7.3'
 ```
 
 O artefato é publicado no Maven Central, sem configuração de repositório nem autenticação. Veja
