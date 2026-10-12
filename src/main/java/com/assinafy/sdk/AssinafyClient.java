@@ -49,6 +49,9 @@ public final class AssinafyClient {
     private static final ConnectionSpec TLS_SPEC = new ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
             .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2).build();
 
+    /** Query parameter that authenticates signer-facing requests in place of workspace credentials. */
+    private static final String SIGNER_ACCESS_CODE = "signer-access-code";
+
     private final OkHttpClient httpClient;
     private final String baseUrl;
 
@@ -118,7 +121,10 @@ public final class AssinafyClient {
                     Request.Builder requestBuilder = chain.request().newBuilder()
                             .header("Accept", "application/json")
                             .header("User-Agent", "assinafy-webforms-java-client-sdk");
-                    if (sameOrigin(chain.request().url(), apiOrigin)) {
+                    // A signer-facing request authenticates with its access code alone; workspace
+                    // credentials must never travel with it.
+                    if (sameOrigin(chain.request().url(), apiOrigin)
+                            && chain.request().url().queryParameter(SIGNER_ACCESS_CODE) == null) {
                         if (apiKey != null && !apiKey.isBlank()) {
                             requestBuilder.header("X-Api-Key", apiKey);
                         } else if (token != null && !token.isBlank()) {

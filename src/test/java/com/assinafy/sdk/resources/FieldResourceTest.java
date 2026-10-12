@@ -138,11 +138,37 @@ class FieldResourceTest {
     }
 
     @Test
+    void signerValidationRejectsMissingAccessCodeBeforeAnyRequest() {
+        for (String code : new String[]{null, "", "  "}) {
+            assertThatThrownBy(() -> resource.validate("field-1", "v", code))
+                    .isInstanceOf(ValidationException.class)
+                    .hasMessageContaining("Signer access code is required");
+            assertThatThrownBy(() -> resource.validateMultiple(
+                    List.of(new FieldValidationPayload("field-1", "v")), code, null))
+                    .isInstanceOf(ValidationException.class)
+                    .hasMessageContaining("Signer access code is required");
+        }
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void workspaceValidationSendsNoAccessCode() throws Exception {
+        server.enqueue(okJson(Map.of("type", "text", "success", true, "error_message", "")));
+        server.enqueue(okJson(List.of()));
+
+        resource.validateAsWorkspace("field-1", "v", "other");
+        resource.validateMultipleAsWorkspace(List.of(new FieldValidationPayload("field-1", "v")), "other");
+
+        assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/other/fields/field-1/validate");
+        assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/other/fields/validate-multiple");
+    }
+
+    @Test
     void validate_allowsNullValueWithoutNpe() throws Exception {
         // A null value must be forwarded as {"value":null}, not throw NullPointerException client-side.
         server.enqueue(okJson(Map.of("type", "text", "success", false, "error_message", "Required")));
 
-        FieldValidationResult result = resource.validate("field-1", null);
+        FieldValidationResult result = resource.validateAsWorkspace("field-1", null);
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getMethod()).isEqualTo("POST");
@@ -155,7 +181,7 @@ class FieldResourceTest {
         server.enqueue(okJson(List.of(Map.of("field_id", "field-1", "type", "email", "success", true,
                 "error_message", ""))));
 
-        List<FieldValidationResult> result = resource.validateMultiple(List.of(
+        List<FieldValidationResult> result = resource.validateMultipleAsWorkspace(List.of(
                 new FieldValidationPayload("field-1", "test@example.com")));
 
         RecordedRequest req = server.takeRequest();
@@ -171,7 +197,7 @@ class FieldResourceTest {
         server.enqueue(okJson(List.of(Map.of("field_id", "field-1", "type", "text", "success", true,
                 "error_message", ""))));
 
-        resource.validateMultiple(List.of(new FieldValidationPayload("field-1", null)));
+        resource.validateMultipleAsWorkspace(List.of(new FieldValidationPayload("field-1", null)));
 
         String body = server.takeRequest().getBody().readUtf8();
         assertThat(body).contains("\"field_id\":\"field-1\"");
@@ -180,7 +206,7 @@ class FieldResourceTest {
 
     @Test
     void validateMultiple_rejectsMissingFieldId() {
-        assertThatThrownBy(() -> resource.validateMultiple(List.of(new FieldValidationPayload("", "value"))))
+        assertThatThrownBy(() -> resource.validateMultipleAsWorkspace(List.of(new FieldValidationPayload("", "value"))))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("field ID");
         assertThat(server.getRequestCount()).isZero();

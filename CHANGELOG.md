@@ -2,14 +2,37 @@
 
 ## [Unreleased]
 
-## [2.7.2] - 2026-10-11
+## [2.7.2] - 2026-10-12
 
 ### Added
 - `com.assinafy.sdk.models.Patterns` exposes the email validation pattern shared by request models and resources.
+- `documents.sendTokenByEmail(documentId, recipient)` returns the endpoint's `data` as `SendTokenResult`
+  (`document`, `channel`, `recipient`). `sendToken` keeps its `void` signature and delegates to it.
+- `ApiException.getRateLimitLimit()`, `getRateLimitRemaining()`, and `getRateLimitReset()` expose the
+  `X-Rate-Limit-*` headers of a failed response; on HTTP 429, `getRetryAfterSeconds()` carries `Retry-After`.
+- Explicit workspace-credential methods for routes that also accept a signer access code:
+  `signerSelf.listDocumentsAsWorkspace`, `signerSelf.searchDocumentsAsWorkspace`, `fields.validateAsWorkspace`,
+  and `fields.validateMultipleAsWorkspace`.
+- `TemplateListItem.getDefaultDocumentTags()` maps the list response's `default_document_tags`.
+
+### Changed
+- `fields.validate(fieldId, value, signerAccessCode[, accountId])` and
+  `fields.validateMultiple(values, signerAccessCode[, accountId])` now require a non-blank access code. Passing
+  `null` used to fall back to workspace credentials; call `validateAsWorkspace` / `validateMultipleAsWorkspace`
+  for that instead.
+- `fields.validate(fieldId, value)` and `fields.validateMultiple(values)` are deprecated in favour of the
+  `...AsWorkspace` methods; they keep working.
+- Cost estimates send only what the API prices: `assignments.estimateCost` sends each signer as
+  `{verification_method, notification_methods}`, and `documents.estimateCostFromTemplate` sends
+  `{role_id, verification_method, notification_methods}`. Signer IDs and steps stay on creation requests.
 
 ### Fixed
 - `documents.sendToken` validates `channel` as `email` before sending; the API rejects every other channel with
-  HTTP 400, so invalid channels now fail fast with a `ValidationException`.
+  HTTP 400, so invalid channels now fail fast with a `ValidationException`. The recipient must be the signer's
+  email address.
+- Signer decline reasons longer than 2000 characters fail fast in `assignments.decline` and
+  `signerSelf.declineMultiple`.
+- `auth.socialLogin` and `auth.linkSocialLogin` accept `google`, the only provider the API supports.
 - Plain-HTTP connections are accepted only for loopback base URLs (local test servers); a redirect away from
   HTTPS can no longer downgrade a request to cleartext against a remote host.
 - A binary endpoint answering with JSON under HTTP 200 now raises `ApiException` instead of `NetworkException`;
@@ -18,6 +41,8 @@
   next alias (`api_key`/`apiKey`, `token`/`access_token`/`accessToken`, `base_url`/`baseUrl`).
 
 ### Security
+- A request carrying a `signer-access-code` is authenticated by that code alone: the client no longer attaches
+  its API key or bearer token to signer-facing requests.
 - Credential headers remain attached only on same-origin requests, and TLS 1.2+ is now the only transport
   option for non-loopback base URLs.
 

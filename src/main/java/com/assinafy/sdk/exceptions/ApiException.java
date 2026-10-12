@@ -13,6 +13,10 @@ package com.assinafy.sdk.exceptions;
  * callers can implement their own backoff. It is left {@code null} on permanent errors (e.g. 400/401) so a
  * caller keying retries on its presence never backs off on a non-retryable failure.</p>
  *
+ * <p>The API's rate-limit headers ({@code X-Rate-Limit-Limit}, {@code X-Rate-Limit-Remaining},
+ * {@code X-Rate-Limit-Reset}) are captured whenever the failed response carries them, so a 429 can be inspected
+ * through {@link #getRateLimitLimit()}, {@link #getRateLimitRemaining()}, and {@link #getRateLimitReset()}.</p>
+ *
  * <p>OAuth failures additionally populate {@link #getOAuthError()}, and an {@code insufficient_scope}
  * rejection also populates {@link #getRequiredScope()}, so an application can branch on the machine-readable
  * code instead of re-parsing the response body or the {@code WWW-Authenticate} header.</p>
@@ -27,6 +31,12 @@ public class ApiException extends AssinafyException {
     private final String responseBody;
     /** Server-suggested retry delay in seconds, or {@code null}. */
     private Integer retryAfterSeconds;
+    /** {@code X-Rate-Limit-Limit} header value, or {@code null}. */
+    private Integer rateLimitLimit;
+    /** {@code X-Rate-Limit-Remaining} header value, or {@code null}. */
+    private Integer rateLimitRemaining;
+    /** {@code X-Rate-Limit-Reset} header value, or {@code null}. */
+    private Integer rateLimitReset;
     /** RFC 6749 error code, or {@code null}. */
     private String oauthError;
     /** Scope named by an {@code insufficient_scope} challenge, or {@code null}. */
@@ -91,6 +101,49 @@ public class ApiException extends AssinafyException {
      */
     public ApiException withRetryAfterSeconds(Integer retryAfterSeconds) {
         this.retryAfterSeconds = retryAfterSeconds;
+        return this;
+    }
+
+    /**
+     * Requests allowed in the current rate-limit window, from the {@code X-Rate-Limit-Limit} header.
+     *
+     * @return request allowance per window, or {@code null} when the response carried no such header
+     */
+    public Integer getRateLimitLimit() {
+        return rateLimitLimit;
+    }
+
+    /**
+     * Requests left in the current rate-limit window, from the {@code X-Rate-Limit-Remaining} header. A 429
+     * reports {@code 0}.
+     *
+     * @return remaining requests, or {@code null} when the response carried no such header
+     */
+    public Integer getRateLimitRemaining() {
+        return rateLimitRemaining;
+    }
+
+    /**
+     * Seconds until the current rate-limit window resets, from the {@code X-Rate-Limit-Reset} header.
+     *
+     * @return seconds until the window resets, or {@code null} when the response carried no such header
+     */
+    public Integer getRateLimitReset() {
+        return rateLimitReset;
+    }
+
+    /**
+     * Attaches the rate-limit header values for fluent throw-site usage.
+     *
+     * @param limit {@code X-Rate-Limit-Limit} value, or {@code null}
+     * @param remaining {@code X-Rate-Limit-Remaining} value, or {@code null}
+     * @param reset {@code X-Rate-Limit-Reset} value, or {@code null}
+     * @return this exception
+     */
+    public ApiException withRateLimit(Integer limit, Integer remaining, Integer reset) {
+        this.rateLimitLimit = limit;
+        this.rateLimitRemaining = remaining;
+        this.rateLimitReset = reset;
         return this;
     }
 

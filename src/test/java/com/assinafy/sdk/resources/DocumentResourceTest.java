@@ -6,6 +6,7 @@ import com.assinafy.sdk.models.DocumentListItem;
 import com.assinafy.sdk.models.DocumentVerification;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.SigningProgress;
+import com.assinafy.sdk.models.SendTokenResult;
 import com.assinafy.sdk.models.TemplateSigner;
 import com.assinafy.sdk.models.TemplateEditorField;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -393,6 +394,17 @@ class DocumentResourceTest {
     }
 
     @Test
+    void estimateTemplateCost_sendsOnlyRoleAndChannels() throws Exception {
+        server.enqueue(okJson(Map.of("has_sufficient_resources", true)));
+
+        resource.estimateCostFromTemplate("template-1", List.of(new TemplateSigner("role-1", "signer-1")
+                .setVerificationMethod("Email").setNotificationMethods(List.of("Email")).setStep(2)));
+
+        assertThat(server.takeRequest().getBody().readUtf8()).isEqualTo("{\"signers\":[{\"role_id\":\"role-1\","
+                + "\"verification_method\":\"Email\",\"notification_methods\":[\"Email\"]}]}");
+    }
+
+    @Test
     void documentTagMethodsUseDocumentedEndpoints() throws Exception {
         server.enqueue(okJson(List.of(Map.of("id", "tag-1", "name", "Contracts"))));
         server.enqueue(okJson(List.of(Map.of("id", "tag-2", "name", "Urgent"))));
@@ -702,6 +714,34 @@ class DocumentResourceTest {
         String body = req.getBody().readUtf8();
         assertThat(body).contains("\"recipient\":\"signer@example.com\"");
         assertThat(body).contains("\"channel\":\"email\"");
+    }
+
+    @Test
+    void sendTokenByEmail_returnsDeliveryData() throws Exception {
+        server.enqueue(okJson(Map.of("document", Map.of("resource", "document", "id", "doc-1", "name", "c.pdf",
+                "page_count", 2, "created_by", "Owner"), "channel", "email", "recipient", "signer@example.com")));
+
+        SendTokenResult result = resource.sendTokenByEmail("doc-1", "signer@example.com");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PUT");
+        assertThat(req.getPath()).isEqualTo("/public/documents/doc-1/send-token");
+        assertThat(req.getBody().readUtf8())
+                .isEqualTo("{\"channel\":\"email\",\"recipient\":\"signer@example.com\"}");
+        assertThat(result.getChannel()).isEqualTo("email");
+        assertThat(result.getRecipient()).isEqualTo("signer@example.com");
+        assertThat(result.getDocument().getId()).isEqualTo("doc-1");
+        assertThat(result.getDocument().getPageCount()).isEqualTo("2");
+        assertThat(result.getDocument().getCreatedBy()).isEqualTo("Owner");
+    }
+
+    @Test
+    void sendTokenByEmail_requiresSignerEmail() {
+        assertThatThrownBy(() -> resource.sendTokenByEmail("doc-1", "+5548999990000"))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> resource.sendTokenByEmail("doc-1", null))
+                .isInstanceOf(ValidationException.class);
+        assertThat(server.getRequestCount()).isZero();
     }
 
     @Test

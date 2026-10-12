@@ -18,8 +18,10 @@ import java.util.Map;
 /**
  * Endpoints accessed by a signer using a short-lived {@code signer-access-code}.
  *
- * <p>These endpoints intentionally do not require the account-level API key. They are
- * authorised via the {@code signer-access-code} query parameter delivered to the signer.</p>
+ * <p>Every method taking a signer access code rejects a {@code null} or blank code and sends the code alone
+ * as the {@code signer-access-code} query parameter; the client's API key or bearer token never travels with
+ * it. The routes that also accept workspace credentials are reached only through the explicit
+ * {@code ...AsWorkspace} methods.</p>
  */
 public final class SignerSelfResource extends BaseResource {
 
@@ -183,48 +185,86 @@ public final class SignerSelfResource extends BaseResource {
     }
 
     /**
-     * {@code GET /signers/{signer_id}/documents}.
+     * {@code GET /signers/{signer_id}/documents} as the signer.
      *
      * @param signerId required signer identifier
      * @param signerAccessCode required signer access code
-     * @return first page of documents waiting for the signer
+     * @return first page of the signer's documents
      */
     public PaginatedResult<DocumentDetails> listDocuments(String signerId, String signerAccessCode) {
         return listDocuments(signerId, signerAccessCode, null);
     }
 
     /**
-     * {@code GET /signers/{signer_id}/documents} with pagination ({@code page}, {@code per-page}). To search by
-     * term, use {@link #searchDocuments(String, String, String)} instead — this route does not filter by search.
+     * {@code GET /signers/{signer_id}/documents} as the signer, with pagination ({@code page}, {@code per-page}).
+     * Only the access code authenticates the request; workspace credentials are withheld. Response
+     * {@code data}: an array of documents, with pagination in the {@code X-Pagination-*} headers. To search by
+     * term, use {@link #searchDocuments(String, String, String)}.
      *
      * @param signerId required signer identifier
      * @param signerAccessCode required signer access code
      * @param params optional pagination values
-     * @return page of documents waiting for the signer
+     * @return page of the signer's documents
+     * @throws ValidationException when the access code is absent or blank
      */
     public PaginatedResult<DocumentDetails> listDocuments(String signerId, String signerAccessCode,
             Map<String, String> params) {
-        String sid = requireId(signerId, "Signer ID");
-        Map<String, String> query = new LinkedHashMap<>(params != null ? params : Map.of());
-        query.putAll(signerAccessCodeQuery(signerAccessCode));
-        return httpGetList("/signers/" + sid + "/documents", query, DocumentDetails.class);
+        return signerDocuments(signerId, params, signerAccessCodeQuery(signerAccessCode));
     }
 
     /**
-     * {@code GET /signers/{signer_id}/documents/search} — search the documents waiting for the signer by term.
-     * The {@code signer-access-code} is the required query parameter; {@code searchTerm} is passed as
-     * {@code search} when non-blank.
+     * {@code GET /signers/{signer_id}/documents} with the workspace's own credentials (API key or bearer token).
+     * The signer must belong to the workspace. Accepts pagination ({@code page}, {@code per-page}).
+     *
+     * @param signerId required signer identifier
+     * @param params optional pagination values
+     * @return page of the signer's documents
+     */
+    public PaginatedResult<DocumentDetails> listDocumentsAsWorkspace(String signerId, Map<String, String> params) {
+        return signerDocuments(signerId, params, Map.of());
+    }
+
+    /**
+     * {@code GET /signers/{signer_id}/documents/search} as the signer — search the signer's documents by term.
+     * Only the access code authenticates the request; {@code searchTerm} is sent as {@code search} when
+     * non-blank. Response {@code data}: an array of compact documents.
      *
      * @param signerId required signer identifier
      * @param signerAccessCode required signer access code
      * @param searchTerm optional search term
      * @return matching document page
+     * @throws ValidationException when the access code is absent or blank
      */
     public PaginatedResult<DocumentDetails> searchDocuments(String signerId, String signerAccessCode,
             String searchTerm) {
+        return searchSignerDocuments(signerId, searchTerm, signerAccessCodeQuery(signerAccessCode));
+    }
+
+    /**
+     * {@code GET /signers/{signer_id}/documents/search} with the workspace's own credentials (API key or bearer
+     * token). The signer must belong to the workspace; {@code searchTerm} is sent as {@code search} when
+     * non-blank.
+     *
+     * @param signerId required signer identifier
+     * @param searchTerm optional search term
+     * @return matching document page
+     */
+    public PaginatedResult<DocumentDetails> searchDocumentsAsWorkspace(String signerId, String searchTerm) {
+        return searchSignerDocuments(signerId, searchTerm, Map.of());
+    }
+
+    private PaginatedResult<DocumentDetails> signerDocuments(String signerId, Map<String, String> params,
+            Map<String, String> auth) {
         String sid = requireId(signerId, "Signer ID");
-        Map<String, String> query = new LinkedHashMap<>();
-        query.putAll(signerAccessCodeQuery(signerAccessCode));
+        Map<String, String> query = new LinkedHashMap<>(params != null ? params : Map.of());
+        query.putAll(auth);
+        return httpGetList("/signers/" + sid + "/documents", query, DocumentDetails.class);
+    }
+
+    private PaginatedResult<DocumentDetails> searchSignerDocuments(String signerId, String searchTerm,
+            Map<String, String> auth) {
+        String sid = requireId(signerId, "Signer ID");
+        Map<String, String> query = new LinkedHashMap<>(auth);
         if (searchTerm != null && !searchTerm.isBlank()) {
             query.put("search", searchTerm);
         }
@@ -248,13 +288,11 @@ public final class SignerSelfResource extends BaseResource {
      *
      * @param signerAccessCode required signer access code
      * @param documentIds one or more document identifiers
-     * @param declineReason required decline reason
+     * @param declineReason required decline reason, at most 2000 characters
      */
     public void declineMultiple(String signerAccessCode, List<String> documentIds, String declineReason) {
         requireDocumentIds(documentIds);
-        if (declineReason == null || declineReason.isBlank()) {
-            throw new ValidationException("Decline reason is required");
-        }
+        requireDeclineReason(declineReason);
         Map<String, Object> body = Map.of(
                 "document_ids", documentIds,
                 "decline_reason", declineReason

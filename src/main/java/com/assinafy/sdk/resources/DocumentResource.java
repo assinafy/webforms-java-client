@@ -9,6 +9,7 @@ import com.assinafy.sdk.models.DocumentListItem;
 import com.assinafy.sdk.models.DocumentStatus;
 import com.assinafy.sdk.models.DocumentVerification;
 import com.assinafy.sdk.models.PaginatedResult;
+import com.assinafy.sdk.models.SendTokenResult;
 import com.assinafy.sdk.models.SigningProgress;
 import com.assinafy.sdk.models.Signer;
 import com.assinafy.sdk.models.Tag;
@@ -475,8 +476,21 @@ public final class DocumentResource extends BaseResource {
         String tmplId = requireId(templateId, "Template ID");
         String accId = accountId(accountId);
         validateTemplateSigners(signers, false);
+        // The estimate prices roles and channels only: each item is {role_id, verification_method,
+        // notification_methods}; signer IDs and steps belong to document creation.
+        List<Map<String, Object>> priced = signers.stream().map(signer -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("role_id", signer.getRoleId());
+            if (signer.getVerificationMethod() != null) {
+                item.put("verification_method", signer.getVerificationMethod());
+            }
+            if (signer.getNotificationMethods() != null) {
+                item.put("notification_methods", signer.getNotificationMethods());
+            }
+            return item;
+        }).toList();
         return httpPost("/accounts/" + accId + "/templates/" + tmplId + "/documents/estimate-cost",
-                Map.of("signers", signers), CostEstimate.class, Map.of());
+                Map.of("signers", priced), CostEstimate.class, Map.of());
     }
 
     /**
@@ -518,30 +532,40 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
-     * {@code PUT /public/documents/{document_id}/send-token} — request that a fresh signing token be sent to a
-     * signer. Unauthenticated endpoint used by signer landing pages.
+     * {@code PUT /public/documents/{document_id}/send-token} — email a fresh signing access token to a signer.
+     * Unauthenticated endpoint used by signer landing pages; the document must be in {@code pending_signature}
+     * status.
      *
-     * <p>The request body is {@code {"recipient": ..., "channel": ...}}, where {@code channel} is {@code "email"}
-     * and {@code recipient} is the target email address. The target document must be in
-     * {@code pending_signature} status. The success envelope's {@code data} payload ({@code document},
-     * {@code channel}, {@code recipient}) is discarded.</p>
+     * <p>Request body: {@code {"channel": "email", "recipient": "signer@example.com"}}, both required. Response
+     * {@code data}: {@code {"document": {"resource", "id", "name", "page_count", "created_by"}, "channel",
+     * "recipient"}}.</p>
      *
      * @param documentId required pending-signature document identifier
-     * @param recipient required email address
+     * @param recipient required signer email address
+     * @return delivery confirmation with the public document summary
+     */
+    public SendTokenResult sendTokenByEmail(String documentId, String recipient) {
+        String id = requireId(documentId, "Document ID");
+        requireEmail(recipient, "Recipient");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("channel", "email");
+        body.put("recipient", recipient);
+        return httpPut("/public/documents/" + id + "/send-token", body, SendTokenResult.class);
+    }
+
+    /**
+     * {@code PUT /public/documents/{document_id}/send-token} with an explicit channel. {@code email} is the only
+     * channel the endpoint accepts; use {@link #sendTokenByEmail(String, String)} to receive the response data.
+     *
+     * @param documentId required pending-signature document identifier
+     * @param recipient required signer email address
      * @param channel required {@code email}
      */
     public void sendToken(String documentId, String recipient, String channel) {
-        String id = requireId(documentId, "Document ID");
-        if (recipient == null || recipient.isBlank()) {
-            throw new ValidationException("Recipient is required");
-        }
         if (!"email".equals(channel)) {
             throw new ValidationException("Channel must be 'email'");
         }
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("recipient", recipient);
-        body.put("channel", channel);
-        httpPutVoid("/public/documents/" + id + "/send-token", body, Map.of());
+        sendTokenByEmail(documentId, recipient);
     }
 
     /**

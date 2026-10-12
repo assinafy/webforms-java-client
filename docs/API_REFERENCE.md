@@ -36,7 +36,11 @@ Set an API key with `AssinafyClientOptions.setApiKey`; it is sent as `X-Api-Key`
 `setToken` is sent as `Authorization: Bearer <token>`. Account-scoped overloads use the explicit `accountId`
 when supplied and otherwise use `AssinafyClientOptions.accountId`.
 
-Signer-facing methods take a `signerAccessCode` and send it as the `signer-access-code` query parameter. The
+Signer-facing methods take a `signerAccessCode` and send it as the `signer-access-code` query parameter. A
+`null` or blank code is rejected before any request, and a request carrying the code never also carries the
+client's API key or bearer token. Routes that accept either a signer code or workspace credentials have separate
+`...AsWorkspace` methods for the workspace form: `signerSelf.listDocumentsAsWorkspace`,
+`signerSelf.searchDocumentsAsWorkspace`, `fields.validateAsWorkspace`, and `fields.validateMultipleAsWorkspace`. The
 document verification, public-document lookup/token, and signer artifact download routes are public. The four
 password/social-login entry points are also usable before authentication, as are the three OAuth endpoints that
 precede a token.
@@ -64,11 +68,14 @@ Successful JSON endpoints return:
 
 The SDK returns only `data`. It raises `ApiException` when the HTTP response is not successful or when the
 logical envelope `status` is `400` or greater, including an error envelope carried by HTTP 200. `ApiException`
-exposes the status, response body, and rate-limit retry hint. Resource, client, payload, and typed record
+exposes the status, response body, rate-limit headers, and retry hint. Resource, client, payload, and typed record
 validation raises `ValidationException`. Transport failures raise `NetworkException`.
 
 Use `ApiException.getStatusCode()`, `getResponseBody()`, and `getRetryAfterSeconds()` for diagnostics and
-caller-managed backoff. `getOAuthError()` carries the RFC 6749 error code of an OAuth failure, read from a flat
+caller-managed backoff. `getRateLimitLimit()`, `getRateLimitRemaining()`, and `getRateLimitReset()` carry the
+`X-Rate-Limit-Limit`, `X-Rate-Limit-Remaining`, and `X-Rate-Limit-Reset` headers of the failed response (`null`
+when absent). Past the limit the API answers 429 with `Retry-After` in seconds, surfaced by
+`getRetryAfterSeconds()`. `getOAuthError()` carries the RFC 6749 error code of an OAuth failure, read from a flat
 `{ "error": string, "error_description": string }` body or from a `WWW-Authenticate` challenge; on an
 `insufficient_scope` rejection `getRequiredScope()` names the scope to reconnect with.
 `ValidationException.getErrors()` returns structured validation details when present.
@@ -124,14 +131,14 @@ null to clear a value.
 | API-key creation | `{ "password": string* }` |
 | Document rename | `{ "name": string* }`, maximum 255 characters |
 | Document tag replace/append | `{ "tags": [tagId, ...] }` |
-| Public token | `{ "recipient": string*, "channel": "email"* }` |
+| Public token | `{ "channel": "email"*, "recipient": signer-email* }` |
 | `CreateSignerPayload` | `{ "full_name": string*, "email": string?, "whatsapp_phone_number": E.164?, "government_id": CPF? }` |
 | `UpdateSignerPayload` | Any non-empty subset of `full_name`, `email`, `whatsapp_phone_number`, `government_id` (CPF/CNPJ) |
-| Assignment expiration | `{ "expires_at": ISO-8601 date-time }` |
-| Assignment decline | `{ "decline_reason": string* }` |
+| Assignment expiration | `{ "expires_at": ISO-8601 date-time\|null* }`; `clearExpiration` sends `null` to remove the expiration |
+| Assignment decline | `{ "decline_reason": string* }`, at most 2000 characters |
 | `AssignmentSignEntry[]` | `[{ "itemId": string*, "fieldId": string*, "pageId": string*, "value": string* }, ...]` |
 | Multi-sign | `{ "document_ids": [string, ...]* }` |
-| Multi-decline | `{ "document_ids": [string, ...]*, "decline_reason": string* }` |
+| Multi-decline | `{ "document_ids": [string, ...]*, "decline_reason": string* }`, reason at most 2000 characters |
 | Signer verification | `{ "verification-code": string* }` |
 | `ConfirmSignerDataPayload` | Any of `full_name`, `email`, `government_id` |
 | `CreateFieldPayload` | `{ "type": string*, "name": string*, "regex": string\|null?, "is_required": boolean? }` |
@@ -209,8 +216,9 @@ CreateAssignmentPayload collect = new CreateAssignmentPayload()
 ```
 
 The estimate endpoint accepts `method`, `signers`, and `entries` pricing inputs. A virtual estimate requires
-non-empty `signers`; a collect estimate requires non-empty `signers` and `entries`.
-Signer IDs within estimate signer entries are optional. Invitation-only `message`, `expires_at`, and `copy_receivers` are not part of that contract.
+non-empty `signers`; a collect estimate requires non-empty `signers` and `entries`. Each estimate signer is sent
+as `{ "verification_method", "notification_methods" }`; signer `id`, `step`, `message`, `expires_at`, and
+`copy_receivers` belong to creation and are not sent.
 
 Verification and notification are coupled. If neither is supplied both default to `Email`; supplying only one
 lets the API infer the other. `Email` verification pairs with `Email`, `Whatsapp` with `Whatsapp`, and
@@ -336,8 +344,8 @@ Use `signEntries(..., List.of(new AssignmentSignEntry(itemId, fieldId, pageId, v
 }
 ```
 
-Creation requires `role_id` and `id` for each signer role. Estimation requires only `role_id`; it also accepts
-verification and notification methods for pricing. Template default tags are always applied and `tags` are
+Creation requires `role_id` and `id` for each signer role. Estimation sends each signer as
+`{ "role_id"*, "verification_method", "notification_methods" }`; signer `id` and `step` are not sent. Template default tags are always applied and `tags` are
 merged on top. Use `new TemplateEditorField(fieldId, value)` with `setTemplateEditorFields`; the untyped
 `setEditorFields(List<?>)` overload remains available for raw maps.
 
@@ -456,7 +464,8 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `FieldValidationResult` | Single: `type`, `success`, `error_message`; multiple also includes `field_id` |
 | `Tag` | `resource`, `id`, `name`, `color?`, `created_at`, `updated_at` |
 | `TemplateDetails` / Template | `resource`, `id`, `name`, `document_name?`, `message?`, `status`, `pages[]`, `roles[]`, `tags[]`, `default_document_tags[]`, `created_at`, `updated_at`; SDK also reads contextual `account_id` |
-| `TemplateListItem` | `resource`, `id`, `account_id?`, `name`, `document_name?`, `message?`, `status`, `pages[]`, `roles[]`, `tags[]`, `created_at`, `updated_at` |
+| `TemplateListItem` | `resource`, `id`, `account_id?`, `name`, `document_name?`, `message?`, `status`, `pages[]`, `roles[]`, `tags[]`, `default_document_tags[]`, `created_at`, `updated_at` |
+| `SendTokenResult` | `document` (`resource`, `id`, `name`, `page_count`, `created_by`), `channel`, `recipient` |
 | `TemplatePage` | `id`, `number`, `height`, `width`, `download_url`, `fields[]` |
 | `TemplateFieldPlacement` | `id`, `field_id`, `role_id`, `label`, `display_settings`, `created_at`, `updated_at` |
 | `TemplateRole` | `id`, `name`, `assignment_type`, `created_at`, `updated_at` |
@@ -570,8 +579,8 @@ documented error codes; the platform may additionally return global transport st
 | **GET** `/accounts/{accountId}/fields/{fieldId}` | `fields.get(fieldId[, accountId])` | — | `FieldDefinition` | 200, 401, 404, 500 |
 | **PUT** `/accounts/{accountId}/fields/{fieldId}` | `fields.update(fieldId, payload[, accountId])` | `UpdateFieldPayload` | `FieldDefinition` | 200, 401, 404, 500 |
 | **DELETE** `/accounts/{accountId}/fields/{fieldId}` | `fields.delete(fieldId[, accountId])` | — | `void` | 200, 401, 404, 500 |
-| **POST** `/accounts/{accountId}/fields/{fieldId}/validate` | `fields.validate(fieldId, value)` | Single validation | `FieldValidationResult` | 200, 401, 500 |
-| **POST** `/accounts/{accountId}/fields/validate-multiple` | `fields.validateMultiple(values)` | `FieldValidationPayload[]` | `List<FieldValidationResult>` | 200, 401, 500 |
+| **POST** `/accounts/{accountId}/fields/{fieldId}/validate` | `fields.validateAsWorkspace(fieldId, value[, accountId])`; signer form `fields.validate(fieldId, value, signerAccessCode[, accountId])` | Single validation | `FieldValidationResult` | 200, 401, 500 |
+| **POST** `/accounts/{accountId}/fields/validate-multiple` | `fields.validateMultipleAsWorkspace(values[, accountId])`; signer form `fields.validateMultiple(values, signerAccessCode[, accountId])` | `FieldValidationPayload[]` | `List<FieldValidationResult>` | 200, 401, 500 |
 | **GET** `/field-types` | `fields.listTypes()` | — | `List<FieldTypeInfo>` | 200, 401, 500 |
 
 ### OAuth — 4 operations
@@ -610,7 +619,7 @@ intended application policy; it does not update an existing signer.
 | Operation | SDK method | Request | Return | Statuses |
 |---|---|---|---|---|
 | **GET** `/public/documents/{documentId}` | `documents.getPublic(documentId)` | — | Public `DocumentDetails` | 200, 404, 500 |
-| **PUT** `/public/documents/{documentId}/send-token` | `documents.sendToken(documentId, recipient, channel)` | Public token | `void` | 200, 400, 500 |
+| **PUT** `/public/documents/{documentId}/send-token` | `documents.sendTokenByEmail(documentId, recipient)`; `documents.sendToken(documentId, recipient, "email")` returns `void` | Public token | `SendTokenResult` | 200, 400, 404, 500 |
 | **GET** `/signers/self` | `signerSelf.getSelf(signerAccessCode)` | Signer access code | `Signer` | 200, 401, 500 |
 | **GET** `/signers/{signerId}/document` | `signerSelf.getCurrentDocument(signerId, signerAccessCode)` | Signer access code | `DocumentDetails` | 200, 401, 404, 500 |
 | **GET** `/sign` | `signerSelf.getSign(signerAccessCode[, hasAcceptedTerms])` | Signer access code; optional flag | `DocumentDetails` | 200, 400, 401, 409, 500 |
@@ -623,8 +632,8 @@ intended application policy; it does not update an existing signer.
 | **PUT** `/signers/accept-terms` | `signerSelf.acceptTerms(signerAccessCode)` | Signer access code | `AcceptTermsResponse` or null | 200, 401, 500 |
 | **POST** `/signature` | `signerSelf.uploadSignature(signerAccessCode, bytes, type[, reuse])` | Raw PNG + query | `void` | 200, 401, 500 |
 | **GET** `/signature/{signatureType}` | `signerSelf.downloadSignature(signerAccessCode, type)` | Signer access code | Raw `byte[]` | 200, 401, 404, 500 |
-| **GET** `/signers/{signerId}/documents` | `signerSelf.listDocuments(signerId, signerAccessCode[, params])` | Signer access code, pagination | `PaginatedResult<DocumentDetails>` | 200, 401, 500 |
-| **GET** `/signers/{signerId}/documents/search` | `signerSelf.searchDocuments(signerId, signerAccessCode, search)` | Signer access code, search | `PaginatedResult<DocumentDetails>` | 200, 401, 500 |
+| **GET** `/signers/{signerId}/documents` | `signerSelf.listDocuments(signerId, signerAccessCode[, params])`; workspace form `signerSelf.listDocumentsAsWorkspace(signerId, params)` | Signer access code or workspace credentials, pagination | `PaginatedResult<DocumentDetails>` | 200, 401, 500 |
+| **GET** `/signers/{signerId}/documents/search` | `signerSelf.searchDocuments(signerId, signerAccessCode, search)`; workspace form `signerSelf.searchDocumentsAsWorkspace(signerId, search)` | Signer access code or workspace credentials, search | `PaginatedResult<DocumentDetails>` | 200, 401, 500 |
 | **GET** `/signers/{signerId}/documents/{documentId}/download/{artifactName}` | `signerSelf.downloadDocument(signerId, documentId, artifactName)` | — | Raw `byte[]` | 200, 404, 500 |
 
 ### Tags — 4 operations
@@ -689,7 +698,7 @@ These public methods compose official operations, provide typed aliases, or expo
 | `assignments.signEntries(...)` | Type-safe collect submission using `AssignmentSignEntry`; delegates to `sign(...)` |
 | `signers.findByEmail(email[, accountId])` | Searches every reported page (100 candidates per page) and returns an exact case-insensitive email match or null |
 | `signers.findOrCreate(payload[, accountId])` | Reuses an exact email match when email is supplied; otherwise creates; re-queries after duplicate-email 400/409 races |
-| Field validation overloads with `signerAccessCode` | Add a `signer-access-code` query parameter to single or multiple validation requests |
+| Field validation overloads with `signerAccessCode` | Send the required `signer-access-code` query parameter, without workspace credentials, on single or multiple validation requests |
 | `signerSelf.uploadSignature(...)` with JPEG bytes | Detects JPEG input and sends `image/jpeg`; the official operation documents PNG |
 | `signerSelf.downloadDocument(..., signerAccessCode)` | Adds `signer-access-code` to the signer artifact request |
 | `CreateFieldPayload.setActive`, `UpdateFieldPayload.setType/setRequired` | Additional field request properties |

@@ -189,9 +189,10 @@ List<FieldTypeInfo> tipos = client.fields.listTypes();
 client.fields.delete(referencia.getId());
 
 // Valida um valor contra o tipo/regex do campo antes de submetê-lo.
-FieldValidationResult check = client.fields.validate(referencia.getId(), "ABC-123");
-List<FieldValidationResult> checks = client.fields.validateMultiple(List.of(
+FieldValidationResult check = client.fields.validateAsWorkspace(referencia.getId(), "ABC-123");
+List<FieldValidationResult> checks = client.fields.validateMultipleAsWorkspace(List.of(
     new FieldValidationPayload(referencia.getId(), "ABC-123")));
+// Durante a assinatura, use validate(..., signerAccessCode): só o código autentica a requisição.
 ```
 
 ---
@@ -490,8 +491,8 @@ uma visão não autenticada do documento e um pedido de reenvio do token de aces
 AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
 DocumentDetails infoPublica = publicClient.documents.getPublic(doc.getId());
 
-// O documento precisa estar em pending_signature. channel é "email".
-publicClient.documents.sendToken(doc.getId(), "signatario@example.com", "email");
+// O documento precisa estar em pending_signature. O token vai por e-mail ao signatário.
+SendTokenResult envio = publicClient.documents.sendTokenByEmail(doc.getId(), "signatario@example.com");
 ```
 
 ---
@@ -801,6 +802,7 @@ try {
     // A API recusou. getResponseBody() guarda o JSON de erro completo.
     System.err.println("Erro de API " + e.getStatusCode() + ": " + e.getMessage());
     Integer backoff = e.getRetryAfterSeconds(); // preenchido só em 429/503 repetíveis
+    Integer restantes = e.getRateLimitRemaining(); // X-Rate-Limit-Remaining, quando presente
     String oauthError = e.getOAuthError();      // código RFC 6749 em falha de OAuth; veja a seção 11
 } catch (NetworkException e) {
     // Falha de transporte, ou um corpo de resposta que não pôde ser lido.

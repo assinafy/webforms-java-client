@@ -551,8 +551,10 @@ Response `data`:
 ### Send signing token — `PUT /public/documents/{document_id}/send-token`
 
 ```java
-client.documents.sendToken(documentId, "signer@example.com", "email");
-// Request: { "recipient": "signer@example.com", "channel": "email" }
+SendTokenResult sent = client.documents.sendTokenByEmail(documentId, "signer@example.com");
+// Request: { "channel": "email", "recipient": "signer@example.com" }
+// Response data: { "document": { "resource": "document", "id": "<id>", "name": "contract.pdf",
+//   "page_count": 2, "created_by": "Owner" }, "channel": "email", "recipient": "signer@example.com" }
 ```
 
 `channel` is `email` and `recipient` is the target email address. The document must
@@ -918,10 +920,11 @@ List<FieldTypeInfo> fieldTypes = client.fields.listTypes();              // GET 
 Validate — `POST /accounts/{account_id}/fields/{field_id}/validate` (body `{ "value": ... }`):
 
 ```java
-FieldValidationResult validation = client.fields.validate(field.getId(), "ABC-123");
+FieldValidationResult validation = client.fields.validateAsWorkspace(field.getId(), "ABC-123");
+// As a signer: client.fields.validate(field.getId(), "ABC-123", signerAccessCode) sends only the code.
 // Response data: { "type": "text", "success": true, "error_message": "" }
 
-List<FieldValidationResult> results = client.fields.validateMultiple(List.of(
+List<FieldValidationResult> results = client.fields.validateMultipleAsWorkspace(List.of(
     new FieldValidationPayload(field.getId(), "ABC-123")));
 // Request: [ { "field_id": "<id>", "value": "ABC-123" } ]
 // Response data: [ { "field_id": "<id>", "type": "text", "success": true, "error_message": "" } ]
@@ -1002,6 +1005,10 @@ PaginatedResult<DocumentDetails> mine = client.signerSelf.listDocuments(
 // GET /signers/{id}/documents/search — search the signer's documents by term
 PaginatedResult<DocumentDetails> found = client.signerSelf.searchDocuments(signerId, signerAccessCode, "invoice");
 
+// The same two routes with the workspace's API key or bearer token (the signer must belong to the workspace)
+PaginatedResult<DocumentDetails> asWorkspace = client.signerSelf.listDocumentsAsWorkspace(signerId, Map.of());
+PaginatedResult<DocumentDetails> foundAsWorkspace = client.signerSelf.searchDocumentsAsWorkspace(signerId, "invoice");
+
 // GET /signers/{id}/documents/{docId}/download/{artifact}
 // This artifact route is public in the current API contract.
 byte[] copy = client.signerSelf.downloadDocument(signerId, documentId, "pades");
@@ -1060,6 +1067,9 @@ try {
         // or insufficient_scope — in which case getRequiredScope() names the scope to reconnect with.
         System.err.println("OAuth " + e.getOAuthError() + " scope=" + e.getRequiredScope());
     }
+    // X-Rate-Limit-Limit / -Remaining / -Reset of the failed response, or null when absent.
+    System.err.println("Rate limit " + e.getRateLimitRemaining() + "/" + e.getRateLimitLimit()
+            + ", resets in " + e.getRateLimitReset() + "s");
     if (e.getStatusCode() == 429 && e.getRetryAfterSeconds() != null) {
         try {
             Thread.sleep(e.getRetryAfterSeconds() * 1000L); // honor Retry-After, or set options.maxRetries

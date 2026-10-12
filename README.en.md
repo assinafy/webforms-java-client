@@ -183,9 +183,10 @@ List<FieldTypeInfo> fieldTypes = client.fields.listTypes();
 client.fields.delete(reference.getId());
 
 // Validate a value against a field's type/regex rules before submitting it.
-FieldValidationResult check = client.fields.validate(reference.getId(), "ABC-123");
-List<FieldValidationResult> checks = client.fields.validateMultiple(List.of(
+FieldValidationResult check = client.fields.validateAsWorkspace(reference.getId(), "ABC-123");
+List<FieldValidationResult> checks = client.fields.validateMultipleAsWorkspace(List.of(
     new FieldValidationPayload(reference.getId(), "ABC-123")));
+// While signing, use validate(..., signerAccessCode): the code alone authenticates the request.
 ```
 
 ---
@@ -468,8 +469,8 @@ view, and a request to re-send the one-time access token:
 AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
 DocumentDetails publicInfo = publicClient.documents.getPublic(doc.getId());
 
-// The document must be in pending_signature. channel is "email".
-publicClient.documents.sendToken(doc.getId(), "signer@example.com", "email");
+// The document must be in pending_signature. The token goes to the signer by email.
+SendTokenResult sent = publicClient.documents.sendTokenByEmail(doc.getId(), "signer@example.com");
 ```
 
 ---
@@ -765,6 +766,7 @@ try {
     // The API rejected it. getResponseBody() keeps the complete error JSON.
     System.err.println("API error " + e.getStatusCode() + ": " + e.getMessage());
     Integer backoff = e.getRetryAfterSeconds(); // populated only for retryable 429/503
+    Integer remaining = e.getRateLimitRemaining(); // X-Rate-Limit-Remaining, when present
     String oauthError = e.getOAuthError();      // RFC 6749 code on an OAuth failure; see section 11
 } catch (NetworkException e) {
     // Transport failure, or a response body that could not be parsed.

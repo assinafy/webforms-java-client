@@ -250,6 +250,26 @@ class AssignmentResourceTest {
     }
 
     @Test
+    void estimateCost_sendsOnlyPricedSignerChannels() throws Exception {
+        server.enqueue(okJson(Map.of("total_credits", 0)));
+
+        resource.estimateCost("doc-1", new CreateAssignmentPayload().setSigners(List.of(
+                new SignerRef().setId("s1").setStep(2).setVerificationMethod("Email")
+                        .setNotificationMethods(List.of("Email", "Whatsapp")))));
+
+        assertThat(server.takeRequest().getBody().readUtf8()).isEqualTo("{\"method\":\"virtual\",\"signers\":["
+                + "{\"verification_method\":\"Email\",\"notification_methods\":[\"Email\",\"Whatsapp\"]}]}");
+    }
+
+    @Test
+    void decline_rejectsReasonsOverTheLimit() {
+        assertThatThrownBy(() -> resource.decline("d", "a", "code", "x".repeat(2001)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("2000");
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
     void estimateCost_omitsCreateOnlyFields() throws Exception {
         server.enqueue(okJson(Map.of("total_credits", 0)));
 

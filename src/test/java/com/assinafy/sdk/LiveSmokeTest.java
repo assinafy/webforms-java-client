@@ -19,6 +19,7 @@ import com.assinafy.sdk.models.NotificationPreferences;
 import com.assinafy.sdk.models.OAuthProtectedResource;
 import com.assinafy.sdk.models.RegisterWebhookPayload;
 import com.assinafy.sdk.models.Signer;
+import com.assinafy.sdk.models.SendTokenResult;
 import com.assinafy.sdk.models.SignerRef;
 import com.assinafy.sdk.models.Tag;
 import com.assinafy.sdk.models.TemplateListItem;
@@ -295,10 +296,10 @@ class LiveSmokeTest {
             assertThat(created.getId()).isNotBlank();
             assertThat(client.fields.get(created.getId()).getName()).isEqualTo(created.getName());
 
-            FieldValidationResult validation = client.fields.validate(created.getId(), "hello");
+            FieldValidationResult validation = client.fields.validateAsWorkspace(created.getId(), "hello");
             assertThat(validation.getSuccess()).isTrue();
 
-            List<FieldValidationResult> multi = client.fields.validateMultiple(List.of(
+            List<FieldValidationResult> multi = client.fields.validateMultipleAsWorkspace(List.of(
                     new com.assinafy.sdk.models.FieldValidationPayload(created.getId(), "world")));
             assertThat(multi).hasSize(1);
 
@@ -369,7 +370,10 @@ class LiveSmokeTest {
             assertThat(client.assignments.resendNotification(
                     doc.getId(), assignment.getId(), signer.getId()).getSent()).isTrue();
             assertThat(client.documents.getPublic(doc.getId()).getId()).isEqualTo(doc.getId());
-            client.documents.sendToken(doc.getId(), signer.getEmail(), "email");
+            SendTokenResult token = client.documents.sendTokenByEmail(doc.getId(), signer.getEmail());
+            assertThat(token.getChannel()).isEqualTo("email");
+            assertThat(token.getRecipient()).isEqualTo(signer.getEmail());
+            assertThat(token.getDocument().getId()).isEqualTo(doc.getId());
             assertThat(client.documents.activities(doc.getId())).isNotEmpty();
         } finally {
             client.documents.delete(doc.getId());
@@ -776,6 +780,43 @@ class LiveSmokeTest {
         skipUnlessOAuthDeployed(failure);
         assertThat(failure.getStatusCode()).isEqualTo(401);
         assertThat(failure.getOAuthError()).isEqualTo("invalid_client");
+    }
+
+    @Test
+    @Order(37)
+    @DisplayName("Signer documents are reachable with workspace credentials through the explicit methods")
+    void signerDocumentsAsWorkspace() {
+        AssinafyClient client = client();
+        Signer signer = ensureTestSigner(client);
+        assertThat(client.signerSelf.listDocumentsAsWorkspace(signer.getId(), Map.of("per-page", "5")).getData())
+                .isNotNull();
+        assertThat(client.signerSelf.searchDocumentsAsWorkspace(signer.getId(), "sdk").getData()).isNotNull();
+    }
+
+    @Test
+    @Order(38)
+    @DisplayName("A signer access code alone authenticates signer routes; an unknown code is rejected")
+    void unknownSignerAccessCodeIsRejected() {
+        assertThatThrownBy(() -> client().signerSelf.getSelf("sdk-live-unknown-code"))
+                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getStatusCode()).isEqualTo(401));
+    }
+
+    @Test
+    @Order(39)
+    @DisplayName("send-token accepts the email channel body and refuses a document that is not pending")
+    void sendTokenRequiresPendingDocument() throws Exception {
+        AssinafyClient client = client();
+        DocumentDetails doc = client.documents.upload(samplePdf(), "sdk-smoke-token-" + shortId() + ".pdf");
+        try {
+            client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
+            assertThatThrownBy(() -> client.documents.sendTokenByEmail(doc.getId(), "signer@example.com"))
+                    .isInstanceOfSatisfying(ApiException.class, e -> {
+                        assertThat(e.getStatusCode()).isEqualTo(400);
+                        assertThat(e.getRateLimitLimit()).isPositive();
+                    });
+        } finally {
+            client.documents.delete(doc.getId());
+        }
     }
 
     private static Signer ensureTestSigner(AssinafyClient client) {

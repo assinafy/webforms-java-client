@@ -139,7 +139,9 @@ public final class AuthenticationResource extends BaseResource {
     }
 
     /**
-     * {@code POST /authentication/social-login} — exchanges a provider token for an access token.
+     * {@code POST /authentication/social-login} — exchanges a provider token for an access token. Request
+     * body: {@code {"provider": "google", "token", "has_accepted_terms"}}, all required; response {@code data}:
+     * {@code {access_token, user, accounts}}.
      *
      * @param payload required provider, token, and terms-acceptance fields
      * @return authenticated user and access token
@@ -148,7 +150,7 @@ public final class AuthenticationResource extends BaseResource {
         if (payload == null) {
             throw new ValidationException("Social login payload is required");
         }
-        requireValue(payload.getProvider(), "Provider");
+        requireProvider(payload.getProvider());
         requireValue(payload.getToken(), "Provider token");
         if (payload.getHasAcceptedTerms() == null) {
             throw new ValidationException("has_accepted_terms is required");
@@ -163,11 +165,11 @@ public final class AuthenticationResource extends BaseResource {
      * unlike {@link #socialLogin(SocialLoginPayload)}. The success envelope carries no data, so this returns
      * {@code void}. Requires API-key or bearer authentication.</p>
      *
-     * @param provider social provider identifier (e.g. {@code "google"})
+     * @param provider social provider; {@code "google"} is the only one the API accepts
      * @param token token issued by the provider
      */
     public void linkSocialLogin(String provider, String token) {
-        requireValue(provider, "Provider");
+        requireProvider(provider);
         requireValue(token, "Provider token");
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("provider", provider);
@@ -255,6 +257,12 @@ public final class AuthenticationResource extends BaseResource {
         }
         body.put("new_password", newPassword);
         return httpPut("/authentication/reset-password", body, EmailResponse.class);
+    }
+
+    private static void requireProvider(String provider) {
+        if (!"google".equals(provider)) {
+            throw new ValidationException("Provider must be 'google'");
+        }
     }
 
     private static Map<String, Object> reauthentication(String password, String code) {

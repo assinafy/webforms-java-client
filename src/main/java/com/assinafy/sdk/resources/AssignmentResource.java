@@ -74,7 +74,11 @@ public final class AssignmentResource extends BaseResource {
     }
 
     /**
-     * {@code POST /documents/{documentId}/assignments}.
+     * {@code POST /documents/{documentId}/assignments} — request signatures. Request body:
+     * {@code {"method": "virtual"|"collect", "signers": [{"id", "verification_method":
+     * "Email"|"Whatsapp"|"DigitalCertificate", "notification_methods": ["Email"|"Whatsapp"], "step"}],
+     * "entries", "message", "expires_at", "copy_receivers"}}; {@code method} and each signer {@code id} are
+     * required, and {@code collect} also requires {@code entries}. Response {@code data}: the {@link Assignment}.
      *
      * @param documentId required document identifier
      * @param payload required virtual or collect assignment body
@@ -88,7 +92,9 @@ public final class AssignmentResource extends BaseResource {
 
     /**
      * {@code POST /documents/{documentId}/assignments/estimate-cost} — estimate the credit cost of an
-     * assignment without creating it. Inspect {@link CostEstimate#getHasSufficientResources()} and
+     * assignment without creating it. Request body: {@code {"method", "signers": [{"verification_method",
+     * "notification_methods"}], "entries"}} — signer IDs, steps, message, expiration, and copy receivers are
+     * not part of an estimate and are not sent. Inspect {@link CostEstimate#getHasSufficientResources()} and
      * {@link CostEstimate#getBlockingReason()} before creating.
      *
      * @param documentId required document identifier
@@ -137,19 +143,18 @@ public final class AssignmentResource extends BaseResource {
 
     /**
      * {@code PUT /documents/{documentId}/assignments/{assignmentId}/reject} — signer declines the assignment.
+     * Request body: {@code {"decline_reason": "..."}} (required, at most 2000 characters).
      *
      * @param documentId required document identifier
      * @param assignmentId required assignment identifier
      * @param signerAccessCode required signer access code
-     * @param declineReason required decline reason
+     * @param declineReason required decline reason, at most 2000 characters
      */
     public void decline(String documentId, String assignmentId, String signerAccessCode,
             String declineReason) {
         String docId = requireId(documentId, "Document ID");
         String asgId = requireId(assignmentId, "Assignment ID");
-        if (declineReason == null || declineReason.isBlank()) {
-            throw new ValidationException("Decline reason is required");
-        }
+        requireDeclineReason(declineReason);
         httpPutVoid("/documents/" + docId + "/assignments/" + asgId + "/reject",
                 Map.of("decline_reason", declineReason),
                 signerAccessCodeQuery(signerAccessCode));
@@ -285,13 +290,21 @@ public final class AssignmentResource extends BaseResource {
         return body;
     }
 
-    private static Map<String, Object> normaliseSignerRef(SignerRef ref, boolean allowWithoutId) {
+    /**
+     * Builds one wire signer. Creation sends {@code {id, verification_method, notification_methods, step}} and
+     * requires {@code id}; an estimate prices channels only, so it sends {@code {verification_method,
+     * notification_methods}}.
+     */
+    private static Map<String, Object> normaliseSignerRef(SignerRef ref, boolean estimate) {
         if (ref == null) {
             throw new ValidationException("Signer references cannot be null");
         }
         String id = ref.getId();
         Map<String, Object> result = new LinkedHashMap<>();
-        if (id != null && !id.isBlank()) {
+        if (!estimate) {
+            if (id == null || id.isBlank()) {
+                throw new ValidationException("Invalid signer reference: ID is required for this operation");
+            }
             result.put("id", id);
         }
         if (ref.getVerificationMethod() != null) {
@@ -300,11 +313,8 @@ public final class AssignmentResource extends BaseResource {
         if (ref.getNotificationMethods() != null && !ref.getNotificationMethods().isEmpty()) {
             result.put("notification_methods", ref.getNotificationMethods());
         }
-        if (ref.getStep() != null) {
+        if (!estimate && ref.getStep() != null) {
             result.put("step", ref.getStep());
-        }
-        if ((id == null || id.isBlank()) && !allowWithoutId) {
-            throw new ValidationException("Invalid signer reference: ID is required for this operation");
         }
         return result;
     }

@@ -57,6 +57,43 @@ class SignerSelfResourceTest {
     }
 
     @Test
+    void everyAccessCodeMethodRejectsMissingCodeBeforeAnyRequest() {
+        for (String code : new String[]{null, "", " "}) {
+            List<org.assertj.core.api.ThrowableAssert.ThrowingCallable> calls = List.of(
+                    () -> resource.getSelf(code),
+                    () -> resource.getSign(code),
+                    () -> resource.acceptTerms(code),
+                    () -> resource.verifyEmail("123456", code),
+                    () -> resource.confirmSignerData("doc-1", code, new ConfirmSignerDataPayload()),
+                    () -> resource.uploadSignature(code, PNG, "signature"),
+                    () -> resource.downloadSignature(code, "signature"),
+                    () -> resource.getCurrentDocument("signer-1", code),
+                    () -> resource.listDocuments("signer-1", code),
+                    () -> resource.searchDocuments("signer-1", code, "x"),
+                    () -> resource.signMultiple(code, List.of("doc-1")),
+                    () -> resource.declineMultiple(code, List.of("doc-1"), "reason"),
+                    () -> resource.downloadDocument("signer-1", "doc-1", "original", code));
+            for (var call : calls) {
+                assertThatThrownBy(call).isInstanceOf(ValidationException.class)
+                        .hasMessageContaining("Signer access code is required");
+            }
+        }
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void workspaceSignerDocumentMethodsSendNoAccessCode() throws Exception {
+        server.enqueue(okJson(List.of()));
+        server.enqueue(okJson(List.of()));
+
+        resource.listDocumentsAsWorkspace("signer-1", Map.of("page", "2"));
+        resource.searchDocumentsAsWorkspace("signer-1", "contract");
+
+        assertThat(server.takeRequest().getPath()).isEqualTo("/signers/signer-1/documents?page=2");
+        assertThat(server.takeRequest().getPath()).isEqualTo("/signers/signer-1/documents/search?search=contract");
+    }
+
+    @Test
     void getSelf_parsesSignatureReusableFlag() throws Exception {
         server.enqueue(okJson(Map.of("id", "signer-1", "full_name", "Test",
                 "has_signature", true, "has_initial", false, "is_signature_reusable", false)));

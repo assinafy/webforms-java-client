@@ -35,6 +35,7 @@ public abstract class BaseResource {
     private static final Pattern PATH_SEGMENT = Pattern.compile("[A-Za-z0-9._~-]+");
     private static final Pattern CHALLENGE_PARAMETER = Pattern.compile("([A-Za-z_]+)=\"([^\"]*)\"");
     private static final String[] ERROR_MESSAGE_KEYS = {"message", "error_description", "error"};
+    private static final int MAX_DECLINE_REASON_LENGTH = 2000;
 
     /** JSON request-body media type used by resource methods. */
     protected static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
@@ -174,6 +175,20 @@ public abstract class BaseResource {
     protected static void requireValue(String value, String name) {
         if (value == null || value.isBlank()) {
             throw new ValidationException(name + " is required");
+        }
+    }
+
+    /**
+     * Validates a signer's decline reason: required and at most 2000 characters.
+     *
+     * @param declineReason decline reason to validate
+     * @throws ValidationException when the reason is absent, blank, or too long
+     */
+    protected static void requireDeclineReason(String declineReason) {
+        requireValue(declineReason, "Decline reason");
+        if (declineReason.length() > MAX_DECLINE_REASON_LENGTH) {
+            throw new ValidationException(
+                    "Decline reason must be at most " + MAX_DECLINE_REASON_LENGTH + " characters");
         }
     }
 
@@ -703,10 +718,10 @@ public abstract class BaseResource {
     /**
      * Copies the server's response-header hints into the exception.
      *
-     * <p>The retry hint is attached only for retryable statuses (HTTP 429 / 503): the
-     * {@code X-Rate-Limit-Reset} header is present on virtually every response (including successful ones and
-     * permanent 4xx errors), so attaching it unconditionally would wrongly signal that a permanent 400/401 is
-     * worth retrying. Reads {@code Retry-After} first, then falls back to {@code X-Rate-Limit-Reset}; only the
+     * <p>The {@code X-Rate-Limit-*} headers are attached whenever present. The retry hint is attached only
+     * for retryable statuses (HTTP 429 / 503): the {@code X-Rate-Limit-Reset} header is present on virtually
+     * every response (including successful ones and permanent 4xx errors), so attaching it unconditionally as
+     * a retry hint would wrongly signal that a permanent 400/401 is worth retrying. Reads {@code Retry-After} first, then falls back to {@code X-Rate-Limit-Reset}; only the
      * delta-seconds form is surfaced (an HTTP-date {@code Retry-After} is ignored).</p>
      *
      * <p>On a 401/403 the {@code WWW-Authenticate} challenge is parsed for the OAuth error code and, for
@@ -714,6 +729,9 @@ public abstract class BaseResource {
      * the body is the more specific source. Header lookup is case-insensitive (OkHttp).</p>
      */
     private ApiException attachResponseHints(ApiException e, Response response) {
+        e = e.withRateLimit(parseInt(response.header("X-Rate-Limit-Limit")),
+                parseInt(response.header("X-Rate-Limit-Remaining")),
+                parseInt(response.header("X-Rate-Limit-Reset")));
         if (e.getStatusCode() == 429 || e.getStatusCode() == 503) {
             Integer seconds = parseInt(response.header("Retry-After"));
             if (seconds == null) {
@@ -889,7 +907,8 @@ public abstract class BaseResource {
     }
 
     /**
-     * Builds the query map authorizing a signer-facing request with the signer's access code.
+     * Builds the query map authorizing a signer-facing request with the signer's access code. The client sends
+     * no workspace credentials on a request carrying this parameter, so the code alone authenticates it.
      *
      * @param signerAccessCode required signer access code
      * @return single-entry query map keyed by {@link #SIGNER_ACCESS_CODE}
@@ -900,19 +919,6 @@ public abstract class BaseResource {
             throw new ValidationException("Signer access code is required");
         }
         return Map.of(SIGNER_ACCESS_CODE, signerAccessCode);
-    }
-
-    /**
-     * Builds the query map for an endpoint where the signer access code is optional — present when a signer is
-     * acting, absent when the account owner is.
-     *
-     * @param signerAccessCode signer access code, or {@code null}
-     * @return single-entry query map, or an empty map when no access code was supplied
-     */
-    protected Map<String, String> optionalSignerAccessCodeQuery(String signerAccessCode) {
-        return signerAccessCode != null && !signerAccessCode.isBlank()
-                ? Map.of(SIGNER_ACCESS_CODE, signerAccessCode)
-                : Map.of();
     }
 
     /**

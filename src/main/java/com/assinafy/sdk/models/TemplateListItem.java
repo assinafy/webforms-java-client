@@ -32,6 +32,9 @@ public final class TemplateListItem {
     private List<TemplateRole> roles;
     private List<Tag> tags;
 
+    @JsonProperty("default_document_tags")
+    private List<Tag> defaultDocumentTags;
+
     /** Creates an empty template summary for JSON deserialization. */
     public TemplateListItem() {}
 
@@ -190,4 +193,19 @@ public final class TemplateListItem {
      * @param tags template tags
      */
     public void setTags(List<Tag> tags) { this.tags = tags; }
+
+    /**
+     * Returns wire {@code default_document_tags}.
+     *
+     * @return tags copied to documents generated from this template
+     */
+    public List<Tag> getDefaultDocumentTags() { return defaultDocumentTags; }
+    /**
+     * Sets wire {@code default_document_tags}.
+     *
+     * @param defaultDocumentTags tags copied to documents generated from this template
+     */
+    public void setDefaultDocumentTags(List<Tag> defaultDocumentTags) {
+        this.defaultDocumentTags = defaultDocumentTags;
+    }
 }

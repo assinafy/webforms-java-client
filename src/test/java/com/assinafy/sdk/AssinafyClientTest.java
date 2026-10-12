@@ -249,6 +249,70 @@ class AssinafyClientTest {
     }
 
     @Test
+    void rateLimitHeadersAreExposedOn429() throws Exception {
+        MockWebServer server = new MockWebServer();
+        server.start();
+        try {
+            server.enqueue(new MockResponse().setResponseCode(429)
+                    .setBody("{\"status\":429,\"message\":\"Too Many Requests\"}")
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("X-Rate-Limit-Limit", "120")
+                    .setHeader("X-Rate-Limit-Remaining", "0")
+                    .setHeader("X-Rate-Limit-Reset", "42")
+                    .setHeader("Retry-After", "17"));
+            AssinafyClient client = AssinafyClient.create("k", "acc",
+                    opts -> opts.setBaseUrl(server.url("/v1").toString()));
+
+            assertThatThrownBy(() -> client.documents.statuses())
+                    .isInstanceOfSatisfying(com.assinafy.sdk.exceptions.ApiException.class, e -> {
+                        assertThat(e.getStatusCode()).isEqualTo(429);
+                        assertThat(e.getRateLimitLimit()).isEqualTo(120);
+                        assertThat(e.getRateLimitRemaining()).isZero();
+                        assertThat(e.getRateLimitReset()).isEqualTo(42);
+                        assertThat(e.getRetryAfterSeconds()).isEqualTo(17);
+                    });
+        } finally {
+            server.shutdown();
+        }
+    }
+
+    @Test
+    void signerAccessCodeRequestsCarryNoWorkspaceCredentials() throws Exception {
+        MockWebServer server = new MockWebServer();
+        server.start();
+        try {
+            for (String data : new String[]{"[]", "{}", "[]", "{}"}) {
+                server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":" + data + "}"));
+            }
+            AssinafyClient apiKeyClient = AssinafyClient.create("secret-key", "acc",
+                    opts -> opts.setBaseUrl(server.url("/v1").toString()));
+            AssinafyClient tokenClient = new AssinafyClient(new AssinafyClientOptions()
+                    .setToken("secret-token").setAccountId("acc")
+                    .setBaseUrl(server.url("/v1").toString()));
+
+            apiKeyClient.signerSelf.listDocuments("signer-1", "code-1");
+            tokenClient.fields.validate("field-1", "v", "code-1");
+            apiKeyClient.signerSelf.listDocumentsAsWorkspace("signer-1", null);
+            tokenClient.fields.validateAsWorkspace("field-1", "v");
+
+            for (int i = 0; i < 2; i++) {
+                RecordedRequest signer = server.takeRequest();
+                assertThat(signer.getPath()).contains("signer-access-code=code-1");
+                assertThat(signer.getHeader("X-Api-Key")).isNull();
+                assertThat(signer.getHeader("Authorization")).isNull();
+            }
+            RecordedRequest workspaceKey = server.takeRequest();
+            assertThat(workspaceKey.getPath()).isEqualTo("/v1/signers/signer-1/documents");
+            assertThat(workspaceKey.getHeader("X-Api-Key")).isEqualTo("secret-key");
+            RecordedRequest workspaceToken = server.takeRequest();
+            assertThat(workspaceToken.getPath()).isEqualTo("/v1/accounts/acc/fields/field-1/validate");
+            assertThat(workspaceToken.getHeader("Authorization")).isEqualTo("Bearer secret-token");
+        } finally {
+            server.shutdown();
+        }
+    }
+
+    @Test
     void credentialsAreSentOnActualRequests() throws Exception {
         MockWebServer server = new MockWebServer();
         server.start();

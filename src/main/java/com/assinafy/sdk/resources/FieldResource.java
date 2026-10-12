@@ -163,64 +163,156 @@ public final class FieldResource extends BaseResource {
     }
 
     /**
-     * {@code POST /accounts/{account_id}/fields/{field_id}/validate} — validate a single value against a field
-     * definition's type/regex rules. Returns {@code {type, success, error_message}}. A {@code null} value is
-     * forwarded to the API (which decides validity) rather than rejected client-side. When provided, the
-     * {@code signerAccessCode} is sent as the {@code signer-access-code} query parameter.
+     * {@code POST /accounts/{account_id}/fields/{field_id}/validate} as a signer — validate a single value
+     * against a field definition's type/regex rules during the signing flow. Request body:
+     * {@code {"value": ...}}; response {@code data}: {@code {type, success, error_message}}. A {@code null}
+     * value is forwarded to the API, which decides validity. Only the access code authenticates the request:
+     * it is sent as the {@code signer-access-code} query parameter and workspace credentials are withheld.
      *
      * @param fieldId required field identifier
      * @param value value to validate; may be {@code null}
-     * @param signerAccessCode optional signer access code
+     * @param signerAccessCode required signer access code
      * @param accountId account override, or {@code null} for the client default
      * @return validation result
+     * @throws ValidationException when the access code is absent or blank
      */
     public FieldValidationResult validate(String fieldId, Object value, String signerAccessCode, String accountId) {
-        String id = accountId(accountId);
-        String fid = requireId(fieldId, "Field ID");
-        Map<String, String> query = optionalSignerAccessCodeQuery(signerAccessCode);
-        Map<String, Object> body = new HashMap<>();
-        body.put("value", value);
-        return httpPost("/accounts/" + id + "/fields/" + fid + "/validate",
-                body, FieldValidationResult.class, query);
+        return validateOne(fieldId, value, signerAccessCodeQuery(signerAccessCode), accountId);
     }
 
     /**
-     * {@code POST /accounts/{account_id}/fields/{field_id}/validate}.
-     * Returns validation result in the default account.
+     * {@code POST /accounts/{account_id}/fields/{field_id}/validate} as a signer, in the default account.
      *
      * @param fieldId required field identifier
      * @param value value to validate; may be {@code null}
-     * @param signerAccessCode optional signer access code
+     * @param signerAccessCode required signer access code
      * @return validation result in the default account
+     * @throws ValidationException when the access code is absent or blank
      */
     public FieldValidationResult validate(String fieldId, Object value, String signerAccessCode) {
         return validate(fieldId, value, signerAccessCode, null);
     }
 
     /**
-     * {@code POST /accounts/{account_id}/fields/{field_id}/validate}.
-     * Returns validation result in the default account.
+     * {@code POST /accounts/{account_id}/fields/{field_id}/validate} with the workspace's own credentials (API
+     * key or bearer token). Request body: {@code {"value": ...}}; response {@code data}:
+     * {@code {type, success, error_message}}.
+     *
+     * @param fieldId required field identifier
+     * @param value value to validate; may be {@code null}
+     * @param accountId account override, or {@code null} for the client default
+     * @return validation result
+     */
+    public FieldValidationResult validateAsWorkspace(String fieldId, Object value, String accountId) {
+        return validateOne(fieldId, value, Map.of(), accountId);
+    }
+
+    /**
+     * {@code POST /accounts/{account_id}/fields/{field_id}/validate} with the workspace's own credentials, in
+     * the default account.
      *
      * @param fieldId required field identifier
      * @param value value to validate; may be {@code null}
      * @return validation result in the default account
      */
-    public FieldValidationResult validate(String fieldId, Object value) {
-        return validate(fieldId, value, null, null);
+    public FieldValidationResult validateAsWorkspace(String fieldId, Object value) {
+        return validateAsWorkspace(fieldId, value, null);
     }
 
     /**
-     * {@code POST /accounts/{account_id}/fields/validate-multiple} — validate several field/value pairs in one
-     * call. The request body is a JSON array of {@code {field_id, value}} objects; the response is an array of
-     * {@code {field_id, type, success, error_message}} results.
+     * {@code POST /accounts/{account_id}/fields/{field_id}/validate} with the workspace's own credentials, in
+     * the default account.
+     *
+     * @param fieldId required field identifier
+     * @param value value to validate; may be {@code null}
+     * @return validation result in the default account
+     * @deprecated use {@link #validateAsWorkspace(String, Object)}, which names the credential it uses
+     */
+    @Deprecated(since = "2.7.2")
+    public FieldValidationResult validate(String fieldId, Object value) {
+        return validateAsWorkspace(fieldId, value, null);
+    }
+
+    /**
+     * {@code POST /accounts/{account_id}/fields/validate-multiple} as a signer — validate several field/value
+     * pairs in one call. Request body: a JSON array of {@code {field_id, value}} objects; response
+     * {@code data}: an array of {@code {field_id, type, success, error_message}} results. Only the access code
+     * authenticates the request; workspace credentials are withheld.
      *
      * @param values one or more field/value pairs
-     * @param signerAccessCode optional signer access code
+     * @param signerAccessCode required signer access code
      * @param accountId account override, or {@code null} for the client default
      * @return validation results in request order
+     * @throws ValidationException when the access code is absent or blank
      */
     public List<FieldValidationResult> validateMultiple(List<FieldValidationPayload> values,
             String signerAccessCode, String accountId) {
+        return validateMany(values, signerAccessCodeQuery(signerAccessCode), accountId);
+    }
+
+    /**
+     * {@code POST /accounts/{account_id}/fields/validate-multiple} as a signer, in the default account.
+     *
+     * @param values one or more field/value pairs
+     * @param signerAccessCode required signer access code
+     * @return validation results in the default account
+     * @throws ValidationException when the access code is absent or blank
+     */
+    public List<FieldValidationResult> validateMultiple(List<FieldValidationPayload> values,
+            String signerAccessCode) {
+        return validateMultiple(values, signerAccessCode, null);
+    }
+
+    /**
+     * {@code POST /accounts/{account_id}/fields/validate-multiple} with the workspace's own credentials.
+     * Request body: a JSON array of {@code {field_id, value}} objects; response {@code data}: an array of
+     * {@code {field_id, type, success, error_message}} results.
+     *
+     * @param values one or more field/value pairs
+     * @param accountId account override, or {@code null} for the client default
+     * @return validation results in request order
+     */
+    public List<FieldValidationResult> validateMultipleAsWorkspace(List<FieldValidationPayload> values,
+            String accountId) {
+        return validateMany(values, Map.of(), accountId);
+    }
+
+    /**
+     * {@code POST /accounts/{account_id}/fields/validate-multiple} with the workspace's own credentials, in the
+     * default account.
+     *
+     * @param values one or more field/value pairs
+     * @return validation results in the default account
+     */
+    public List<FieldValidationResult> validateMultipleAsWorkspace(List<FieldValidationPayload> values) {
+        return validateMultipleAsWorkspace(values, null);
+    }
+
+    /**
+     * {@code POST /accounts/{account_id}/fields/validate-multiple} with the workspace's own credentials, in the
+     * default account.
+     *
+     * @param values one or more field/value pairs
+     * @return validation results in the default account
+     * @deprecated use {@link #validateMultipleAsWorkspace(List)}, which names the credential it uses
+     */
+    @Deprecated(since = "2.7.2")
+    public List<FieldValidationResult> validateMultiple(List<FieldValidationPayload> values) {
+        return validateMultipleAsWorkspace(values, null);
+    }
+
+    private FieldValidationResult validateOne(String fieldId, Object value, Map<String, String> query,
+            String accountId) {
+        String id = accountId(accountId);
+        String fid = requireId(fieldId, "Field ID");
+        Map<String, Object> body = new HashMap<>();
+        body.put("value", value);
+        return httpPost("/accounts/" + id + "/fields/" + fid + "/validate",
+                body, FieldValidationResult.class, query);
+    }
+
+    private List<FieldValidationResult> validateMany(List<FieldValidationPayload> values,
+            Map<String, String> query, String accountId) {
         if (values == null || values.isEmpty()) {
             throw new ValidationException("At least one field validation value is required");
         }
@@ -229,33 +321,8 @@ public final class FieldResource extends BaseResource {
             throw new ValidationException("Every field validation value must have a field ID");
         }
         String id = accountId(accountId);
-        Map<String, String> query = optionalSignerAccessCodeQuery(signerAccessCode);
         return orEmpty(httpPost("/accounts/" + id + "/fields/validate-multiple", values,
                 new TypeReference<List<FieldValidationResult>>() {}, query));
-    }
-
-    /**
-     * {@code POST /accounts/{account_id}/fields/validate-multiple}.
-     * Returns validation results in the default account.
-     *
-     * @param values one or more field/value pairs
-     * @param signerAccessCode optional signer access code
-     * @return validation results in the default account
-     */
-    public List<FieldValidationResult> validateMultiple(List<FieldValidationPayload> values,
-            String signerAccessCode) {
-        return validateMultiple(values, signerAccessCode, null);
-    }
-
-    /**
-     * {@code POST /accounts/{account_id}/fields/validate-multiple}.
-     * Returns validation results in the default account.
-     *
-     * @param values one or more field/value pairs
-     * @return validation results in the default account
-     */
-    public List<FieldValidationResult> validateMultiple(List<FieldValidationPayload> values) {
-        return validateMultiple(values, null, null);
     }
 
     /**
