@@ -61,6 +61,8 @@ class SignerSelfResourceTest {
         for (String code : new String[]{null, "", " "}) {
             List<org.assertj.core.api.ThrowableAssert.ThrowingCallable> calls = List.of(
                     () -> resource.getSelf(code),
+                    () -> resource.getIdentityVerification(code),
+                    () -> resource.startIdentityVerification(code, true),
                     () -> resource.getSign(code),
                     () -> resource.acceptTerms(code),
                     () -> resource.verifyEmail("123456", code),
@@ -79,6 +81,47 @@ class SignerSelfResourceTest {
             }
         }
         assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void identityVerificationReadsStatusWithoutLosingTheCaptureFragment() throws Exception {
+        server.enqueue(new MockResponse().setBody("""
+                {"status":200,"data":{"can_start":false,"status":"Pending",
+                 "url":"https://example.invalid/c/1#t=opaque","expires_at":"2026-12-01T00:00:00Z",
+                 "completed_at":null,"future_field":true}}
+                """));
+
+        var state = resource.getIdentityVerification("code +/?");
+
+        assertThat(state.canStart()).isFalse();
+        assertThat(state.status()).isEqualTo("Pending");
+        assertThat(state.url()).endsWith("#t=opaque");
+        assertThat(state.toString()).doesNotContain("opaque");
+        assertThat(state.expiresAt()).isEqualTo("2026-12-01T00:00:00Z");
+        assertThat(state.completedAt()).isNull();
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("GET");
+        assertThat(req.getRequestUrl().encodedPath()).isEqualTo("/signers/identity-verification");
+        assertThat(req.getRequestUrl().queryParameter("signer-access-code")).isEqualTo("code +/?");
+    }
+
+    @Test
+    void identityVerificationStartsOnlyWithExplicitConsent() throws Exception {
+        assertThatThrownBy(() -> resource.startIdentityVerification("code", false))
+                .isInstanceOf(ValidationException.class).hasMessageContaining("consent");
+        assertThat(server.getRequestCount()).isZero();
+        server.enqueue(okJson(Map.of("id", "verification-1", "url", "https://example.invalid/c/1#t=opaque")));
+
+        var session = resource.startIdentityVerification("code", true);
+
+        assertThat(session.id()).isEqualTo("verification-1");
+        assertThat(session.url()).endsWith("#t=opaque");
+        assertThat(session.toString()).doesNotContain("opaque");
+        assertThat(session.expiresAt()).isNull();
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("POST");
+        assertThat(req.getPath()).isEqualTo("/signers/identity-verification?signer-access-code=code");
+        assertThat(req.getBody().readUtf8()).isEqualTo("{\"consent\":true}");
     }
 
     @Test

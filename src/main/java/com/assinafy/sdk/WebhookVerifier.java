@@ -86,7 +86,8 @@ public final class WebhookVerifier {
         } catch (NumberFormatException e) {
             throw new ValidationException("Webhook timestamp is not a Unix timestamp");
         }
-        if (Math.abs(clock.instant().getEpochSecond() - timestamp) > TOLERANCE.toSeconds()) {
+        long now = clock.instant().getEpochSecond();
+        if (timestamp < now - TOLERANCE.toSeconds() || timestamp > now + TOLERANCE.toSeconds()) {
             throw new ValidationException("Webhook timestamp is outside the allowed tolerance");
         }
 

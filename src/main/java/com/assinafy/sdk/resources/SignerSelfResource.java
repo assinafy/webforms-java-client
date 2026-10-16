@@ -4,6 +4,8 @@ import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.AcceptTermsResponse;
 import com.assinafy.sdk.models.ConfirmSignerDataPayload;
 import com.assinafy.sdk.models.DocumentDetails;
+import com.assinafy.sdk.models.IdentityVerificationSession;
+import com.assinafy.sdk.models.IdentityVerificationStatus;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.Signer;
 import com.assinafy.sdk.models.VerifyEmailResponse;
@@ -48,6 +50,36 @@ public final class SignerSelfResource extends BaseResource {
     }
 
     /**
+     * {@code GET /signers/identity-verification} — read the biometric verification state. A provider decision
+     * may be backfilled by this call. InReview permits signing while the account reviews certification.
+     *
+     * @param signerAccessCode required signer access code, sent without workspace credentials
+     * @return current state, including whether a session can be started
+     */
+    public IdentityVerificationStatus getIdentityVerification(String signerAccessCode) {
+        return httpGet("/signers/identity-verification", signerAccessCodeQuery(signerAccessCode),
+                IdentityVerificationStatus.class);
+    }
+
+    /**
+     * {@code POST /signers/identity-verification} — send {@code {"consent":true}} and open hosted biometric
+     * capture. Start only after explicit signer consent and when canStart is true. Pending, InReview,
+     * Approved, Declined, and Abandoned sessions cannot restart; an Expired session can be replaced.
+     *
+     * @param signerAccessCode required signer access code, sent without workspace credentials
+     * @param consent explicit consent to biometric processing; must be true
+     * @return session identifier, capture bearer URL, and optional expiration
+     * @throws ValidationException when consent is false or the access code is missing
+     */
+    public IdentityVerificationSession startIdentityVerification(String signerAccessCode, boolean consent) {
+        if (!consent) {
+            throw new ValidationException("Explicit consent to biometric processing is required");
+        }
+        return httpPost("/signers/identity-verification", Map.of("consent", true),
+                IdentityVerificationSession.class, signerAccessCodeQuery(signerAccessCode));
+    }
+
+    /**
      * {@code GET /sign} — retrieve the signer-facing document and assignment details. While the document is
      * still being prepared the API responds 409 (surfaced as an {@link com.assinafy.sdk.exceptions.ApiException}
      * with {@code getStatusCode() == 409}); retry with backoff until it succeeds.
@@ -88,8 +120,8 @@ public final class SignerSelfResource extends BaseResource {
     }
 
     /**
-     * {@code POST /verify} — exchange a one-time verification code for confirmation that the signer's email
-     * matches. The {@code signer-access-code} is sent as the required query parameter and the body carries only
+     * {@code POST /verify} — verify the signer's one-time Email or Whatsapp code. The {@code signer-access-code}
+     * is sent as the required query parameter and the body carries only
      * {@code {"verification-code": ...}}.
      *
      * @param verificationCode required one-time verification code

@@ -67,8 +67,8 @@ public final class WebhookResource extends BaseResource {
      * {@code POST /accounts/{account_id}/webhooks/endpoints} — register a URL to receive the account's events.
      * Requires {@code url}, {@code email}, and {@code events}. Creating an endpoint past the plan's limit
      * (1, or 3 on paid plans) fails with HTTP 403; reusing another endpoint's URL fails with HTTP 400. When
-     * {@code signing_enabled} is {@code true} a signing secret is generated; read it with
-     * {@link #getEndpointSecret(String, String)}.
+     * {@code signing_enabled} is {@code true} a signing secret is returned once in {@link WebhookEndpoint#secret()}.
+     * Store it immediately: OAuth applications cannot retrieve or rotate it later and must recreate a lost endpoint.
      *
      * @param payload endpoint values
      * @param accountId account override, or {@code null} for the client default
@@ -167,6 +167,28 @@ public final class WebhookResource extends BaseResource {
      */
     public void deleteEndpoint(String endpointId) {
         deleteEndpoint(endpointId, null);
+    }
+
+    /**
+     * {@code DELETE /accounts/{accountId}/webhooks/endpoints?url=...} — delete an endpoint by its exact
+     * registered URL and free its slot. Requires webhooks:write with OAuth; a missing endpoint returns 404.
+     *
+     * @param url exact registered HTTP or HTTPS URL, preserved without normalization
+     * @param accountId account override, or null for the client default
+     */
+    public void deleteEndpointByUrl(String url, String accountId) {
+        requireWebhookUrl(url);
+        httpDelete("/accounts/" + accountId(accountId) + "/webhooks/endpoints",
+                new TypeReference<Object>() {}, Map.of("url", url));
+    }
+
+    /**
+     * {@code DELETE /accounts/{accountId}/webhooks/endpoints?url=...} in the default account.
+     *
+     * @param url exact registered HTTP or HTTPS URL
+     */
+    public void deleteEndpointByUrl(String url) {
+        deleteEndpointByUrl(url, null);
     }
 
     /**

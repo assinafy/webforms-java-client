@@ -64,7 +64,8 @@ public final class TemplateSigner {
     public String getVerificationMethod() { return verificationMethod; }
 
     /**
-     * Sets optional wire {@code verification_method}.
+     * Sets optional wire {@code verification_method}: Email, Whatsapp, DigitalCertificate, or
+     * IdDocumentFaceMatchBasic.
      *
      * @param verificationMethod optional wire {@code verification_method}
      * @return this mapping

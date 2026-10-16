@@ -1,7 +1,7 @@
 # Examples
 
 Worked end-to-end examples for the SDK. The [API reference](API_REFERENCE.md) contains the complete
-106-operation matrix and centralized request/response payload definitions.
+112-operation matrix and centralized request/response payload definitions.
 
 ## Response envelope
 
@@ -706,7 +706,7 @@ CostEstimate certificateCost = client.assignments.estimateCost(doc.getId(),
             .setStep(1))));
 ```
 
-The digital-certificate signature costs two credits per signer in addition to any notification cost. Valid
+The digital-certificate signature costs 0.5 credits per signer in addition to any notification cost. Valid
 artifact names are `original`, `certificated`, `certificate-page`, `pades`, and `bundle`.
 After creating the assignment and completing certificate signing, download the qualified artifact with
 `client.documents.download(doc.getId(), "pades")`; an estimate alone does not create that artifact.
@@ -760,6 +760,103 @@ client.assignments.signEntries(documentId, assignmentId, signerAccessCode, List.
 > returns a `DocumentDetails` whose `getAssignment()` / `getCurrentSigner()` carry the assignment view. (There
 > is no standalone `GET /documents/{id}/assignments/{id}` endpoint.)
 
+## Biometric identity verification
+
+Select `IdDocumentFaceMatchBasic` on `SignerRef` (or `TemplateSigner`) after storing a valid CPF on the signer.
+The account must have the feature. Estimate the fee with `assignments.estimateCost` or
+`documents.estimateCostFromTemplate`; choose exactly one Email or Whatsapp notification.
+
+```java
+CreateAssignmentPayload biometric = new CreateAssignmentPayload().setSigners(List.of(
+    SignerRef.of(signerId).setVerificationMethod("IdDocumentFaceMatchBasic")
+        .setNotificationMethods(List.of("Email"))));
+CostEstimate price = client.assignments.estimateCost(documentId, biometric);
+// Create only after confirming feature availability, resources, and permission to send the invitation.
+```
+
+The signer-facing methods require a signer access code and carry no workspace credential:
+
+```java
+IdentityVerificationStatus state = client.signerSelf.getIdentityVerification(signerAccessCode);
+if (state.canStart()) {
+    // Run only after this signer explicitly consents to biometric processing.
+    IdentityVerificationSession session = client.signerSelf.startIdentityVerification(signerAccessCode, true);
+    redirectSignerTo(session.url());
+}
+```
+
+`redirectSignerTo` is your application's browser redirect. Open the returned URL unchanged, including its
+fragment. It is a bearer link: keep it out of logs and browser storage. `toString()` redacts it.
+
+Request and response payloads (the SDK returns only `data`):
+
+```jsonc
+// GET /signers/identity-verification?signer-access-code=...
+{"status":200,"message":"","data":{
+  "can_start":false,"status":"Pending","url":"https://example.invalid/c/session#t=opaque",
+  "expires_at":"2026-12-01T00:00:00Z","completed_at":null
+}}
+// POST /signers/identity-verification?signer-access-code=...
+{"consent":true}
+{"status":200,"message":"","data":{
+  "id":"verification-id","url":"https://example.invalid/c/session#t=opaque",
+  "expires_at":"2026-12-01T00:00:00Z"
+}}
+```
+
+`can_start` is true before a session exists or after an unused capture link expires. Pending, InReview,
+Approved, Declined, and Abandoned sessions cannot restart; resending an invitation preserves the session.
+Declined or Abandoned requires a new document and assignment. Starting again after Expired does not bill again.
+InReview permits signing while holding certification. Once all signers finish, the document stays in
+`pending_identity_review` until every open review is approved.
+
+Account reviewers use workspace credentials:
+
+```java
+SignerIdentityReview review = client.assignments.getIdentityVerification(documentId, assignmentId, signerId);
+if ("InReview".equals(review.status()) && review.images().contains("face")) {
+    byte[] face = client.assignments.downloadIdentityVerificationImage(documentId, assignmentId, signerId, "face");
+    // Display only to the authorized account reviewer; keep evidence private.
+}
+// Only after the authorized reviewer explicitly decides:
+// client.assignments.reviewIdentityVerification(documentId, assignmentId, signerId, "Approved", "Private note");
+// Alternative: "Rejected" cancels the document and notifies all signers and copy receivers.
+```
+
+`GET .../identity-verification` and `POST .../identity-verification/review` return this complete `data` shape:
+
+```json
+{
+  "id":"verification-id",
+  "status":"InReview",
+  "provider":"AssinafyVerify",
+  "verification_method":"IdDocumentFaceMatchBasic",
+  "reason_codes":[{"code":"NAME_MISMATCH","description":"Name differs"}],
+  "evidence_available":true,
+  "expected":{"name":"Example Signer","cpf":null},
+  "document":{"type":"CNH","name":"EXAMPLE SIGNER","cpf":null},
+  "matches":{"cpf":true,"name":0.5217,"birth_date":null},
+  "checks":[{"name":"name","result":"review","score":0.5217,"reasons":["NAME_MISMATCH"]}],
+  "images":["document_front","document_back","face"],
+  "ruleset_version":"2026-10-12.2",
+  "evidence_sha256":"sha256-of-evidence",
+  "reviewed_by":null,
+  "reviewed_at":null,
+  "review_note":null,
+  "completed_at":null
+}
+```
+
+A decision sends `{ "decision": "Approved" }` or `{ "decision": "Rejected", "note": "Private note" }`.
+`note` is optional and limited to 2000 characters. The response records `reviewed_by: { "id", "name" }`,
+`reviewed_at`, `review_note`, and `completed_at`; `images` is empty after a decision. A rejected verification
+has status `Declined`. Review images are `document_front`, `document_back`, `document_pdf`, or `face`,
+returned as JPEG, PNG, or PDF bytes; they return 404 after the review closes.
+
+Process `signer_identity_verified`, `signer_identity_verification_failed`, `signer_identity_review_required`,
+`signer_identity_review_approved`, and `signer_identity_review_rejected` idempotently. Direct provider approval
+keeps its evidence summary in the verified activity; the review endpoint has no evidence for that case.
+
 ## Webhooks
 
 ### Webhook endpoints
@@ -788,7 +885,7 @@ Request:
 }
 ```
 
-Response `data` (also each item of `listEndpoints()` and the result of `getEndpoint` / `updateEndpoint`):
+Creation response `data` (`secret` is omitted by `listEndpoints`, `getEndpoint`, and `updateEndpoint`):
 
 ```json
 {
@@ -799,6 +896,7 @@ Response `data` (also each item of `listEndpoints()` and the result of `getEndpo
   "events": ["document_ready", "signer_signed_document"],
   "is_active": true,
   "signing_enabled": true,
+  "secret": "whsec_creation_secret",
   "created_at": "2026-10-01T12:00:00Z",
   "updated_at": "2026-10-01T12:00:00Z"
 }
@@ -809,10 +907,17 @@ List<WebhookEndpoint> all = client.webhooks.listEndpoints();          // GET ...
 client.webhooks.getEndpoint(endpoint.id());                           // GET .../webhooks/endpoints/{id}
 client.webhooks.updateEndpoint(endpoint.id(),                         // PUT .../webhooks/endpoints/{id}
     new WebhookEndpointPayload().setActive(false));                   // Request: { "is_active": false }
-String secret = client.webhooks.getEndpointSecret(endpoint.id());     // GET .../{id}/secret → { "secret": "whsec_..." }
+String secret = endpoint.secret();                                  // returned once on creation; store it now
+// API key or user session only:
+String retrieved = client.webhooks.getEndpointSecret(endpoint.id()); // GET .../{id}/secret → { "secret": "whsec_..." }
 String rotated = client.webhooks.rotateEndpointSecret(endpoint.id()); // POST .../{id}/secret/rotate
+secret = rotated;                                                    // rotation takes effect immediately
 client.webhooks.deleteEndpoint(endpoint.id());                        // DELETE .../webhooks/endpoints/{id}
+// Alternative: client.webhooks.deleteEndpointByUrl(endpoint.url());     // DELETE .../webhooks/endpoints?url=...
 ```
+
+OAuth apps receive the secret only on signed endpoint creation. They cannot retrieve or rotate it later;
+if it is lost, delete and recreate the endpoint. Store each endpoint's secret separately.
 
 ### Verifying a signed delivery
 

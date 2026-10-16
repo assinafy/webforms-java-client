@@ -1,6 +1,6 @@
 # Assinafy Java SDK API Reference
 
-This reference maps the Java SDK to the 106 operations documented at the
+This reference maps the Java SDK to the 112 operations documented at the
 [Assinafy API documentation](https://api.assinafy.com.br/v1/docs). Paths below omit the `/v1` prefix, except
 for the OAuth protected-resource metadata, which the API serves at its host root.
 
@@ -93,7 +93,8 @@ These downloads are raw binary responses rather than JSON envelopes and return `
 - document `original`, `certificated`, `certificate-page`, `pades`, or `bundle` artifact;
 - document thumbnail and page image;
 - saved signer `signature` or `initial` image;
-- signer document artifact.
+- signer document artifact;
+- biometric review evidence image or document PDF.
 
 Paginated methods return `PaginatedResult<T>`. `getData()` is the response `data` array and `getMeta()` contains
 `currentPage`, `perPage`, `total`, and `lastPage`, read from `X-Pagination-Current-Page`,
@@ -132,14 +133,16 @@ null to clear a value.
 | Document rename | `{ "name": string* }`, maximum 255 characters |
 | Document tag replace/append | `{ "tags": [tagId, ...] }` |
 | Public token | `{ "channel": "email"*, "recipient": signer-email* }` |
-| `CreateSignerPayload` | `{ "full_name": string*, "email": string?, "whatsapp_phone_number": E.164?, "government_id": CPF? }` |
+| `CreateSignerPayload` | `{ "full_name": string*, "email": string?, "whatsapp_phone_number": E.164?, "government_id": CPF/CNPJ? }` |
 | `UpdateSignerPayload` | Any non-empty subset of `full_name`, `email`, `whatsapp_phone_number`, `government_id` (CPF/CNPJ) |
 | Assignment expiration | `{ "expires_at": ISO-8601 date-time\|null* }`; `clearExpiration` sends `null` to remove the expiration |
 | Assignment decline | `{ "decline_reason": string* }`, at most 2000 characters |
 | `AssignmentSignEntry[]` | `[{ "itemId": string*, "fieldId": string*, "pageId": string*, "value": string* }, ...]` |
 | Multi-sign | `{ "document_ids": [string, ...]* }` |
 | Multi-decline | `{ "document_ids": [string, ...]*, "decline_reason": string* }`, reason at most 2000 characters |
-| Signer verification | `{ "verification-code": string* }` |
+| Signer verification (Email or Whatsapp) | `{ "verification-code": string* }` |
+| Biometric session start | `{ "consent": true* }`; explicit signer consent is required |
+| Biometric review decision | `{ "decision": "Approved"\|"Rejected"*, "note": string\|null? }`; note at most 2000 characters |
 | `ConfirmSignerDataPayload` | Any of `full_name`, `email`, `government_id` |
 | `CreateFieldPayload` | `{ "type": string*, "name": string*, "regex": string\|null?, "is_required": boolean? }` |
 | `UpdateFieldPayload` | Any of `name`, `regex`, `is_active`; `clearRegex()` explicitly sends `"regex": null` |
@@ -172,7 +175,7 @@ Use `setSigners(List<SignerRef>)` when setting verification, notification, or st
   "signers": [
     {
       "id": "signer-id",
-      "verification_method": "Email | Whatsapp | DigitalCertificate",
+      "verification_method": "Email | Whatsapp | DigitalCertificate | IdDocumentFaceMatchBasic",
       "notification_methods": ["Email | Whatsapp"],
       "step": 1
     }
@@ -222,14 +225,39 @@ as `{ "verification_method", "notification_methods" }`; signer `id`, `step`, `me
 
 Verification and notification are coupled. If neither is supplied both default to `Email`; supplying only one
 lets the API infer the other. `Email` verification pairs with `Email`, `Whatsapp` with `Whatsapp`, and
-`DigitalCertificate` with either notification channel. Only one notification channel is accepted per signer.
+`DigitalCertificate` and `IdDocumentFaceMatchBasic` with either notification channel. Only one notification channel is accepted per signer.
 Sequential `step` values must be positive, contiguous from 1, and supplied for every signer when used.
 
 `DigitalCertificate` requires the account feature, a CPF/CNPJ in the signer's `government_id`, and a step that
-contains only that signer. It adds two credits per signer (`SignatureDigitalCertificate`) plus notification
+contains only that signer. It adds 0.5 credits per signer (`SignatureDigitalCertificate`) plus notification
 cost. The signer completes the ICP-Brasil Web PKI flow in a browser, through the `POST /signers/certificate/start`
 and `POST /signers/certificate/complete` routes, which the API deploys but publishes no schema for and which
 this server-side SDK therefore does not wrap. Download the resulting qualified PDF with artifact name `pades`.
+
+### Biometric identity verification
+
+`IdDocumentFaceMatchBasic` requires the account feature and a valid CPF in `government_id`. Estimate its
+per-signer fee and notification cost before creation. It uses hosted ID capture, face matching, and liveness.
+The signer explicitly consents through `signerSelf.startIdentityVerification(code, true)`, which returns a
+capture bearer URL. Open it unchanged, including its fragment; keep it out of logs and browser storage.
+`IdentityVerificationSession` and `IdentityVerificationStatus` redact the URL in `toString()`.
+
+`signerSelf.getIdentityVerification(code)` returns `can_start`, `status`, `url`, `expires_at`, and `completed_at`.
+A session can start only before a session exists or after it expires before submission. Pending, InReview,
+Approved, Declined, and Abandoned sessions cannot restart. Resends preserve the session, and restarting an
+expired session does not charge again. A declined or abandoned verification needs a new document and assignment.
+
+InReview permits viewing, data confirmation, and signing. Certification waits for every review's approval;
+a document whose signers have all signed waits in `pending_identity_review`. An account reviewer reads
+`assignments.getIdentityVerification(documentId, assignmentId, signerId)` and downloads the names in `images`
+using `downloadIdentityVerificationImage(..., name)`. The API returns JPEG, PNG, or PDF with no-store caching;
+images are available only while the review is open and return 404 after a decision. Handle evidence as private data.
+
+`assignments.reviewIdentityVerification(..., decision, note)` accepts only `Approved` or `Rejected`.
+Approval permits certification once every signer has signed and every review is approved. Rejection sets
+`rejected_by_user` and sends cancellation notices to all signers and copy receivers. The note is private,
+recorded in activities, and sent to the provider; the signer receives no separate decision message.
+Direct provider approval has no review evidence here; its summary is on the `signer_identity_verified` activity.
 
 ### OAuth 2.1 authorization-code flow
 
@@ -264,7 +292,7 @@ disagree (`invalid_target`). `setResource(...)` accepts only that value. Overrid
 | `templates:read` | Read templates, their pages, roles, fields, and tags |
 | `templates:write` | Create, update, and delete templates and their contents |
 | `account:read` | Read the workspace profile, theme, and logo |
-| `webhooks:write` | Configure and deactivate the workspace webhook subscription |
+| `webhooks:write` | Create, update, and delete workspace webhook endpoints; creation returns its signing secret once, while later retrieval/rotation requires an API key or user session |
 | `openid` | Identify the user and enable `GET /oauth/userinfo` |
 | `profile` | Include the user's name in the `id_token` and userinfo claims |
 | `email` | Include the user's email and its verification status in those claims |
@@ -329,7 +357,7 @@ Use `signEntries(..., List.of(new AssignmentSignEntry(itemId, fieldId, pageId, v
     {
       "role_id": "template-role-id",
       "id": "existing-signer-id",
-      "verification_method": "Email | Whatsapp | DigitalCertificate",
+      "verification_method": "Email | Whatsapp | DigitalCertificate | IdDocumentFaceMatchBasic",
       "notification_methods": ["Email | Whatsapp"],
       "step": 1
     }
@@ -383,7 +411,10 @@ is set. Create requires `url`, `email`, and at least one event:
 
 `url` must be an absolute HTTP or HTTPS URL that no other endpoint of the account uses. `is_active` defaults to
 `true` and `signing_enabled` to `false` on create. Enabling signing generates a secret when the endpoint has
-none and keeps the current one otherwise; disabling it discards the secret.
+none and keeps the current one otherwise; disabling it discards the secret. A signed endpoint creation returns
+`secret` once: store `endpoint.secret()` immediately, including with OAuth. List/view/update responses omit it.
+Only API keys and user sessions may retrieve or rotate it later; OAuth apps must delete and recreate a lost endpoint.
+`WebhookEndpoint` keeps its nine-argument constructor; record patterns include the tenth `secret` component.
 
 ### Notification preferences
 
@@ -421,7 +452,8 @@ keys are:
 | Tag delete | `force=true\|false` |
 | Signing view | optional `has_accepted_terms=true\|false` |
 | Signature upload | `type`, optional `reuse` |
-| Webhook history | `endpoint_id`, `event`, `delivered`, Unix timestamps `from`/`to`, pagination |
+| Webhook deletion by URL | `url` (required), matched exactly against the registered URL |
+| Webhook history (`ListDispatchesParams`) | `endpoint_id`, `event`, `delivered`, Unix timestamps `from`/`to`, pagination |
 
 ## Response payload catalog
 
@@ -441,20 +473,29 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `EmailResponse` | `email` |
 | `NotificationPreferences` | The nine boolean keys listed above |
 | `DocumentStatsRow` | `period` (`YYYY-MM` or `YYYY-MM-DD`), `documents_uploaded`, `documents_sent`, `signature_requests`, `signature_requests_notification_email`, `signature_requests_notification_whatsapp`, `signature_requests_notification_bypass`, `signature_requests_verification_email`, `signature_requests_verification_whatsapp`, `signature_requests_verification_bypass`, `signature_requests_verification_digital_certificate`, `signature_requests_viewed`, `signature_requests_completed`, `documents_certified` |
-| `Signer` | `resource`, `id`, `full_name`, `email?`, `whatsapp_phone_number?`, `government_id?`, `has_accepted_terms`; contextual fields: `has_signature`, `has_initial`, `is_signature_reusable`, `verification_method`, `notification_methods[]`, `step`, `notified`, `completed`, `notification_history[]` |
+| `Signer` | `resource`, `id`, `full_name`, `email?`, `whatsapp_phone_number?`, `government_id?`, `has_accepted_terms`; contextual fields: `has_signature`, `has_initial`, `is_signature_reusable`, `verification_method`, `identity_verification_status?` (`Pending\|InReview\|Approved\|Declined\|Expired\|Abandoned`), `notification_methods[]`, `step`, `notified`, `completed`, `notification_history[]` |
+| `IdentityVerificationStatus` | `can_start`, `status?`, `url?`, `expires_at?`, `completed_at?` |
+| `IdentityVerificationSession` | `id`, `url`, `expires_at?` |
+| `SignerIdentityReview` | `id`, `status`, `provider`, `verification_method`, `reason_codes[]`, `evidence_available`, `expected?`, `document?`, `matches?`, `checks[]`, `images[]`, `ruleset_version?`, `evidence_sha256?`, `reviewed_by?`, `reviewed_at?`, `review_note?`, `completed_at?` |
+| `SignerIdentityReview.Reason` | `code`, `description` |
+| `SignerIdentityReview.Expected` | `name?`, `cpf?` |
+| `SignerIdentityReview.IdentityDocument` | `type?`, `name?`, `cpf?` |
+| `SignerIdentityReview.Matches` | `cpf?` (`boolean`), `name?` (similarity 0–1), `birth_date?` (`boolean`) |
+| `SignerIdentityReview.Check` | `name`, `result` (`pass`, `review`, `skipped`, or a provider failure), `score?`, `reasons[]` |
+| `SignerIdentityReview.Reviewer` | `id`, `name` |
 | `AssignmentSignerNotification` | `event`, `status` (`sent\|failed`), `error_code?`, `error_message?`, `sent_at?`, `failed_at?` |
 | `Assignment` | `resource`, `id`, `sender_email`, `method` (`virtual\|collect`), `expires_at?`, `message?`, `signers[]`, `copy_receivers[]` (`Signer` objects), `items[]`, `summary`, `signing_urls[]` |
 | `AssignmentItem` | `id`, `page?`, `signer`, `field?`, `display_settings`, `value?`, `completed` |
 | `AssignmentSummary` | `signer_count`, `completed_count`, `signers[]` |
 | `SigningUrl` | `signer_id`, `url` |
 | `CostEstimate` | `documents`, `credits`, `needs_extra_document`, `extra_document_cost`, `total_credits`, `breakdown[]`, `document_balance`, `credit_balance`, `has_sufficient_resources`, `blocking_reason?`, `message?` |
-| Cost breakdown | `code`, `name`, `cost`, `quantity`, `unit_cost` |
+| `CostEstimateBreakdownItem` | `code`, `name`, `cost`, `quantity`, `unit_cost` |
 | `ResendResult` | `is_sent`, `document_id`, `signer_id` |
 | `ResendCostEstimate` | Documented `CostEstimate` fields; also accepts compact `total`, `breakdown[]` (`code`, `name`, `cost`), `credit_balance`, `has_sufficient_credits` |
 | `WhatsappNotification` | `sent_at` (Unix seconds), `header`, `body`, `buttons[]` (`text`), `phone_number`, `signer_id` |
 | `DocumentDetails` / Document | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; public/signer contexts can add `page_count`, `created_by`, `current_signer`, `download_url`, `download_final_url`, `activities` |
 | `DocumentListItem` | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; lightweight search may omit expanded relationships |
-| Document artifacts | URL map keyed by `original`, `certificated`, `certificate-page`, `pades`, `bundle`, and contextual `thumbnail` |
+| `DocumentArtifacts` | URL map keyed by `original`, `certificated`, `certificate-page`, `pades`, `bundle`, and contextual `thumbnail` |
 | `DocumentPage` | `id`, `number`, `height`, `width`, `download_url` |
 | `DocumentStatus` | `code`, `deletable` |
 | `DocumentVerification` | `hash`, `id?`, `agreement_code?` (printed on the document certificate), `status?`, `page_count?` (string), `signer_count?` (string), `completed_count?`, `completed_at?`, `verified_at`, `is_valid`, `message` |
@@ -470,7 +511,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `TemplateFieldPlacement` | `id`, `field_id`, `role_id`, `label`, `display_settings`, `created_at`, `updated_at` |
 | `TemplateRole` | `id`, `name`, `assignment_type`, `created_at`, `updated_at` |
 | `WebhookSubscription` | `events[]`, `is_active`, `url?`, `email?`, `updated_at?` |
-| `WebhookEndpoint` | `id`, `name?`, `url`, `email`, `events[]`, `is_active`, `signing_enabled`, `created_at`, `updated_at` |
+| `WebhookEndpoint` | `id`, `name?`, `url`, `email`, `events[]`, `is_active`, `signing_enabled`, `created_at`, `updated_at`, `secret?` (only on signed endpoint creation) |
 | Webhook endpoint secret | `{ "secret": "whsec_..." }`; the SDK returns the string |
 | `WebhookEvent` | Webhook delivery body; see [Webhook deliveries](#webhook-deliveries) |
 | `WebhookDispatch` | `resource`, `id`, `event`, `activity_id`, `endpoint?`, `endpoint_id?`, `payload?`, `delivered`, `http_status?`, `response_body?`, `error?`, `created_at`, `updated_at` |
@@ -481,6 +522,8 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `OAuthTokens` | `access_token`, `token_type` (`Bearer`), `expires_in` (seconds), `refresh_token?` (only with `offline_access`; a refresh always returns a new one), `scope` (space-separated, never contains `offline_access`), `id_token?` (only with `openid`), `issued_token_type?` (RFC 8693 token type URI, when supplied) |
 | `OAuthUserInfo` | `sub`, `name?` (needs `profile`), `email?` and `email_verified?` (need `email`) |
 | `OAuthProtectedResource` | `resource`, `authorization_servers[]`, `scopes_supported[]`, `bearer_methods_supported[]` |
+
+`Patterns.EMAIL` is the shared basic email-validation pattern used by resource boundaries and request models.
 
 The three OAuth response models above are **not** envelope payloads. RFC 6749, OIDC Core, and RFC 8615 each
 require a flat object, so those endpoints answer with the object itself and the SDK deserializes it directly.
@@ -515,7 +558,7 @@ documented error codes; the platform may additionally return global transport st
 | **DELETE** `/accounts/{accountId}/logo` | `accounts.deleteLogo([accountId])` | — | `void` | 200, 401, 500 |
 | **GET** `/accounts/{accountId}/stats` | `accounts.stats([params][, accountId])` | Stats query | `List<DocumentStatsRow>` | 200, 400, 401, 500 |
 
-### Assignments — 7 operations
+### Assignments — 10 operations
 
 | Operation | SDK method | Request | Return | Statuses |
 |---|---|---|---|---|
@@ -526,6 +569,9 @@ documented error codes; the platform may additionally return global transport st
 | **POST** `/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` | `assignments.estimateResendCost(documentId, assignmentId, signerId)` | — | `ResendCostEstimate` | 200, 401, 500 |
 | **PUT** `/documents/{documentId}/assignments/{assignmentId}/reset-expiration` | `assignments.resetExpiration(documentId, assignmentId, expiresAt)` | Assignment expiration | `Assignment` | 200, 400, 401, 404, 500 |
 | **GET** `/documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications` | `assignments.whatsappNotifications(documentId, assignmentId)` | — | `List<WhatsappNotification>` | 200, 401, 500 |
+| **GET** `/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification` | `assignments.getIdentityVerification(documentId, assignmentId, signerId)` | — | `SignerIdentityReview` | 200, 401, 404, 500 |
+| **GET** `/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/images/{name}` | `assignments.downloadIdentityVerificationImage(documentId, assignmentId, signerId, name)` | Evidence image name | Raw `byte[]` | 200, 401, 404, 500 |
+| **POST** `/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/review` | `assignments.reviewIdentityVerification(documentId, assignmentId, signerId, decision, note)` | Biometric review decision | `SignerIdentityReview` | 200, 400, 401, 404, 500 |
 
 ### Authentication — 15 operations
 
@@ -614,13 +660,15 @@ answers 200 while the connection stays active.
 `signers.create` always sends the documented POST. Use `signers.findOrCreate` only when exact-email reuse is the
 intended application policy; it does not update an existing signer.
 
-### Signing — 17 operations
+### Signing — 19 operations
 
 | Operation | SDK method | Request | Return | Statuses |
 |---|---|---|---|---|
 | **GET** `/public/documents/{documentId}` | `documents.getPublic(documentId)` | — | Public `DocumentDetails` | 200, 404, 500 |
 | **PUT** `/public/documents/{documentId}/send-token` | `documents.sendTokenByEmail(documentId, recipient)`; `documents.sendToken(documentId, recipient, "email")` returns `void` | Public token | `SendTokenResult` | 200, 400, 404, 500 |
 | **GET** `/signers/self` | `signerSelf.getSelf(signerAccessCode)` | Signer access code | `Signer` | 200, 401, 500 |
+| **GET** `/signers/identity-verification` | `signerSelf.getIdentityVerification(signerAccessCode)` | Signer access code | `IdentityVerificationStatus` | 200, 401, 500 |
+| **POST** `/signers/identity-verification` | `signerSelf.startIdentityVerification(signerAccessCode, consent)` | Biometric session start + signer access code | `IdentityVerificationSession` | 200, 400, 401, 500 |
 | **GET** `/signers/{signerId}/document` | `signerSelf.getCurrentDocument(signerId, signerAccessCode)` | Signer access code | `DocumentDetails` | 200, 401, 404, 500 |
 | **GET** `/sign` | `signerSelf.getSign(signerAccessCode[, hasAcceptedTerms])` | Signer access code; optional flag | `DocumentDetails` | 200, 400, 401, 409, 500 |
 | **POST** `/documents/{documentId}/assignments/{assignmentId}` | `assignments.signEntries(documentId, assignmentId, signerAccessCode, entries)` / `sign(...)` | Collect submission | `void` | 200, 400, 401, 409, 500 |
@@ -663,7 +711,7 @@ official documentation categorizes them.
 | **PUT** `/users/self/notification-preferences` | `users.updateNotificationPreferences(preferences)` | Partial `NotificationPreferences` | Complete `NotificationPreferences` | 200, 400, 401, 500 |
 | **GET** `/users/self/stats` | `users.stats([params])` | Stats query | `List<DocumentStatsRow>` | 200, 400, 401, 500 |
 
-### Webhooks — 13 operations
+### Webhooks — 14 operations
 
 | Operation | SDK method | Request | Return | Statuses |
 |---|---|---|---|---|
@@ -672,6 +720,7 @@ official documentation categorizes them.
 | **PUT** `/accounts/{accountId}/webhooks/inactivate` | `webhooks.inactivate([accountId])` | — | `WebhookSubscription` | 200, 401, 500 |
 | **GET** `/accounts/{accountId}/webhooks/endpoints` | `webhooks.listEndpoints([accountId])` | — | `List<WebhookEndpoint>`, oldest first | 200, 401, 500 |
 | **POST** `/accounts/{accountId}/webhooks/endpoints` | `webhooks.createEndpoint(payload[, accountId])` | Webhook endpoint | `WebhookEndpoint` | 200, 400, 401, 403 (plan limit), 500 |
+| **DELETE** `/accounts/{accountId}/webhooks/endpoints` | `webhooks.deleteEndpointByUrl(url[, accountId])` | Required `url` query | `void` | 200, 400, 401, 404, 500 |
 | **GET** `/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `webhooks.getEndpoint(endpointId[, accountId])` | — | `WebhookEndpoint` | 200, 401, 404, 500 |
 | **PUT** `/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `webhooks.updateEndpoint(endpointId, payload[, accountId])` | Partial webhook endpoint | `WebhookEndpoint` | 200, 400, 401, 404, 500 |
 | **DELETE** `/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `webhooks.deleteEndpoint(endpointId[, accountId])` | — | `void` | 200, 401, 404, 500 |
@@ -743,7 +792,7 @@ Signatures follow [Standard Webhooks](https://www.standardwebhooks.com): the HMA
 `whsec_`. `WebhookVerifier` implements it:
 
 ```java
-WebhookVerifier verifier = new WebhookVerifier(client.webhooks.getEndpointSecret(endpointId));
+WebhookVerifier verifier = new WebhookVerifier(storedEndpointSecret);
 
 WebhookEvent event = verifier.verify(
         request.getHeader("webhook-id"),
@@ -780,7 +829,7 @@ fields inside `subject` and `object`, are Unix seconds. `subject` and `object` a
 `type` (`User`, `Signer`, `Account`, `Document`, or `Template`) followed by that resource's fields. Document
 objects include expanded assignment/pages. Account objects omit integration dispatch history.
 
-The current event catalog contains 18 values:
+The event catalog includes:
 
 | Event | Subject | Object | Event-specific `payload` keys |
 |---|---|---|---|
@@ -796,6 +845,11 @@ The current event catalog contains 18 values:
 | `signer_whatsapp_verified` | Signer | Document | `signer_full_name`, `signer_whatsapp_phone_number` |
 | `signer_data_confirmed` | Signer | Document | `signer_full_name`, `signer_email`, `signer_whatsapp_phone_number`, `verification_method` |
 | `signer_viewed_document` | Signer | Document | `signer_full_name` |
+| `signer_identity_verified` | Signer | Document | `signer_full_name`, `evidence` (when available) |
+| `signer_identity_verification_failed` | Signer | Document | `signer_full_name`, `reason` |
+| `signer_identity_review_required` | Signer | Document | `signer_full_name`, `reason_codes` |
+| `signer_identity_review_approved` | Signer | Document | `signer_full_name`, `reviewer_id`, `reviewer_name`, `reason_codes` |
+| `signer_identity_review_rejected` | Signer | Document | `signer_full_name`, `reviewer_id`, `reviewer_name`, `note` |
 | `signer_signed_document` | Signer | Document | `signer_full_name` |
 | `signer_rejected_document` | Signer | Document | `signer_full_name` |
 | `user_rejected_document` | User | Document | `user_name` |

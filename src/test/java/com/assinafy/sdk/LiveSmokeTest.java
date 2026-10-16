@@ -88,7 +88,7 @@ class LiveSmokeTest {
 
     @BeforeEach
     void paceSandboxRequests() throws InterruptedException {
-        Thread.sleep(3_000);
+        Thread.sleep(10_000);
     }
 
     private static AssinafyClient client() {

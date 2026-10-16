@@ -70,6 +70,18 @@ class WebhookVerifierTest {
     }
 
     @Test
+    void rejectsTimestampsWhoseDistanceOverflowsALong() throws Exception {
+        String timestamp = Long.toString(1614265330L + Long.MIN_VALUE);
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(Base64.getDecoder().decode(SECRET.substring(6)), "HmacSHA256"));
+        String signature = "v1," + Base64.getEncoder().encodeToString(
+                mac.doFinal((ID + "." + timestamp + "." + BODY).getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> verifierAt(1614265330).verify(ID, timestamp, signature, BODY))
+                .isInstanceOf(ValidationException.class).hasMessageContaining("tolerance");
+    }
+
+    @Test
     void rejectsMissingHeadersAndInvalidSecrets() {
         assertThatThrownBy(() -> verifierAt(1614265330).verify(ID, TIMESTAMP, null, BODY))
                 .isInstanceOf(ValidationException.class);

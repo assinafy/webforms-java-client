@@ -48,6 +48,24 @@ class WebhookResourceTest {
     }
 
     @Test
+    void deleteEndpointByUrlPreservesTheExactUrlAndAccountOverride() throws Exception {
+        String url = "https://example.invalid/hook?tenant=a&token=b+c%20d";
+        for (String account : new String[]{null, "other"}) {
+            server.enqueue(okJson(List.of()));
+            resource.deleteEndpointByUrl(url, account);
+            RecordedRequest req = server.takeRequest();
+            assertThat(req.getMethod()).isEqualTo("DELETE");
+            assertThat(req.getRequestUrl().encodedPath())
+                    .isEqualTo("/accounts/" + (account == null ? "acc" : account) + "/webhooks/endpoints");
+            assertThat(req.getRequestUrl().queryParameter("url")).isEqualTo(url);
+        }
+        for (String invalid : new String[]{null, "", "relative", "ftp://example.invalid/hook"}) {
+            assertThatThrownBy(() -> resource.deleteEndpointByUrl(invalid)).isInstanceOf(ValidationException.class);
+        }
+        assertThat(server.getRequestCount()).isEqualTo(2);
+    }
+
+    @Test
     void register_sendsExplicitEvents() throws Exception {
         server.enqueue(okJson(Map.of("is_active", true)));
 
@@ -257,6 +275,20 @@ class WebhookResourceTest {
                 "url", "https://example.com/hook", "email", "ops@example.com",
                 "events", List.of("document_ready"), "name", "ERP", "signing_enabled", true)));
         assertThat(created.signingEnabled()).isTrue();
+    }
+
+    @Test
+    void createEndpointPreservesTheSigningSecretReturnedOnlyAtCreation() throws Exception {
+        Map<String, Object> response = new java.util.LinkedHashMap<>(endpointJson());
+        response.put("secret", "whsec_creation_only");
+        server.enqueue(okJson(response));
+
+        WebhookEndpoint created = resource.createEndpoint(new WebhookEndpointPayload()
+                .setUrl("https://example.invalid/hook").setEmail("ops@example.invalid")
+                .setEvents(List.of("document_ready")).setSigningEnabled(true));
+
+        assertThat(created.secret()).isEqualTo("whsec_creation_only");
+        assertThat(created.toString()).doesNotContain("whsec_creation_only");
     }
 
     @Test

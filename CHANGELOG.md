@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-16
+
+### Added
+- Biometric identity verification: signer status and consent-based session creation, account review,
+  evidence-image downloads, and approval or rejection through typed response models.
+- `Signer.getIdentityVerificationStatus()` exposes the assignment's biometric state.
+- `webhooks.deleteEndpointByUrl(url[, accountId])` deletes an endpoint using its exact registered URL.
+
+### Fixed
+- `WebhookEndpoint.secret()` preserves the signing secret returned once on endpoint creation, including
+  for OAuth applications. The existing nine-argument constructor remains available; record patterns must
+  include the new `secret` component.
+
+### Security
+- Webhook timestamp checks reject extreme values without integer overflow.
+- Capture bearer URLs and webhook creation secrets are redacted from their response models' `toString()`.
+
 ## [2.7.3] - 2026-10-12
 
 ### Added

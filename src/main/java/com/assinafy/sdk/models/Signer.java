@@ -41,6 +41,9 @@ public final class Signer {
     @JsonProperty("verification_method")
     private String verificationMethod;
 
+    @JsonProperty("identity_verification_status")
+    private String identityVerificationStatus;
+
     @JsonProperty("notification_methods")
     private List<String> notificationMethods;
 
@@ -55,6 +58,20 @@ public final class Signer {
 
     /** Creates an empty signer model for JSON deserialization. */
     public Signer() {}
+
+    /**
+     * Returns the assignment's biometric verification state, or null when absent.
+     * @return Pending, InReview, Approved, Declined, Expired, Abandoned, or null
+     */
+    public String getIdentityVerificationStatus() { return identityVerificationStatus; }
+
+    /**
+     * Sets the assignment's biometric verification state.
+     * @param identityVerificationStatus provider state, or null
+     */
+    public void setIdentityVerificationStatus(String identityVerificationStatus) {
+        this.identityVerificationStatus = identityVerificationStatus;
+    }
 
     /**
      * Returns signer identifier.

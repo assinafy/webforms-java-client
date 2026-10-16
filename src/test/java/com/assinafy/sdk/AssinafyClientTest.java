@@ -281,7 +281,7 @@ class AssinafyClientTest {
         MockWebServer server = new MockWebServer();
         server.start();
         try {
-            for (String data : new String[]{"[]", "{}", "[]", "{}"}) {
+            for (String data : new String[]{"[]", "{}", "{}", "{}", "[]", "{}"}) {
                 server.enqueue(new MockResponse().setBody("{\"status\":200,\"data\":" + data + "}"));
             }
             AssinafyClient apiKeyClient = AssinafyClient.create("secret-key", "acc",
@@ -292,10 +292,12 @@ class AssinafyClientTest {
 
             apiKeyClient.signerSelf.listDocuments("signer-1", "code-1");
             tokenClient.fields.validate("field-1", "v", "code-1");
+            apiKeyClient.signerSelf.getIdentityVerification("code-1");
+            tokenClient.signerSelf.startIdentityVerification("code-1", true);
             apiKeyClient.signerSelf.listDocumentsAsWorkspace("signer-1", null);
             tokenClient.fields.validateAsWorkspace("field-1", "v");
 
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < 4; i++) {
                 RecordedRequest signer = server.takeRequest();
                 assertThat(signer.getPath()).contains("signer-access-code=code-1");
                 assertThat(signer.getHeader("X-Api-Key")).isNull();

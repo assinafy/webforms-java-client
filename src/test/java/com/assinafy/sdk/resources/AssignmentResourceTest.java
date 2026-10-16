@@ -52,6 +52,133 @@ class AssignmentResourceTest {
     }
 
     @Test
+    void identityVerificationParsesTheCompleteReview() throws Exception {
+        server.enqueue(new MockResponse().setBody("""
+                {"status":200,"data":{"id":"v1","status":"InReview","provider":"AssinafyVerify",
+                 "verification_method":"IdDocumentFaceMatchBasic",
+                 "reason_codes":[{"code":"NAME_MISMATCH","description":"Name differs"}],
+                 "evidence_available":true,"expected":{"name":"Test Signer","cpf":null},
+                 "document":{"type":"CNH","name":"TEST SIGNER","cpf":null},
+                 "matches":{"cpf":true,"name":0.5217,"birth_date":null},
+                 "checks":[{"name":"name","result":"review","score":0.5217,"reasons":["NAME_MISMATCH"]}],
+                 "images":["document_front","face"],"ruleset_version":"2026-10-12.2","evidence_sha256":"digest",
+                 "reviewed_by":{"id":"u1","name":"Reviewer"},"reviewed_at":"2026-10-13T21:05:00Z",
+                 "review_note":"Private note","completed_at":"2026-10-13T21:05:00Z","future_field":true}}
+                """));
+
+        var review = resource.getIdentityVerification("d1", "a1", "s1");
+
+        assertThat(review.id()).isEqualTo("v1");
+        assertThat(review.status()).isEqualTo("InReview");
+        assertThat(review.provider()).isEqualTo("AssinafyVerify");
+        assertThat(review.verificationMethod()).isEqualTo("IdDocumentFaceMatchBasic");
+        assertThat(review.reasonCodes().getFirst().code()).isEqualTo("NAME_MISMATCH");
+        assertThat(review.reasonCodes().getFirst().description()).isEqualTo("Name differs");
+        assertThat(review.evidenceAvailable()).isTrue();
+        assertThat(review.expected().name()).isEqualTo("Test Signer");
+        assertThat(review.document().type()).isEqualTo("CNH");
+        assertThat(review.document().name()).isEqualTo("TEST SIGNER");
+        assertThat(review.expected().cpf()).isNull();
+        assertThat(review.document().cpf()).isNull();
+        assertThat(review.matches().cpf()).isTrue();
+        assertThat(review.matches().name()).isEqualTo(0.5217);
+        assertThat(review.matches().birthDate()).isNull();
+        assertThat(review.checks().getFirst().result()).isEqualTo("review");
+        assertThat(review.checks().getFirst().score()).isEqualTo(0.5217);
+        assertThat(review.checks().getFirst().reasons()).containsExactly("NAME_MISMATCH");
+        assertThat(review.images()).containsExactly("document_front", "face");
+        assertThat(review.rulesetVersion()).isEqualTo("2026-10-12.2");
+        assertThat(review.evidenceSha256()).isEqualTo("digest");
+        assertThat(review.reviewedBy().id()).isEqualTo("u1");
+        assertThat(review.reviewedBy().name()).isEqualTo("Reviewer");
+        assertThat(review.reviewedAt()).isEqualTo("2026-10-13T21:05:00Z");
+        assertThat(review.reviewNote()).isEqualTo("Private note");
+        assertThat(review.completedAt()).isEqualTo("2026-10-13T21:05:00Z");
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("GET");
+        assertThat(req.getPath()).isEqualTo("/documents/d1/assignments/a1/signers/s1/identity-verification");
+    }
+
+    @Test
+    void identityReviewSendsBothDecisionsAndOmitsAnAbsentNote() throws Exception {
+        for (String decision : List.of("Approved", "Rejected")) {
+            String status = "Approved".equals(decision) ? "Approved" : "Declined";
+            server.enqueue(okJson(Map.of("id", "v1", "status", status)));
+            var review = resource.reviewIdentityVerification("d1", "a1", "s1", decision,
+                    "Approved".equals(decision) ? "Private note" : null);
+            assertThat(review.status()).isEqualTo(status);
+            RecordedRequest req = server.takeRequest();
+            assertThat(req.getMethod()).isEqualTo("POST");
+            assertThat(req.getPath())
+                    .isEqualTo("/documents/d1/assignments/a1/signers/s1/identity-verification/review");
+            assertThat(MAPPER.readTree(req.getBody().readUtf8())).isEqualTo(MAPPER.readTree(
+                    "Approved".equals(decision) ? "{\"decision\":\"Approved\",\"note\":\"Private note\"}"
+                            : "{\"decision\":\"Rejected\"}"));
+        }
+    }
+
+    @Test
+    void identityEvidenceDownloadsAllDocumentedFormatsAndSurfacesEnvelopeErrors() throws Exception {
+        for (String name : List.of("document_front", "document_back", "document_pdf", "face")) {
+            server.enqueue(new MockResponse().setBody("evidence")
+                    .setHeader("Content-Type", name.equals("document_pdf") ? "application/pdf" : "image/jpeg"));
+            assertThat(resource.downloadIdentityVerificationImage("d1", "a1", "s1", name))
+                    .isEqualTo("evidence".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertThat(server.takeRequest().getPath())
+                    .isEqualTo("/documents/d1/assignments/a1/signers/s1/identity-verification/images/" + name);
+        }
+        server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
+                .setBody("{\"status\":404,\"message\":\"Review closed\",\"data\":null}"));
+        assertThatThrownBy(() -> resource.downloadIdentityVerificationImage("d1", "a1", "s1", "face"))
+                .isInstanceOf(com.assinafy.sdk.exceptions.ApiException.class).hasMessageContaining("Review closed");
+    }
+
+    @Test
+    void identityReviewRejectsInvalidInputsBeforeSending() {
+        for (String invalid : new String[]{null, "", "../x", "a/b"}) {
+            assertThatThrownBy(() -> resource.getIdentityVerification(invalid, "a1", "s1"))
+                    .isInstanceOf(ValidationException.class);
+            assertThatThrownBy(() -> resource.getIdentityVerification("d1", invalid, "s1"))
+                    .isInstanceOf(ValidationException.class);
+            assertThatThrownBy(() -> resource.getIdentityVerification("d1", "a1", invalid))
+                    .isInstanceOf(ValidationException.class);
+            assertThatThrownBy(() -> resource.downloadIdentityVerificationImage("d1", "a1", "s1", invalid))
+                    .isInstanceOf(ValidationException.class);
+            assertThatThrownBy(() -> resource.reviewIdentityVerification("d1", "a1", "s1", invalid, null))
+                    .isInstanceOf(ValidationException.class);
+        }
+        assertThatThrownBy(() -> resource.reviewIdentityVerification("d1", "a1", "s1", "Approved",
+                "x".repeat(2001))).isInstanceOf(ValidationException.class);
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void createAndEstimateSupportEveryVerificationAndNotificationPair() throws Exception {
+        for (String method : List.of("Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic")) {
+            for (String channel : method.equals("Email") ? List.of("Email")
+                    : method.equals("Whatsapp") ? List.of("Whatsapp") : List.of("Email", "Whatsapp")) {
+                SignerRef signer = SignerRef.of("s1").setVerificationMethod(method)
+                        .setNotificationMethods(List.of(channel)).setStep(1);
+                CreateAssignmentPayload payload = new CreateAssignmentPayload().setSigners(List.of(signer));
+                server.enqueue(okJson(Map.of("id", "a1", "signers", List.of(Map.of(
+                        "id", "s1", "identity_verification_status", "InReview")))));
+                assertThat(resource.create("d1", payload).getSigners().getFirst().getIdentityVerificationStatus())
+                        .isEqualTo("InReview");
+                var created = MAPPER.readTree(server.takeRequest().getBody().readUtf8()).path("signers").get(0);
+                assertThat(created.path("verification_method").asText()).isEqualTo(method);
+                assertThat(created.path("notification_methods").get(0).asText()).isEqualTo(channel);
+                assertThat(created.path("step").asInt()).isEqualTo(1);
+                server.enqueue(okJson(Map.of("total", 1)));
+                resource.estimateCost("d1", payload);
+                var priced = MAPPER.readTree(server.takeRequest().getBody().readUtf8()).path("signers").get(0);
+                assertThat(priced.size()).isEqualTo(2);
+                assertThat(priced.path("verification_method").asText()).isEqualTo(method);
+                assertThat(priced.path("notification_methods").get(0).asText()).isEqualTo(channel);
+            }
+        }
+    }
+
+    @Test
     void create_postsToCorrectUrl() throws Exception {
         server.enqueue(okJson(Map.of("id", "assignment-1")));
 

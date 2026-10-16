@@ -339,6 +339,38 @@ class DocumentResourceTest {
     }
 
     @Test
+    void templateCreationAndEstimatesPreserveEveryVerificationAndNotificationPair() throws Exception {
+        for (String method : List.of("Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic")) {
+            for (String channel : method.equals("Email") ? List.of("Email")
+                    : method.equals("Whatsapp") ? List.of("Whatsapp") : List.of("Email", "Whatsapp")) {
+                TemplateSigner signer = new TemplateSigner("role-1", "signer-1")
+                        .setVerificationMethod(method).setNotificationMethods(List.of(channel)).setStep(1);
+                server.enqueue(okJson(Map.of("id", "doc-1")));
+                resource.createFromTemplate("template-1", List.of(signer));
+                RecordedRequest create = server.takeRequest();
+                assertThat(create.getMethod()).isEqualTo("POST");
+                assertThat(create.getPath()).isEqualTo("/accounts/acc/templates/template-1/documents");
+                var created = MAPPER.readTree(create.getBody().readUtf8()).path("signers").get(0);
+                assertThat(created.path("id").asText()).isEqualTo("signer-1");
+                assertThat(created.path("role_id").asText()).isEqualTo("role-1");
+                assertThat(created.path("verification_method").asText()).isEqualTo(method);
+                assertThat(created.path("notification_methods").get(0).asText()).isEqualTo(channel);
+                assertThat(created.path("step").asInt()).isEqualTo(1);
+                server.enqueue(okJson(Map.of("total_credits", 1)));
+                resource.estimateCostFromTemplate("template-1", List.of(signer));
+                RecordedRequest estimate = server.takeRequest();
+                assertThat(estimate.getPath())
+                        .isEqualTo("/accounts/acc/templates/template-1/documents/estimate-cost");
+                var priced = MAPPER.readTree(estimate.getBody().readUtf8()).path("signers").get(0);
+                assertThat(priced.size()).isEqualTo(3);
+                assertThat(priced.path("role_id").asText()).isEqualTo("role-1");
+                assertThat(priced.path("verification_method").asText()).isEqualTo(method);
+                assertThat(priced.path("notification_methods").get(0).asText()).isEqualTo(channel);
+            }
+        }
+    }
+
+    @Test
     void createFromTemplate_includesOptionalDocumentTags() throws Exception {
         server.enqueue(okJson(Map.of("id", "doc-1", "name", "x.pdf")));
 

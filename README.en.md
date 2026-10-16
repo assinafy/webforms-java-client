@@ -5,7 +5,7 @@
 Java client SDK for the [Assinafy API](https://api.assinafy.com.br/v1/docs), the Brazilian digital signature
 platform.
 
-Covers all 106 operations in the official API contract: accounts, users, authentication, OAuth, documents,
+Covers all 112 operations in the official API contract: accounts, users, authentication, OAuth, documents,
 signers, assignments, fields, templates, tags, webhooks, and the signer-facing signing flows.
 
 > This artifact uses `new AssinafyClientOptions().setApiKey(...)`. The `webforms` name is historical;
@@ -31,14 +31,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.7.3</version>
+    <version>2.8.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.7.3'
+implementation 'com.assinafy:webforms-java-client-sdk:2.8.0'
 ```
 
 The artifact is published to Maven Central, with no repository configuration or authentication. See
@@ -327,7 +327,8 @@ the missing side is inferred. With neither, both default to `Email`.
 | --- | --- | --- |
 | `Email` *(default)* | A one-time code by email, required before signing | Free |
 | `Whatsapp` | A one-time code over WhatsApp | Verification is free; the WhatsApp notification it requires costs 0.45 credits, on paid plans only |
-| `DigitalCertificate` | The signer signs with their **own ICP-Brasil certificate (A1 or A3)** through the Web PKI browser extension, producing a **qualified PAdES** signature | 2 credits, plus the notification cost |
+| `DigitalCertificate` | The signer signs with their **own ICP-Brasil certificate (A1 or A3)** through the Web PKI browser extension, producing a **qualified PAdES** signature | 0.5 credits, plus the notification cost |
+| `IdDocumentFaceMatchBasic` | Hosted government-ID capture, face match, and liveness check; requires the account feature and a valid CPF in `government_id` | Per-signer fee plus notification; use the estimate |
 
 Allowed pairings — an invalid one answers HTTP 400:
 
@@ -336,10 +337,11 @@ Allowed pairings — an invalid one answers HTTP 400:
 | `Email` | `Email` |
 | `Whatsapp` | `Whatsapp` |
 | `DigitalCertificate` | `Email` **or** `Whatsapp` |
+| `IdDocumentFaceMatchBasic` | `Email` **or** `Whatsapp` |
 
-One notification channel per signer. No verification method is priced on its own: what is billed is the
-**notification** it travels with — plus, for a digital certificate, the signature itself. So two email-notified
-signers cost 0 credits and two WhatsApp-notified ones cost 0.9.
+One notification channel per signer. Email and WhatsApp verification are billed through their notification
+channel; certificate signatures and biometric verification add their own per-signer fee. Use
+`assignments.estimateCost` before creating the assignment to check feature availability, credits, and the total.
 
 ```java
 CreateAssignmentPayload overWhatsapp = new CreateAssignmentPayload()
@@ -355,7 +357,7 @@ CreateAssignmentPayload overWhatsapp = new CreateAssignmentPayload()
 alone in that step**. A CPF requires that person's own certificate (an e-CPF, or an e-CNPJ naming them as legal
 representative); a CNPJ requires the company's e-CNPJ. A1 (a file) and A3 (a token or smartcard) both work —
 they differ only in where the signer's key is stored, and both are reached through the same Web PKI extension.
-The 2-credit charge appears in the estimate under `SignatureDigitalCertificate`.
+The 0.5-credit charge appears in the estimate under `SignatureDigitalCertificate`.
 
 The ordinary signing endpoint **rejects** certificate signers: their signature comes from a two-step handshake
 with the Web PKI extension (`POST /v1/signers/certificate/start`, then `.../complete`). Those two routes are
@@ -382,6 +384,26 @@ client.assignments.clearExpiration(doc.getId(), assignment.getId()); // sends ex
 List<WhatsappNotification> whatsapp =
     client.assignments.whatsappNotifications(doc.getId(), assignment.getId());
 ```
+
+### Biometric identity verification
+
+Set `SignerRef.setVerificationMethod("IdDocumentFaceMatchBasic")` and choose Email or WhatsApp notification.
+The signer uses their access code to read `client.signerSelf.getIdentityVerification(signerAccessCode)`.
+After explicit consent, call `startIdentityVerification(signerAccessCode, true)` and open the returned `url()`
+unchanged, including its fragment. It is a bearer link: keep it out of logs and browser storage.
+
+A new session is allowed only when `canStart()` is true: before capture starts or after an unused session
+expires. Pending, InReview, Approved, Declined, and Abandoned sessions cannot restart. A resend preserves the
+session; a declined or abandoned verification needs a new document and assignment.
+
+`InReview` lets the signer continue and sign. Once all signers finish, the document waits in
+`pending_identity_review` until the account decides every open review. Use
+`assignments.getIdentityVerification(documentId, assignmentId, signerId)` for the evidence summary and
+`downloadIdentityVerificationImage(..., name)` for the listed images, available only while the review is open.
+An authorized account reviewer calls `reviewIdentityVerification(..., "Approved", note)` or `"Rejected"`.
+Rejection cancels the document and notifies signers and copy receivers; the private note is not shown to them.
+Handle the identity webhook events listed in [the API reference](docs/API_REFERENCE.md#webhook-deliveries).
+Complete request and response examples are in [EXAMPLES](docs/EXAMPLES.md#biometric-identity-verification).
 
 ### The one-call shortcut
 
@@ -505,6 +527,7 @@ List<WebhookEndpoint> endpoints = client.webhooks.listEndpoints();          // o
 client.webhooks.getEndpoint(endpoint.id());
 client.webhooks.updateEndpoint(endpoint.id(), new WebhookEndpointPayload().setActive(false)); // only what changed
 client.webhooks.deleteEndpoint(endpoint.id());                               // frees the slot
+// Alternative: client.webhooks.deleteEndpointByUrl(endpoint.url());
 
 List<WebhookEventTypeInfo> eventTypes = client.webhooks.listEventTypes();
 PaginatedResult<WebhookDispatch> dispatches = client.webhooks.listDispatches(
@@ -513,13 +536,14 @@ client.webhooks.retryDispatch(dispatchId);
 ```
 
 With `signing_enabled`, every delivery carries the `webhook-id`, `webhook-timestamp`, and `webhook-signature`
-headers. The endpoint's secret (`whsec_...`) comes from `getEndpointSecret`, and only an API key or a user
-session can read it — an OAuth application cannot. `WebhookVerifier` checks the signature in constant time,
+headers. Creation returns the secret (`whsec_...`) once as `endpoint.secret()`: store it immediately.
+Only an API key or user session can retrieve or rotate it later. An OAuth application that loses it must
+delete and recreate the endpoint. `WebhookVerifier` checks the signature in constant time,
 rejects deliveries more than five minutes from the local clock (replays), and returns the typed body. Pass the
 **raw** body exactly as received; re-serialized JSON does not verify.
 
 ```java
-WebhookVerifier verifier = new WebhookVerifier(client.webhooks.getEndpointSecret(endpoint.id()));
+WebhookVerifier verifier = new WebhookVerifier(endpoint.secret());
 
 // In the HTTP receiver:
 WebhookEvent event = verifier.verify(
@@ -530,7 +554,7 @@ WebhookEvent event = verifier.verify(
 if (alreadyProcessed(request.getHeader("webhook-id"))) return;  // the same id repeats on the retry
 handle(event.event(), event.object());
 
-// Rotation takes effect immediately: later deliveries use only the new secret.
+// API key or user session only. Rotation takes effect immediately.
 verifier = new WebhookVerifier(client.webhooks.rotateEndpointSecret(endpoint.id()));
 ```
 
@@ -655,7 +679,7 @@ sent back to you: the authorization server shows an error on its own page.
 | `documents:write` | Create documents and send them for signature |
 | `templates:read` / `templates:write` | Read, and create or change, templates |
 | `account:read` | Read the workspace profile, theme, and logo |
-| `webhooks:write` | Create, change, and remove the workspace webhook endpoints (the signing secret needs an API key) |
+| `webhooks:write` | Create, change, and remove the workspace webhook endpoints (the secret is returned on creation; reading or rotating it later needs an API key or user session) |
 | `openid` / `profile` / `email` | Identify the user, and read their name and email |
 | `offline_access` | Receive a refresh token, so the app keeps working while the user is away |
 

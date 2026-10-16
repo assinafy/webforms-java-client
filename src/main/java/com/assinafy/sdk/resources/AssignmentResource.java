@@ -9,6 +9,7 @@ import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.ResendCostEstimate;
 import com.assinafy.sdk.models.ResendResult;
 import com.assinafy.sdk.models.SignerRef;
+import com.assinafy.sdk.models.SignerIdentityReview;
 import com.assinafy.sdk.models.WhatsappNotification;
 import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.OkHttpClient;
@@ -76,7 +77,8 @@ public final class AssignmentResource extends BaseResource {
     /**
      * {@code POST /documents/{documentId}/assignments} — request signatures. Request body:
      * {@code {"method": "virtual"|"collect", "signers": [{"id", "verification_method":
-     * "Email"|"Whatsapp"|"DigitalCertificate", "notification_methods": ["Email"|"Whatsapp"], "step"}],
+     * "Email"|"Whatsapp"|"DigitalCertificate"|"IdDocumentFaceMatchBasic",
+     * "notification_methods": ["Email"|"Whatsapp"], "step"}],
      * "entries", "message", "expires_at", "copy_receivers"}}; {@code method} and each signer {@code id} are
      * required, and {@code collect} also requires {@code entries}. Response {@code data}: the {@link Assignment}.
      *
@@ -246,6 +248,72 @@ public final class AssignmentResource extends BaseResource {
         String asgId = requireId(assignmentId, "Assignment ID");
         return orEmpty(httpGet("/documents/" + docId + "/assignments/" + asgId + "/whatsapp-notifications",
                 new TypeReference<List<WhatsappNotification>>() {}));
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification}.
+     * Returns the account's biometric review and evidence summary. Images are available only while InReview.
+     *
+     * @param documentId required document identifier
+     * @param assignmentId required assignment identifier
+     * @param signerId required signer identifier
+     * @return verification, evidence summary, and account review state
+     */
+    public SignerIdentityReview getIdentityVerification(String documentId, String assignmentId, String signerId) {
+        return httpGet(identityVerificationPath(documentId, assignmentId, signerId), SignerIdentityReview.class);
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/images/{name}}.
+     * Fetches JPEG, PNG, or PDF evidence while InReview; a decided review returns 404. Keep these bytes private.
+     *
+     * @param documentId required document identifier
+     * @param assignmentId required assignment identifier
+     * @param signerId required signer identifier
+     * @param name document_front, document_back, document_pdf, or face, as listed in the review
+     * @return raw evidence bytes
+     * @throws ValidationException when an identifier or image name is invalid
+     */
+    public byte[] downloadIdentityVerificationImage(String documentId, String assignmentId, String signerId,
+            String name) {
+        if (name == null || !List.of("document_front", "document_back", "document_pdf", "face").contains(name)) {
+            throw new ValidationException("Image name must be document_front, document_back, document_pdf, or face");
+        }
+        return httpGetBinary(identityVerificationPath(documentId, assignmentId, signerId) + "/images/" + name);
+    }
+
+    /**
+     * {@code POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/review}.
+     * Sends {@code {decision,note?}}. Approval releases certification once all signers finish and all reviews
+     * are approved. Rejection cancels the document and notifies signers and copy receivers; the note stays private.
+     *
+     * @param documentId required document identifier
+     * @param assignmentId required assignment identifier
+     * @param signerId required signer identifier
+     * @param decision Approved or Rejected; the verification must be InReview
+     * @param note optional private note of at most 2000 characters, recorded and sent to the provider
+     * @return decided verification and review
+     * @throws ValidationException when an identifier, decision, or note is invalid
+     */
+    public SignerIdentityReview reviewIdentityVerification(String documentId, String assignmentId, String signerId,
+            String decision, String note) {
+        if (!"Approved".equals(decision) && !"Rejected".equals(decision)) {
+            throw new ValidationException("Identity review decision must be Approved or Rejected");
+        }
+        if (note != null && note.length() > 2000) {
+            throw new ValidationException("Identity review note must be at most 2000 characters");
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision", decision);
+        if (note != null) body.put("note", note);
+        return httpPost(identityVerificationPath(documentId, assignmentId, signerId) + "/review", body,
+                SignerIdentityReview.class);
+    }
+
+    private String identityVerificationPath(String documentId, String assignmentId, String signerId) {
+        return "/documents/" + requireId(documentId, "Document ID")
+                + "/assignments/" + requireId(assignmentId, "Assignment ID")
+                + "/signers/" + requireId(signerId, "Signer ID") + "/identity-verification";
     }
 
     private static Map<String, Object> buildPayload(CreateAssignmentPayload payload, boolean estimate) {
