@@ -228,11 +228,21 @@ lets the API infer the other. `Email` verification pairs with `Email`, `Whatsapp
 `DigitalCertificate` and `IdDocumentFaceMatchBasic` with either notification channel. Only one notification channel is accepted per signer.
 Sequential `step` values must be positive, contiguous from 1, and supplied for every signer when used.
 
-`DigitalCertificate` requires the account feature, a CPF/CNPJ in the signer's `government_id`, and a step that
-contains only that signer. It adds 0.5 credits per signer (`SignatureDigitalCertificate`) plus notification
-cost. The signer completes the ICP-Brasil Web PKI flow in a browser, through the `POST /signers/certificate/start`
-and `POST /signers/certificate/complete` routes, which the API deploys but publishes no schema for and which
-this server-side SDK therefore does not wrap. Download the resulting qualified PDF with artifact name `pades`.
+`DigitalCertificate` requires `method: "virtual"`, the account feature, a CPF/CNPJ in the signer's
+`government_id`, and a step that contains only that signer. It adds 0.5 credits per signer
+(`SignatureDigitalCertificate`) plus notification cost. The certificate flow completes the signer's virtual
+item; the ordinary field-signing endpoint refuses certificate signers, so a certificate signer cannot complete
+a `collect` assignment.
+
+`assignments.create` and `assignments.estimateCost` reject `DigitalCertificate` with `method: "collect"`
+before sending a request. The resulting `ValidationException` has
+`getErrors().get("code") == AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD`, whose stable
+value is `digital_certificate_requires_virtual_method`; `getErrors().get("method")` is `"collect"`.
+
+The signer completes the ICP-Brasil Web PKI flow in a browser, through the
+`POST /signers/certificate/start` and `POST /signers/certificate/complete` routes, which the API deploys but
+publishes no schema for and which this server-side SDK therefore does not wrap. Download the resulting qualified
+PDF with artifact name `pades`.
 
 ### Biometric identity verification
 
@@ -376,6 +386,12 @@ Creation requires `role_id` and `id` for each signer role. Estimation sends each
 `{ "role_id"*, "verification_method", "notification_methods" }`; signer `id` and `step` are not sent. Template default tags are always applied and `tags` are
 merged on top. Use `new TemplateEditorField(fieldId, value)` with `setTemplateEditorFields`; the untyped
 `setEditorFields(List<?>)` overload remains available for raw maps.
+
+The API derives a template assignment's method from its placed fields. Until the API rejects certificate
+signers when that derived method is `collect`, both `documents.createFromTemplate` and
+`documents.estimateCostFromTemplate` reject every `DigitalCertificate` template signer before sending a
+request. They use the same stable `digital_certificate_requires_virtual_method` validation code described
+above and set its `method` detail to `null`, because the method is not present in either request.
 
 ### Webhook subscription
 

@@ -340,7 +340,7 @@ class DocumentResourceTest {
 
     @Test
     void templateCreationAndEstimatesPreserveEveryVerificationAndNotificationPair() throws Exception {
-        for (String method : List.of("Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic")) {
+        for (String method : List.of("Email", "Whatsapp", "IdDocumentFaceMatchBasic")) {
             for (String channel : method.equals("Email") ? List.of("Email")
                     : method.equals("Whatsapp") ? List.of("Whatsapp") : List.of("Email", "Whatsapp")) {
                 TemplateSigner signer = new TemplateSigner("role-1", "signer-1")
@@ -368,6 +368,22 @@ class DocumentResourceTest {
                 assertThat(priced.path("notification_methods").get(0).asText()).isEqualTo(channel);
             }
         }
+    }
+
+    @Test
+    void templateCreationAndEstimateRejectCertificateSignersWithStableCode() {
+        TemplateSigner signer = new TemplateSigner("role-1", "signer-1")
+                .setVerificationMethod("DigitalCertificate");
+
+        assertThatThrownBy(() -> resource.createFromTemplate("template-1", List.of(signer)))
+                .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
+                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD)
+                        .containsEntry("method", null));
+        assertThatThrownBy(() -> resource.estimateCostFromTemplate("template-1", List.of(signer)))
+                .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
+                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD)
+                        .containsEntry("method", null));
+        assertThat(server.getRequestCount()).isZero();
     }
 
     @Test

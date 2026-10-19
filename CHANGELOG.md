@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-10-19
+
+### Fixed
+- `assignments.create` and `assignments.estimateCost` reject `DigitalCertificate` signers unless the assignment
+  method is `virtual`, before an unusable `collect` request can invite signers or consume credits. Template
+  creation and estimation reject certificate signers until the API enforces the rule after deriving the method
+  from placed fields. All paths expose the stable `digital_certificate_requires_virtual_method` validation
+  code through `ValidationException.getErrors()`.
+
 ## [2.8.0] - 2026-10-16
 
 ### Added

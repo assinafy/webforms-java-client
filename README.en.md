@@ -31,14 +31,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.8.0</version>
+    <version>2.8.1</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.8.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.8.1'
 ```
 
 The artifact is published to Maven Central, with no repository configuration or authentication. See
@@ -234,6 +234,11 @@ DocumentDetails generated = client.documents.createFromTemplate(
     new CreateDocumentFromTemplateOptions().setTags(List.of("Generated")));
 ```
 
+The server derives a template assignment's method from its placed fields. Until the API enforces the
+virtual-only certificate rule atomically, the SDK rejects `DigitalCertificate` in both `createFromTemplate`
+and `estimateCostFromTemplate` with the same stable validation code. Create a direct `virtual` assignment for
+certificate signers instead.
+
 An uploaded PDF is not immediately assignable: the API extracts page metadata first. `waitUntilReady` polls
 `GET /documents/{id}` until the status reaches `metadata_ready`, `pending_signature`, or `certificated`,
 raising `ValidationException` if the document fails, expires, is rejected, or the wait budget elapses.
@@ -327,7 +332,7 @@ the missing side is inferred. With neither, both default to `Email`.
 | --- | --- | --- |
 | `Email` *(default)* | A one-time code by email, required before signing | Free |
 | `Whatsapp` | A one-time code over WhatsApp | Verification is free; the WhatsApp notification it requires costs 0.45 credits, on paid plans only |
-| `DigitalCertificate` | The signer signs with their **own ICP-Brasil certificate (A1 or A3)** through the Web PKI browser extension, producing a **qualified PAdES** signature | 0.5 credits, plus the notification cost |
+| `DigitalCertificate` | The signer signs with their **own ICP-Brasil certificate (A1 or A3)** through the Web PKI browser extension, producing a **qualified PAdES** signature; requires `method: "virtual"` | 0.5 credits, plus the notification cost |
 | `IdDocumentFaceMatchBasic` | Hosted government-ID capture, face match, and liveness check; requires the account feature and a valid CPF in `government_id` | Per-signer fee plus notification; use the estimate |
 
 Allowed pairings — an invalid one answers HTTP 400:
@@ -352,12 +357,20 @@ CreateAssignmentPayload overWhatsapp = new CreateAssignmentPayload()
         .setStep(1)));
 ```
 
-**ICP-Brasil digital certificates (A1 and A3).** These need the **Digital Certificate** feature on the account
-(Standard and Pro plans), a CPF or CNPJ in the signer's `government_id`, and exactly **one certificate signer
-alone in that step**. A CPF requires that person's own certificate (an e-CPF, or an e-CNPJ naming them as legal
-representative); a CNPJ requires the company's e-CNPJ. A1 (a file) and A3 (a token or smartcard) both work —
-they differ only in where the signer's key is stored, and both are reached through the same Web PKI extension.
-The 0.5-credit charge appears in the estimate under `SignatureDigitalCertificate`.
+**ICP-Brasil digital certificates (A1 and A3).** These require `method: "virtual"`, the **Digital Certificate**
+feature on the account (Standard and Pro plans), a CPF or CNPJ in the signer's `government_id`, and exactly
+**one certificate signer alone in that step**. A certificate flow completes the signer's virtual item; it
+cannot submit placed fields through the ordinary `collect` signing endpoint. A CPF requires that person's own
+certificate (an e-CPF, or an e-CNPJ naming them as legal representative); a CNPJ requires the company's e-CNPJ.
+A1 (a file) and A3 (a token or smartcard) both work — they differ only in where the signer's key is stored, and
+both are reached through the same Web PKI extension. The 0.5-credit charge appears in the estimate under
+`SignatureDigitalCertificate`.
+
+The SDK rejects certificate signers on a `collect` assignment in both `assignments.create` and
+`assignments.estimateCost` before any request. Branch on
+`ValidationException.getErrors().get("code")` equal to
+`AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD` (stable value
+`digital_certificate_requires_virtual_method`), not on the human-readable message.
 
 The ordinary signing endpoint **rejects** certificate signers: their signature comes from a two-step handshake
 with the Web PKI extension (`POST /v1/signers/certificate/start`, then `.../complete`). Those two routes are

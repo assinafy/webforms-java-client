@@ -23,6 +23,10 @@ import java.util.Map;
 /** Client for account-wide assignment lists and document-scoped assignment operations. */
 public final class AssignmentResource extends BaseResource {
 
+    /** Stable validation code used when a certificate signer is not guaranteed a virtual assignment. */
+    public static final String DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD =
+            "digital_certificate_requires_virtual_method";
+
     /**
      * Creates an instance.
      *
@@ -85,6 +89,8 @@ public final class AssignmentResource extends BaseResource {
      * @param documentId required document identifier
      * @param payload required virtual or collect assignment body
      * @return created assignment
+     * @throws ValidationException when the payload is invalid; certificate signers on {@code collect} use
+     *         {@link #DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD} in {@link ValidationException#getErrors()}
      */
     public Assignment create(String documentId, CreateAssignmentPayload payload) {
         String docId = requireId(documentId, "Document ID");
@@ -102,6 +108,8 @@ public final class AssignmentResource extends BaseResource {
      * @param documentId required document identifier
      * @param payload required virtual or collect estimate body
      * @return credit estimate
+     * @throws ValidationException when the payload is invalid; certificate signers on {@code collect} use
+     *         {@link #DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD} in {@link ValidationException#getErrors()}
      */
     public CostEstimate estimateCost(String documentId, CreateAssignmentPayload payload) {
         String docId = requireId(documentId, "Document ID");
@@ -341,6 +349,10 @@ public final class AssignmentResource extends BaseResource {
         for (SignerRef ref : signerRefs) {
             normalisedSigners.add(normaliseSignerRef(ref, estimate));
         }
+        if (!"virtual".equals(method) && normalisedSigners.stream()
+                .anyMatch(signer -> "DigitalCertificate".equals(signer.get("verification_method")))) {
+            throw digitalCertificateRequiresVirtualMethod(method);
+        }
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("method", method);
@@ -385,5 +397,12 @@ public final class AssignmentResource extends BaseResource {
             result.put("step", ref.getStep());
         }
         return result;
+    }
+
+    static ValidationException digitalCertificateRequiresVirtualMethod(String method) {
+        Map<String, Object> errors = new LinkedHashMap<>();
+        errors.put("code", DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD);
+        errors.put("method", method);
+        return new ValidationException("DigitalCertificate signers require method: virtual", errors);
     }
 }

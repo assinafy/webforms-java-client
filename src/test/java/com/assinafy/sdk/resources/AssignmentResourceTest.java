@@ -179,6 +179,26 @@ class AssignmentResourceTest {
     }
 
     @Test
+    void createAndEstimateRejectCertificateCollectRequestsWithStableCode() {
+        CreateAssignmentPayload payload = new CreateAssignmentPayload()
+                .setMethod("collect")
+                .setSigners(List.of(SignerRef.of("s1").setVerificationMethod("DigitalCertificate")))
+                .setEntries(List.of(new CollectAssignmentEntry("p1", List.of(
+                        new CollectFieldPlacement("s1", "f1",
+                                new DisplaySettings(10, 20, 100, 30, 12, "Arial", "#D5EBFF"))))));
+
+        assertThatThrownBy(() -> resource.create("doc-1", payload))
+                .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
+                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD)
+                        .containsEntry("method", "collect"));
+        assertThatThrownBy(() -> resource.estimateCost("doc-1", payload))
+                .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
+                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD)
+                        .containsEntry("method", "collect"));
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
     void create_postsToCorrectUrl() throws Exception {
         server.enqueue(okJson(Map.of("id", "assignment-1")));
 
@@ -348,7 +368,7 @@ class AssignmentResourceTest {
 
         resource.estimateCost("doc-1", new CreateAssignmentPayload()
                 .setMethod("collect")
-                .setSigners(List.of(new SignerRef().setVerificationMethod("DigitalCertificate")))
+                .setSigners(List.of(new SignerRef().setVerificationMethod("Email")))
                 .setEntries(List.of(new CollectAssignmentEntry("p1", List.of(
                         new CollectFieldPlacement("s1", "f1",
                                 new DisplaySettings(10, 20, 100, 30, 12, "Arial", "#D5EBFF")))))));
@@ -362,7 +382,7 @@ class AssignmentResourceTest {
                 .contains("\"fontSize\":12.0")
                 .contains("\"backgroundColor\":\"#D5EBFF\"");
         // collect is priced per signer too, so the channels must reach the API.
-        assertThat(body).contains("\"verification_method\":\"DigitalCertificate\"");
+        assertThat(body).contains("\"verification_method\":\"Email\"");
     }
 
     @Test

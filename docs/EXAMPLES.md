@@ -692,8 +692,9 @@ if (!cost.getHasSufficientResources()) {
 }
 ```
 
-For a qualified ICP-Brasil signature, use `DigitalCertificate` after storing the signer's CPF/CNPJ in
-`government_id`. That signer must be alone in its signing step and the account must have the feature enabled:
+For a qualified ICP-Brasil signature, use `DigitalCertificate` with `method: "virtual"` after storing the
+signer's CPF/CNPJ in `government_id`. That signer must be alone in its signing step and the account must have
+the feature enabled:
 
 ```java
 Signer certificateSigner = client.signers.update(signerId,
@@ -710,6 +711,9 @@ The digital-certificate signature costs 0.5 credits per signer in addition to an
 artifact names are `original`, `certificated`, `certificate-page`, `pades`, and `bundle`.
 After creating the assignment and completing certificate signing, download the qualified artifact with
 `client.documents.download(doc.getId(), "pades")`; an estimate alone does not create that artifact.
+Both `assignments.create` and `assignments.estimateCost` reject a certificate signer on `collect` before HTTP.
+Catch `ValidationException` and compare `getErrors().get("code")` with
+`AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD`.
 
 Response `data` (typed as `CostEstimate`):
 
@@ -1057,6 +1061,10 @@ DocumentDetails doc = client.documents.createFromTemplate(
 CostEstimate cost = client.documents.estimateCostFromTemplate(
     templateId, List.of(new TemplateSigner(firstRole.getId(), signerId)));
 ```
+
+Template calls do not carry the assignment method; the server derives it from placed fields. Until the API
+enforces the certificate virtual-only rule, both template creation and estimation reject
+`DigitalCertificate` locally with `AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD`.
 
 The `createFromTemplate` request body:
 

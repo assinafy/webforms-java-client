@@ -32,14 +32,14 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.8.0</version>
+    <version>2.8.1</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.8.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.8.1'
 ```
 
 O artefato é publicado no Maven Central, sem configuração de repositório nem autenticação. Veja
@@ -240,6 +240,11 @@ DocumentDetails gerado = client.documents.createFromTemplate(
     new CreateDocumentFromTemplateOptions().setTags(List.of("Gerado")));
 ```
 
+O servidor deduz o método do assignment de template a partir dos campos posicionados. Até a API impor
+atomicamente a regra de método virtual, o SDK rejeita `DigitalCertificate` tanto em `createFromTemplate`
+quanto em `estimateCostFromTemplate`, com o mesmo código estável. Para certificados, crie diretamente um
+assignment `virtual`.
+
 Um PDF enviado não fica imediatamente pronto para assignment: a API extrai os metadados das páginas
 antes. `waitUntilReady` consulta `GET /documents/{id}` até o status chegar a `metadata_ready`,
 `pending_signature` ou `certificated`, lançando `ValidationException` se o documento falhar, expirar,
@@ -356,7 +361,7 @@ dois ou nenhum — o lado que faltar é inferido. Sem nenhum dos dois, ambos ass
 | --- | --- | --- |
 | `Email` *(padrão)* | Código de uso único (OTP) por e-mail, exigido antes de assinar | Gratuito |
 | `Whatsapp` | Código de uso único (OTP) por WhatsApp | Verificação gratuita; a notificação que ela exige custa 0,45 crédito, só em planos pagos |
-| `DigitalCertificate` | O signatário assina com o **próprio certificado ICP-Brasil (A1 ou A3)**, pela extensão de navegador Web PKI, gerando uma assinatura **PAdES qualificada** | 0,5 crédito, além do custo da notificação |
+| `DigitalCertificate` | O signatário assina com o **próprio certificado ICP-Brasil (A1 ou A3)**, pela extensão de navegador Web PKI, gerando uma assinatura **PAdES qualificada**; exige `method: "virtual"` | 0,5 crédito, além do custo da notificação |
 | `IdDocumentFaceMatchBasic` | Captura hospedada do documento de identidade, comparação facial e prova de vida; exige o recurso na conta e CPF válido em `government_id` | Tarifa por signatário mais notificação; consulte a estimativa |
 
 Combinações permitidas — uma combinação inválida devolve HTTP 400:
@@ -383,14 +388,22 @@ CreateAssignmentPayload porWhatsapp = new CreateAssignmentPayload()
 
 #### Certificado digital ICP-Brasil (A1 e A3)
 
-Exige o recurso **Certificado Digital** na conta (planos Standard e Pro), CPF ou CNPJ em `government_id`
-do signatário, e exatamente **um signatário por certificado naquele passo**. Um CPF exige o certificado
-daquela pessoa (e-CPF, ou e-CNPJ que a nomeie como representante legal); um CNPJ exige um e-CNPJ da
-empresa. Tanto o A1 (arquivo) quanto o A3 (token ou cartão) funcionam — a diferença fica na mídia em que
-a chave do signatário está guardada, e ambos são acessados pela mesma extensão Web PKI.
+Exige `method: "virtual"`, o recurso **Certificado Digital** na conta (planos Standard e Pro), CPF ou CNPJ em
+`government_id` do signatário, e exatamente **um signatário por certificado naquele passo**. O fluxo por
+certificado conclui o item virtual do signatário; ele não consegue enviar campos posicionados pelo endpoint
+comum de assinatura `collect`. Um CPF exige o certificado daquela pessoa (e-CPF, ou e-CNPJ que a nomeie como
+representante legal); um CNPJ exige um e-CNPJ da empresa. Tanto o A1 (arquivo) quanto o A3 (token ou cartão)
+funcionam — a diferença fica na mídia em que a chave do signatário está guardada, e ambos são acessados pela
+mesma extensão Web PKI.
 
 Estime o custo antes: a assinatura por certificado custa 0,5 crédito por signatário, aparecendo na
 estimativa sob o código `SignatureDigitalCertificate`, além do custo da notificação escolhida.
+
+O SDK rejeita signatários por certificado em assignments `collect`, tanto em `assignments.create` quanto em
+`assignments.estimateCost`, antes de qualquer requisição. Ramifique por
+`ValidationException.getErrors().get("code")` igual a
+`AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD` (valor estável
+`digital_certificate_requires_virtual_method`), sem depender da mensagem legível.
 
 Antes de abrir o assignment, o signatário precisa confirmar os dados de identidade e aceitar os termos. O
 endpoint comum de assinatura **rejeita** signatários por certificado — a assinatura deles é produzida por

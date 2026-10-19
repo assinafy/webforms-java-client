@@ -408,12 +408,15 @@ public final class DocumentResource extends BaseResource {
      * {@code POST /accounts/{account_id}/templates/{template_id}/documents} — generate a document from a
      * template. Each {@link TemplateSigner} binds a template role to a signer; optional {@code name},
      * {@code message}, {@code expires_at}, {@code editor_fields}, and {@code tags} are taken from {@code options}.
+     * Certificate signers are refused until the API enforces their virtual-only rule after deriving the
+     * assignment method from the template's placed fields.
      *
      * @param templateId required template identifier
      * @param signers required template role-to-signer mappings
      * @param options optional document, invitation, editor-field, and tag values
      * @param accountId account override, or {@code null} for the client default
      * @return created document
+     * @throws ValidationException when a signer uses {@code DigitalCertificate}, or another input is invalid
      */
     public DocumentDetails createFromTemplate(String templateId, List<TemplateSigner> signers,
             CreateDocumentFromTemplateOptions options, String accountId) {
@@ -465,11 +468,14 @@ public final class DocumentResource extends BaseResource {
      * {@link CostEstimate#getNeedsExtraDocument()}, {@link CostEstimate#getBlockingReason()}
      * ({@code PendingPayment} / {@code InsufficientDocuments} / {@code InsufficientCredits}),
      * {@link CostEstimate#getHasSufficientResources()}, and {@link CostEstimate#getBreakdown()} to decide.
+     * Certificate signers are refused because the SDK cannot prove that the template will produce the required
+     * virtual assignment before this potentially billable request reaches the API.
      *
      * @param templateId required template identifier
      * @param signers required role and optional assignment settings
      * @param accountId account override, or {@code null} for the client default
      * @return template-generation credit estimate
+     * @throws ValidationException when a signer uses {@code DigitalCertificate}, or another input is invalid
      */
     public CostEstimate estimateCostFromTemplate(String templateId, List<TemplateSigner> signers,
             String accountId) {
@@ -743,6 +749,9 @@ public final class DocumentResource extends BaseResource {
             }
             if (requireSignerId && (signer.getId() == null || signer.getId().isBlank())) {
                 throw new ValidationException("Template signer ID is required when creating a document");
+            }
+            if ("DigitalCertificate".equals(signer.getVerificationMethod())) {
+                throw AssignmentResource.digitalCertificateRequiresVirtualMethod(null);
             }
         }
     }
