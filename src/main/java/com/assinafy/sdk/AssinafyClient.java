@@ -13,6 +13,7 @@ import com.assinafy.sdk.resources.AssignmentResource;
 import com.assinafy.sdk.resources.BaseResource;
 import com.assinafy.sdk.resources.AccountResource;
 import com.assinafy.sdk.resources.AuthenticationResource;
+import com.assinafy.sdk.resources.ContractResource;
 import com.assinafy.sdk.resources.DocumentResource;
 import com.assinafy.sdk.resources.FieldResource;
 import com.assinafy.sdk.resources.OAuthResource;
@@ -79,6 +80,8 @@ public final class AssinafyClient {
     public final AccountResource accounts;
     /** Current-user profile, notification-preference, and user-statistics operations. */
     public final UserResource users;
+    /** Contract-term listing, updates, amendments, renewal, and termination operations. */
+    public final ContractResource contracts;
 
     /**
      * Builds a client from validated connection, authentication, retry, and timeout options.
@@ -168,6 +171,7 @@ public final class AssinafyClient {
         this.oauth = new OAuthResource(httpClient, baseUrl);
         this.accounts = new AccountResource(httpClient, baseUrl, accountId);
         this.users = new UserResource(httpClient, baseUrl);
+        this.contracts = new ContractResource(httpClient, baseUrl, accountId);
     }
 
     /**

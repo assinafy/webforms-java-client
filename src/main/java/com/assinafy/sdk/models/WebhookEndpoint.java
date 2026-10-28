@@ -18,6 +18,9 @@ import java.util.List;
  * @param createdAt wire {@code created_at} ISO-8601 timestamp
  * @param updatedAt wire {@code updated_at} ISO-8601 timestamp
  * @param secret signing secret returned only when creating a signed endpoint; null in list/view responses
+ * @param resource resource discriminator, normally {@code activity_event_subscription}
+ * @param held wire {@code is_held}: whether delivery is paused after repeated failures
+ * @param heldSince wire {@code held_since} Unix timestamp, or null while delivery runs
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record WebhookEndpoint(
@@ -30,7 +33,30 @@ public record WebhookEndpoint(
         @JsonProperty("signing_enabled") boolean signingEnabled,
         @JsonProperty("created_at") String createdAt,
         @JsonProperty("updated_at") String updatedAt,
-        String secret) {
+        String secret,
+        String resource,
+        @JsonProperty("is_held") boolean held,
+        @JsonProperty("held_since") Long heldSince) {
+
+    /**
+     * Creates an endpoint model with the optional creation-time signing secret.
+     *
+     * @param id endpoint identifier
+     * @param name optional endpoint label
+     * @param url receiver URL
+     * @param email delivery-failure contact email
+     * @param events subscribed event types
+     * @param active whether delivery is active
+     * @param signingEnabled whether delivery signatures are enabled
+     * @param createdAt creation time in ISO-8601
+     * @param updatedAt update time in ISO-8601
+     * @param secret creation-time signing secret, or {@code null}
+     */
+    public WebhookEndpoint(String id, String name, String url, String email, List<String> events,
+            boolean active, boolean signingEnabled, String createdAt, String updatedAt, String secret) {
+        this(id, name, url, email, events, active, signingEnabled, createdAt, updatedAt, secret,
+                null, false, null);
+    }
 
     /**
      * Creates an endpoint model without a creation-time signing secret.
@@ -47,7 +73,8 @@ public record WebhookEndpoint(
      */
     public WebhookEndpoint(String id, String name, String url, String email, List<String> events,
             boolean active, boolean signingEnabled, String createdAt, String updatedAt) {
-        this(id, name, url, email, events, active, signingEnabled, createdAt, updatedAt, null);
+        this(id, name, url, email, events, active, signingEnabled, createdAt, updatedAt, null,
+                null, false, null);
     }
 
     /**
@@ -58,6 +85,7 @@ public record WebhookEndpoint(
     public String toString() {
         return "WebhookEndpoint[id=" + id + ", name=" + name + ", url=" + url + ", email=" + email
                 + ", events=" + events + ", active=" + active + ", signingEnabled=" + signingEnabled
-                + ", createdAt=" + createdAt + ", updatedAt=" + updatedAt + ", secret=<redacted>]";
+                + ", createdAt=" + createdAt + ", updatedAt=" + updatedAt + ", secret=<redacted>"
+                + ", resource=" + resource + ", held=" + held + ", heldSince=" + heldSince + "]";
     }
 }

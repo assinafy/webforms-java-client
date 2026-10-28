@@ -44,7 +44,7 @@ class AccountResourceTest {
         Map<String, Object> account = Map.of(
                 "resource", "account", "id", "acc", "name", "Acme", "roles", List.of("owner"),
                 "primary_color", "aabbcc", "notification_sender_type", "Account",
-                "is_delete_allowed", true);
+                "is_delete_allowed", true, "limits", Map.of("webhook_endpoints", 3));
         server.enqueue(okJson(List.of(account)));
         server.enqueue(okJson(account));
 
@@ -54,6 +54,7 @@ class AccountResourceTest {
         assertThat(accounts).hasSize(1);
         assertThat(selected.getPrimaryColor()).isEqualTo("aabbcc");
         assertThat(selected.getNotificationSenderType()).isEqualTo("Account");
+        assertThat(selected.getLimits()).containsEntry("webhook_endpoints", 3);
         assertThat(server.takeRequest().getPath()).isEqualTo("/accounts");
         assertThat(server.takeRequest().getPath()).isEqualTo("/accounts/acc");
     }

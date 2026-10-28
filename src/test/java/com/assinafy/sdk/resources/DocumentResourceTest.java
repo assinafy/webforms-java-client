@@ -9,6 +9,7 @@ import com.assinafy.sdk.models.SigningProgress;
 import com.assinafy.sdk.models.SendTokenResult;
 import com.assinafy.sdk.models.TemplateSigner;
 import com.assinafy.sdk.models.TemplateEditorField;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
@@ -85,6 +86,9 @@ class DocumentResourceTest {
                 "id", "doc-1",
                 "name", "x.pdf",
                 "status", "metadata_ready",
+                "verification_code", "verify-123",
+                "verification_url", "https://www.assinafy.com.br/verificador/verify-123",
+                "has_contract", true,
                 "artifacts", Map.of(
                         "original", "https://example/x.pdf",
                         "pades", "https://example/x-pades.pdf")
@@ -97,6 +101,9 @@ class DocumentResourceTest {
         assertThat(d.getStatus()).isEqualTo("metadata_ready");
         assertThat(d.getArtifacts().getOriginal()).isEqualTo("https://example/x.pdf");
         assertThat(d.getArtifacts().getPades()).isEqualTo("https://example/x-pades.pdf");
+        assertThat(d.getVerificationCode()).isEqualTo("verify-123");
+        assertThat(d.getVerificationUrl()).endsWith("/verify-123");
+        assertThat(d.getHasContract()).isTrue();
     }
 
     @Test
@@ -283,10 +290,10 @@ class DocumentResourceTest {
     void activities_returnsList() throws Exception {
         server.enqueue(okJson(List.of(Map.of("id", 1, "event", "signature_requested"))));
 
-        var activities = resource.activities("doc-1");
+        var activities = resource.activities("doc-1", "id");
 
         assertThat(server.takeRequest().getPath())
-                .isEqualTo("/documents/doc-1/activities");
+                .isEqualTo("/documents/doc-1/activities?sort=id");
         assertThat(activities).hasSize(1);
     }
 
@@ -340,7 +347,7 @@ class DocumentResourceTest {
 
     @Test
     void templateCreationAndEstimatesPreserveEveryVerificationAndNotificationPair() throws Exception {
-        for (String method : List.of("Email", "Whatsapp", "IdDocumentFaceMatchBasic")) {
+        for (String method : List.of("Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic")) {
             for (String channel : method.equals("Email") ? List.of("Email")
                     : method.equals("Whatsapp") ? List.of("Whatsapp") : List.of("Email", "Whatsapp")) {
                 TemplateSigner signer = new TemplateSigner("role-1", "signer-1")
@@ -371,19 +378,37 @@ class DocumentResourceTest {
     }
 
     @Test
-    void templateCreationAndEstimateRejectCertificateSignersWithStableCode() {
-        TemplateSigner signer = new TemplateSigner("role-1", "signer-1")
-                .setVerificationMethod("DigitalCertificate");
+    void templateCreationAndEstimateRejectCertificateSignerSharingAStep() {
+        List<TemplateSigner> signers = List.of(
+                new TemplateSigner("role-1", "signer-1")
+                        .setVerificationMethod("DigitalCertificate").setStep(1),
+                new TemplateSigner("role-2", "signer-2").setVerificationMethod("Email").setStep(1));
 
-        assertThatThrownBy(() -> resource.createFromTemplate("template-1", List.of(signer)))
+        assertThatThrownBy(() -> resource.createFromTemplate("template-1", signers))
                 .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
-                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD)
-                        .containsEntry("method", null));
-        assertThatThrownBy(() -> resource.estimateCostFromTemplate("template-1", List.of(signer)))
+                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP)
+                        .containsEntry("step", 1));
+        assertThatThrownBy(() -> resource.estimateCostFromTemplate("template-1", signers))
                 .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
-                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD)
-                        .containsEntry("method", null));
+                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP)
+                        .containsEntry("step", 1));
         assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
+    void createFromTemplateCanFindOrCreateSignerByEmail() throws Exception {
+        server.enqueue(okJson(Map.of("id", "doc-1")));
+
+        resource.createFromTemplate("template-1", List.of(new TemplateSigner("role-1")
+                .setEmail("signer@example.com").setName("Example Signer")
+                .setWhatsappPhoneNumber("+5548999990000")));
+
+        JsonNode signer = MAPPER.readTree(server.takeRequest().getBody().readUtf8()).path("signers").get(0);
+        assertThat(signer.path("role_id").asText()).isEqualTo("role-1");
+        assertThat(signer.path("email").asText()).isEqualTo("signer@example.com");
+        assertThat(signer.path("name").asText()).isEqualTo("Example Signer");
+        assertThat(signer.path("whatsapp_phone_number").asText()).isEqualTo("+5548999990000");
+        assertThat(signer.has("id")).isFalse();
     }
 
     @Test
@@ -419,11 +444,11 @@ class DocumentResourceTest {
     }
 
     @Test
-    void createFromTemplate_requiresSignerId() {
+    void createFromTemplateRequiresSignerIdOrEmail() {
         assertThatThrownBy(() -> resource.createFromTemplate("template-1",
                 List.of(new TemplateSigner("role-1"))))
                 .isInstanceOf(ValidationException.class)
-                .hasMessageContaining("signer ID");
+                .hasMessageContaining("email");
         assertThat(server.getRequestCount()).isZero();
     }
 
@@ -534,13 +559,19 @@ class DocumentResourceTest {
 
     @Test
     void search_hitsSearchEndpointWithParams() throws Exception {
-        server.enqueue(okJson(List.of(Map.of("id", "doc-1", "name", "contract.pdf"))));
+        server.enqueue(okJson(List.of(Map.of(
+                "id", "doc-1",
+                "name", "contract.pdf",
+                "verification_code", "verify-123",
+                "verification_url", "https://www.assinafy.com.br/verificador/verify-123"))));
 
         PaginatedResult<DocumentListItem> page = resource.search(Map.of("search", "contract"));
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getPath()).isEqualTo("/accounts/acc/documents/search?search=contract");
         assertThat(page.getData().get(0).getName()).isEqualTo("contract.pdf");
+        assertThat(page.getData().get(0).getVerificationCode()).isEqualTo("verify-123");
+        assertThat(page.getData().get(0).getVerificationUrl()).endsWith("/verify-123");
     }
 
     @Test

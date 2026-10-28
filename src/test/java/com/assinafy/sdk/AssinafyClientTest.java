@@ -50,6 +50,7 @@ class AssinafyClientTest {
                 .setApiKey("k")
                 .setAccountId("acc"));
         assertThat(client.documents).isNotNull();
+        assertThat(client.contracts).isNotNull();
         assertThat(client.signers).isNotNull();
         assertThat(client.assignments).isNotNull();
         assertThat(client.webhooks).isNotNull();

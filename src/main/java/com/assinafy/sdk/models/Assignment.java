@@ -17,6 +17,12 @@ public final class Assignment {
     private String resource;
     private String method;
 
+    @JsonProperty("document_id")
+    private String documentId;
+
+    @JsonProperty("created_at")
+    private String createdAt;
+
     @JsonProperty("expires_at")
     @JsonAlias("expiration")
     private String expiresAt;
@@ -79,6 +85,34 @@ public final class Assignment {
      * @param method signing method returned by the API
      */
     public void setMethod(String method) { this.method = method; }
+
+    /**
+     * Returns the document this assignment belongs to, or {@code null} after that document is deleted.
+     *
+     * @return owning document identifier, or {@code null}
+     */
+    public String getDocumentId() { return documentId; }
+
+    /**
+     * Sets owning document identifier.
+     *
+     * @param documentId owning document identifier
+     */
+    public void setDocumentId(String documentId) { this.documentId = documentId; }
+
+    /**
+     * Returns ISO 8601 assignment creation time.
+     *
+     * @return ISO 8601 assignment creation time
+     */
+    public String getCreatedAt() { return createdAt; }
+
+    /**
+     * Sets ISO 8601 assignment creation time.
+     *
+     * @param createdAt ISO 8601 assignment creation time
+     */
+    public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
 
     /**
      * Returns the optional ISO 8601 {@code expires_at} timestamp.

@@ -64,6 +64,29 @@ public final class WebhookResource extends BaseResource {
     }
 
     /**
+     * {@code GET /accounts/{account_id}/webhooks/endpoints?url=...} — list the endpoint registered with the
+     * exact URL, if any. The URL is passed unchanged.
+     *
+     * @param url exact registered endpoint URL
+     * @param accountId account override, or {@code null} for the client default
+     * @return matching endpoint list, never {@code null}
+     */
+    public List<WebhookEndpoint> listEndpointsByUrl(String url, String accountId) {
+        requireWebhookUrl(url);
+        String id = accountId(accountId);
+        return orEmpty(httpGet("/accounts/" + id + "/webhooks/endpoints", Map.of("url", url),
+                new TypeReference<List<WebhookEndpoint>>() {}));
+    }
+
+    /**
+     * {@code GET /accounts/{account_id}/webhooks/endpoints?url=...} in the default account.
+     *
+     * @param url exact registered endpoint URL
+     * @return matching endpoint list, never {@code null}
+     */
+    public List<WebhookEndpoint> listEndpointsByUrl(String url) { return listEndpointsByUrl(url, null); }
+
+    /**
      * {@code POST /accounts/{account_id}/webhooks/endpoints} — register a URL to receive the account's events.
      * Requires {@code url}, {@code email}, and {@code events}. Creating an endpoint past the plan's limit
      * (1, or 3 on paid plans) fails with HTTP 403; reusing another endpoint's URL fails with HTTP 400. When

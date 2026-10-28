@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /** Client for account-wide assignment lists and document-scoped assignment operations. */
 public final class AssignmentResource extends BaseResource {
@@ -26,6 +27,10 @@ public final class AssignmentResource extends BaseResource {
     /** Stable validation code used when a certificate signer is not guaranteed a virtual assignment. */
     public static final String DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD =
             "digital_certificate_requires_virtual_method";
+
+    /** Stable validation code used when a certificate signer shares a signing step. */
+    public static final String DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP =
+            "digital_certificate_requires_exclusive_step";
 
     /**
      * Creates an instance.
@@ -349,6 +354,7 @@ public final class AssignmentResource extends BaseResource {
         for (SignerRef ref : signerRefs) {
             normalisedSigners.add(normaliseSignerRef(ref, estimate));
         }
+        validateDigitalCertificateSteps(signerRefs, SignerRef::getVerificationMethod, SignerRef::getStep);
         if (!"virtual".equals(method) && normalisedSigners.stream()
                 .anyMatch(signer -> "DigitalCertificate".equals(signer.get("verification_method")))) {
             throw digitalCertificateRequiresVirtualMethod(method);
@@ -404,5 +410,24 @@ public final class AssignmentResource extends BaseResource {
         errors.put("code", DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD);
         errors.put("method", method);
         return new ValidationException("DigitalCertificate signers require method: virtual", errors);
+    }
+
+    static <T> void validateDigitalCertificateSteps(List<T> signers, Function<T, String> method,
+            Function<T, Integer> step) {
+        Map<Integer, Integer> stepSizes = new HashMap<>();
+        for (T signer : signers) {
+            int signerStep = step.apply(signer) != null ? step.apply(signer) : 1;
+            stepSizes.merge(signerStep, 1, Integer::sum);
+        }
+        for (T signer : signers) {
+            int signerStep = step.apply(signer) != null ? step.apply(signer) : 1;
+            if ("DigitalCertificate".equals(method.apply(signer)) && stepSizes.get(signerStep) > 1) {
+                Map<String, Object> errors = new LinkedHashMap<>();
+                errors.put("code", DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP);
+                errors.put("step", signerStep);
+                throw new ValidationException("DigitalCertificate signers must be alone in their signing step",
+                        errors);
+            }
+        }
     }
 }

@@ -1,7 +1,7 @@
 # Examples
 
 Worked end-to-end examples for the SDK. The [API reference](API_REFERENCE.md) contains the complete
-112-operation matrix and centralized request/response payload definitions.
+118-operation matrix and centralized request/response payload definitions.
 
 ## Response envelope
 
@@ -95,10 +95,11 @@ user stats return `DocumentStatsRow[]`; each row contains `period`, `documents_u
 `signature_requests_viewed`, `signature_requests_completed`, and `documents_certified`. Daily stats require a
 `month` in `YYYY-MM` form.
 
-Notification preferences use these nine case-sensitive boolean JSON keys: `DocumentCompleted`,
+Notification preferences use these 13 case-sensitive boolean JSON keys: `DocumentCompleted`,
 `SignerDeclined`, `DocumentCancelled`, `DocumentAboutToExpire`, `DocumentExpired`,
 `DocumentExpirationReset`, `DocumentProcessingFailed`, `TemplateProcessingFailed`, and
-`SignerWhatsappFailed`. A PUT merges non-null values and returns the complete map.
+`SignerWhatsappFailed`, plus `ContractRenewalNotice`, `ContractExpiring`, `ContractExpired`, and
+`ContractRenewed`. A PUT merges non-null values and returns the complete map.
 
 ## Authentication
 
@@ -508,6 +509,7 @@ byte[] original = client.documents.download(doc.getId(), "original");
 byte[] thumb    = client.documents.thumbnail(doc.getId());            // GET /documents/{id}/thumbnail (JPEG)
 byte[] pageImg  = client.documents.downloadPage(doc.getId(), pageId); // GET /documents/{id}/pages/{pid}/download
 List<DocumentActivity> log = client.documents.activities(doc.getId());// GET /documents/{id}/activities
+List<DocumentActivity> oldestFirst = client.documents.activities(doc.getId(), "id");
 ```
 
 > `download(id)` requests the `"certificated"` (final signed) artifact, which is only available after the
@@ -580,6 +582,138 @@ System.out.printf("Signed: %d/%d (%.1f%%)%n",
 // Delete only after documents.statuses() marks the current status deletable:
 // client.documents.delete(doc.getId());
 ```
+
+## Tracked Contracts
+
+Contract tracking is plan-gated. Create or partially update terms on a document with
+`PUT /accounts/{accountId}/documents/{documentId}/contract`:
+
+```java
+DocumentContractInput terms = new DocumentContractInput()
+    .setStatus("active")
+    .setCounterpartyName("Example Company")
+    .setCounterpartyTaxpayerId("11222333000181")
+    .setValue(new BigDecimal("120000.50"))
+    .setCurrency("BRL")
+    .setStartDate("2026-11-01")
+    .setEndDate("2027-10-31")
+    .setAutoRenew(true)
+    .setRenewalTermMonths(12)
+    .setNoticePeriodDays(30)
+    .setOwnerId(ownerId)
+    .setMetadata(Map.of("crm_stage", "won"))
+    .setExternalReferences(List.of(new ContractExternalReference("hubspot", "98765")));
+
+DocumentContractResult saved = client.contracts.set(documentId, terms);
+DocumentContract contract = (DocumentContract) saved;
+```
+
+Request body (only called setters are sent; a called nullable setter with null clears that property):
+
+```json
+{
+  "status": "active",
+  "counterparty_name": "Example Company",
+  "counterparty_taxpayer_id": "11222333000181",
+  "value": 120000.50,
+  "currency": "BRL",
+  "start_date": "2026-11-01",
+  "end_date": "2027-10-31",
+  "auto_renew": true,
+  "renewal_term_months": 12,
+  "notice_period_days": 30,
+  "owner_id": "member-id",
+  "metadata": { "crm_stage": "won" },
+  "external_references": [ { "system": "hubspot", "id": "98765" } ]
+}
+```
+
+Response `data`:
+
+```json
+{
+  "resource": "document_contract",
+  "document_id": "document-id",
+  "status": "active",
+  "counterparty_name": "Example Company",
+  "counterparty_taxpayer_id": "11222333000181",
+  "value": 120000.50,
+  "currency": "BRL",
+  "start_date": "2026-11-01",
+  "end_date": "2027-10-31",
+  "auto_renew": true,
+  "renewal_term_months": 12,
+  "notice_period_days": 30,
+  "term": 1,
+  "owner_id": "member-id",
+  "metadata": { "crm_stage": "won" },
+  "external_references": [ { "system": "hubspot", "id": "98765" } ],
+  "created_at": "2026-10-23T12:00:00Z",
+  "updated_at": "2026-10-23T12:00:00Z"
+}
+```
+
+Read one contract, its family, or a filtered page:
+
+```java
+DocumentContractResult one = client.contracts.get(documentId);
+DocumentContract family = client.contracts.related(documentId); // includes amendments[]
+PaginatedResult<DocumentContract> endingSoon = client.contracts.list(Map.of(
+    "status", "active", "ending_within_days", "30", "sort", "end_date", "expand", "document"));
+```
+
+Link another document as an amendment, renewal, or termination instrument. The remaining properties are the
+delta that will apply after the instrument is certificated:
+
+```java
+DocumentContractResult linked = client.contracts.set(amendmentDocumentId,
+    new DocumentContractInput()
+        .setParentDocumentId(documentId)
+        .setRelationType("amendment")
+        .setValue(new BigDecimal("130000.00"))
+        .setEndDate("2028-06-30"));
+```
+
+An instrument read returns `DocumentContractAmendment`:
+
+```json
+{
+  "resource": "document_contract_amendment",
+  "document_id": "amendment-document-id",
+  "document_name": "Amendment 1.pdf",
+  "parent_document_id": "document-id",
+  "relation_type": "amendment",
+  "number": null,
+  "status": "pending",
+  "document_status": "pending_signature",
+  "apply_error": null,
+  "currency": "BRL",
+  "terms": { "value": 130000.00, "end_date": "2028-06-30" },
+  "changes": {
+    "value": { "from": 120000.50, "to": 130000.00 },
+    "end_date": { "from": "2027-10-31", "to": "2028-06-30" }
+  },
+  "applied_at": null,
+  "created_at": "2026-10-24T12:00:00Z",
+  "updated_at": "2026-10-24T12:00:00Z"
+}
+```
+
+Use the last-read timestamp as a write precondition. Renewal names the current term unless it supplies an
+explicit later end date, which prevents a repeated call from advancing twice:
+
+```java
+DocumentContract renewed = client.contracts.renew(documentId,
+    new ContractRenewalPayload().setTerm(contract.getTerm())
+        .setValue(new BigDecimal("130000.00")).setUpdatedAt(contract.getUpdatedAt()));
+
+DocumentContract terminated = client.contracts.terminate(documentId,
+    new ContractTerminationPayload().setReason("Replaced")
+        .setUpdatedAt(renewed.getUpdatedAt()));
+```
+
+Contract changes appear in document activities and the eight `document_contract_*` webhook events listed in
+the [API reference](API_REFERENCE.md#webhook-deliveries).
 
 ## Signers
 
@@ -893,12 +1027,15 @@ Creation response `data` (`secret` is omitted by `listEndpoints`, `getEndpoint`,
 
 ```json
 {
+  "resource": "activity_event_subscription",
   "id": "65f1c2a9b3e4d5f60718293a4b5c6d7e",
   "name": "ERP",
   "url": "https://example.com/webhooks/assinafy",
   "email": "ops@example.com",
   "events": ["document_ready", "signer_signed_document"],
   "is_active": true,
+  "is_held": false,
+  "held_since": null,
   "signing_enabled": true,
   "secret": "whsec_creation_secret",
   "created_at": "2026-10-01T12:00:00Z",
@@ -908,6 +1045,7 @@ Creation response `data` (`secret` is omitted by `listEndpoints`, `getEndpoint`,
 
 ```java
 List<WebhookEndpoint> all = client.webhooks.listEndpoints();          // GET .../webhooks/endpoints, oldest first
+List<WebhookEndpoint> exact = client.webhooks.listEndpointsByUrl(endpoint.url()); // GET .../endpoints?url=...
 client.webhooks.getEndpoint(endpoint.id());                           // GET .../webhooks/endpoints/{id}
 client.webhooks.updateEndpoint(endpoint.id(),                         // PUT .../webhooks/endpoints/{id}
     new WebhookEndpointPayload().setActive(false));                   // Request: { "is_active": false }
@@ -941,6 +1079,11 @@ switch (event.event()) {
 `verify` throws `ValidationException` when the signature does not match, the timestamp is more than five minutes
 from the local clock, or a header is missing. Deduplicate on `webhook-id`.
 
+Connection failures, timeouts, 408, 429, and 5xx responses receive up to six attempts about ten minutes
+apart. After ten failed deliveries in a row, `is_held` becomes true and the API probes the endpoint after 3,
+15, and 60 minutes, then every 6 hours. A successful probe delivers missed events oldest first. Dispatch
+history exposes `webhook_id`, `attempt`, `kind` (`scheduled`, `probe`, or `manual`), and `will_retry`.
+
 ### Legacy subscription
 
 The subscription operations act on the account's oldest endpoint.
@@ -969,6 +1112,8 @@ Response `data` (also returned by `getSubscription()`):
 {
   "events": ["document_ready", "signer_signed_document", "document_processing_failed"],
   "is_active": true,
+  "is_held": false,
+  "held_since": null,
   "url": "https://example.com/webhooks/assinafy",
   "email": "admin@example.com",
   "updated_at": "2026-06-05T20:46:43Z"
@@ -987,7 +1132,7 @@ client.webhooks.retryDispatch(dispatchId);                          // POST .../
 ```
 
 The receiver gets a JSON `POST` with `{id, event, message, payload, origin, created_at, subject, object,
-account_id}`. See [Webhook deliveries](API_REFERENCE.md#webhook-deliveries) for all 18 event types and their
+account_id}`. See [Webhook deliveries](API_REFERENCE.md#webhook-deliveries) for all 31 event types and their
 event-specific payload keys.
 
 ## Tags
@@ -1060,18 +1205,29 @@ DocumentDetails doc = client.documents.createFromTemplate(
 // Estimate cost — POST /accounts/{id}/templates/{tid}/documents/estimate-cost  (typed CostEstimate)
 CostEstimate cost = client.documents.estimateCostFromTemplate(
     templateId, List.of(new TemplateSigner(firstRole.getId(), signerId)));
+
+// Without an ID, the account signer is found or created by email.
+DocumentDetails createdByEmail = client.documents.createFromTemplate(templateId,
+    List.of(new TemplateSigner(firstRole.getId())
+        .setEmail("signer@example.com").setName("Example Signer")
+        .setWhatsappPhoneNumber("+5548999990000")));
 ```
 
-Template calls do not carry the assignment method; the server derives it from placed fields. Until the API
-enforces the certificate virtual-only rule, both template creation and estimation reject
-`DigitalCertificate` locally with `AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD`.
+Template calls do not carry the assignment method; the server derives it from placed fields and rejects a
+certificate signer whose role has placed fields. Both creation and estimation reject a certificate signer
+that shares its signing step with another signer, using
+`AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP`.
 
 The `createFromTemplate` request body:
 
 ```json
 {
-  "signers": [ { "role_id": "<role>", "id": "<signer>", "verification_method": "Email",
-                 "notification_methods": ["Email"], "step": 1 } ],
+  "signers": [
+    { "role_id": "<role>", "id": "<signer>", "verification_method": "Email",
+      "notification_methods": ["Email"], "step": 1 },
+    { "role_id": "<other-role>", "email": "signer@example.com", "name": "Example Signer",
+      "whatsapp_phone_number": "+5548999990000" }
+  ],
   "name": "NDA - John Doe",
   "editor_fields": [ { "field_id": "<editorField>", "value": "John Doe" } ],
   "tags": ["Generated"]

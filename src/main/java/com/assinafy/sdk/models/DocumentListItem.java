@@ -46,6 +46,12 @@ public final class DocumentListItem {
     @JsonProperty("declined_by")
     private Signer declinedBy;
 
+    @JsonProperty("verification_code")
+    private String verificationCode;
+
+    @JsonProperty("verification_url")
+    private String verificationUrl;
+
     /**
      * Returns the document identifier.
      *
@@ -269,4 +275,32 @@ public final class DocumentListItem {
      * @param declinedBy value of {@code declined_by}
      */
     public void setDeclinedBy(Signer declinedBy) { this.declinedBy = declinedBy; }
+
+    /**
+     * Returns the public code printed on the certificate page, or {@code null} before certification.
+     *
+     * @return public verification code, or {@code null}
+     */
+    public String getVerificationCode() { return verificationCode; }
+
+    /**
+     * Sets public verification code.
+     *
+     * @param verificationCode public verification code
+     */
+    public void setVerificationCode(String verificationCode) { this.verificationCode = verificationCode; }
+
+    /**
+     * Returns the public document-verification page, or {@code null} before certification.
+     *
+     * @return public verification URL, or {@code null}
+     */
+    public String getVerificationUrl() { return verificationUrl; }
+
+    /**
+     * Sets public verification URL.
+     *
+     * @param verificationUrl public verification URL
+     */
+    public void setVerificationUrl(String verificationUrl) { this.verificationUrl = verificationUrl; }
 }

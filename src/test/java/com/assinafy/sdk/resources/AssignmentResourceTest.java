@@ -199,6 +199,23 @@ class AssignmentResourceTest {
     }
 
     @Test
+    void createAndEstimateRejectCertificateSignerSharingAStep() {
+        CreateAssignmentPayload payload = new CreateAssignmentPayload().setSigners(List.of(
+                SignerRef.of("s1").setVerificationMethod("DigitalCertificate").setStep(2),
+                SignerRef.of("s2").setVerificationMethod("Email").setStep(2)));
+
+        assertThatThrownBy(() -> resource.create("doc-1", payload))
+                .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
+                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP)
+                        .containsEntry("step", 2));
+        assertThatThrownBy(() -> resource.estimateCost("doc-1", payload))
+                .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
+                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP)
+                        .containsEntry("step", 2));
+        assertThat(server.getRequestCount()).isZero();
+    }
+
+    @Test
     void create_postsToCorrectUrl() throws Exception {
         server.enqueue(okJson(Map.of("id", "assignment-1")));
 
@@ -258,6 +275,8 @@ class AssignmentResourceTest {
     void create_parsesDocumentedAssignmentShape() throws Exception {
         server.enqueue(okJson(Map.of(
                 "id", "a1",
+                "document_id", "doc-1",
+                "created_at", "2026-10-28T12:00:00Z",
                 "copy_receivers", List.of(Map.of("id", "copy-1", "full_name", "Copy Receiver")),
                 "items", List.of(Map.of(
                         "id", "item-1",
@@ -278,6 +297,8 @@ class AssignmentResourceTest {
         Assignment result = resource.create("doc-1", new CreateAssignmentPayload().setSignerStrings("signer-1"));
 
         assertThat(result.getCopyReceivers()).hasSize(1);
+        assertThat(result.getDocumentId()).isEqualTo("doc-1");
+        assertThat(result.getCreatedAt()).isEqualTo("2026-10-28T12:00:00Z");
         assertThat(result.getItems()).hasSize(1);
         assertThat(result.getSummary().getSigners()).hasSize(1);
         assertThat(result.getSigningUrls().get(0).getSignerId()).isEqualTo("signer-1");
@@ -612,11 +633,12 @@ class AssignmentResourceTest {
     void listSendsPaginationAlongsideTheAccountContext() throws Exception {
         server.enqueue(okJson(List.of(Map.of("id", "a1", "method", "virtual"))));
 
-        PaginatedResult<Assignment> page = resource.list(Map.of("page", "2", "per_page", "5"));
+        PaginatedResult<Assignment> page = resource.list(Map.of("page", "2", "per_page", "5",
+                "sort", "-created_at"));
 
         RecordedRequest req = server.takeRequest();
         assertThat(req.getPath()).startsWith("/assignments?")
-                .contains("page=2", "per-page=5", "accountId=acc");
+                .contains("page=2", "per-page=5", "accountId=acc", "sort=-created_at");
         assertThat(page.getData().get(0).getId()).isEqualTo("a1");
     }
 

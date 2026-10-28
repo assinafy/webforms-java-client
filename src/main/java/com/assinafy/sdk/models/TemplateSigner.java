@@ -14,6 +14,12 @@ public final class TemplateSigner {
 
     private final String id;
 
+    private String email;
+    private String name;
+
+    @JsonProperty("whatsapp_phone_number")
+    private String whatsappPhoneNumber;
+
     @JsonProperty("verification_method")
     private String verificationMethod;
 
@@ -55,6 +61,54 @@ public final class TemplateSigner {
      * @return existing signer ID, or {@code null}
      */
     public String getId() { return id; }
+
+    /**
+     * Returns the email used to find or create a signer when {@link #getId()} is absent.
+     *
+     * @return signer email, or {@code null}
+     */
+    public String getEmail() { return email; }
+
+    /**
+     * Sets the email used to find or create a signer when no ID is supplied.
+     *
+     * @param email signer email
+     * @return this mapping
+     */
+    public TemplateSigner setEmail(String email) { this.email = email; return this; }
+
+    /**
+     * Returns the full name used when the email does not match an existing account signer.
+     *
+     * @return signer full name, or {@code null}
+     */
+    public String getName() { return name; }
+
+    /**
+     * Sets the full name used when the email does not match an existing account signer.
+     *
+     * @param name signer full name
+     * @return this mapping
+     */
+    public TemplateSigner setName(String name) { this.name = name; return this; }
+
+    /**
+     * Returns the WhatsApp number used when creating a signer by email.
+     *
+     * @return WhatsApp number, or {@code null}
+     */
+    public String getWhatsappPhoneNumber() { return whatsappPhoneNumber; }
+
+    /**
+     * Sets the WhatsApp number used when creating a signer by email.
+     *
+     * @param whatsappPhoneNumber WhatsApp number
+     * @return this mapping
+     */
+    public TemplateSigner setWhatsappPhoneNumber(String whatsappPhoneNumber) {
+        this.whatsappPhoneNumber = whatsappPhoneNumber;
+        return this;
+    }
 
     /**
      * Returns wire {@code verification_method}, or {@code null}.

@@ -5,8 +5,8 @@
 SDK cliente Java para a [API Assinafy](https://api.assinafy.com.br/v1/docs) — plataforma brasileira
 de assinatura eletrônica.
 
-Cobre as 112 operações do contrato oficial da API: contas, usuários, autenticação, OAuth, documentos,
-signatários, assignments, campos, templates, tags, webhooks e os fluxos de assinatura do signatário.
+Cobre as 118 operações do contrato oficial da API: contas, usuários, autenticação, OAuth, documentos,
+contratos, signatários, assignments, campos, templates, tags, webhooks e os fluxos de assinatura do signatário.
 
 > Este artefato usa `new AssinafyClientOptions().setApiKey(...)`. O nome `webforms` é histórico;
 > o SDK atende a API Assinafy. Para novas integrações, a Assinafy recomenda `com.assinafy:assinafy-sdk`.
@@ -32,14 +32,14 @@ consulta por operação, os [exemplos](docs/EXAMPLES.md) trazem programas execut
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.8.1</version>
+    <version>2.9.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.8.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.9.0'
 ```
 
 O artefato é publicado no Maven Central, sem configuração de repositório nem autenticação. Veja
@@ -221,8 +221,8 @@ client.documents.replaceTags(doc.getId(), List.of(contratoTagId, trimestreTagId)
 boolean desanexada = client.documents.detachTag(doc.getId(), tagId);
 ```
 
-Templates produzem um documento e seu assignment em uma única chamada. Forneça uma entrada de signatário
-por papel do template; os signatários já precisam existir na conta.
+Templates produzem um documento e seu assignment em uma única chamada. Forneça uma entrada por papel: use o
+ID de um signatário existente ou um email para localizar ou criar o signatário na conta.
 
 ```java
 PaginatedResult<TemplateListItem> templates = client.templates.list(Map.of("search", "NDA"));
@@ -240,10 +240,9 @@ DocumentDetails gerado = client.documents.createFromTemplate(
     new CreateDocumentFromTemplateOptions().setTags(List.of("Gerado")));
 ```
 
-O servidor deduz o método do assignment de template a partir dos campos posicionados. Até a API impor
-atomicamente a regra de método virtual, o SDK rejeita `DigitalCertificate` tanto em `createFromTemplate`
-quanto em `estimateCostFromTemplate`, com o mesmo código estável. Para certificados, crie diretamente um
-assignment `virtual`.
+O servidor deduz o método do assignment de template a partir dos campos posicionados e recusa
+`DigitalCertificate` quando o papel tem campos posicionados. Tanto na criação quanto na estimativa, o SDK
+também exige que cada signatário por certificado fique sozinho em seu passo de assinatura.
 
 Um PDF enviado não fica imediatamente pronto para assignment: a API extrai os metadados das páginas
 antes. `waitUntilReady` consulta `GET /documents/{id}` até o status chegar a `metadata_ready`,
@@ -404,6 +403,9 @@ O SDK rejeita signatários por certificado em assignments `collect`, tanto em `a
 `ValidationException.getErrors().get("code")` igual a
 `AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD` (valor estável
 `digital_certificate_requires_virtual_method`), sem depender da mensagem legível.
+Se um signatário por certificado compartilhar o passo, o código é
+`AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP` (valor
+`digital_certificate_requires_exclusive_step`). A mesma validação vale para criação e estimativa por template.
 
 Antes de abrir o assignment, o signatário precisa confirmar os dados de identidade e aceitar os termos. O
 endpoint comum de assinatura **rejeita** signatários por certificado — a assinatura deles é produzida por
@@ -596,8 +598,10 @@ tratar(evento.event(), evento.object());
 verificador = new WebhookVerifier(client.webhooks.rotateEndpointSecret(endpoint.id()));
 ```
 
-Responda `2xx` rápido e processe depois. Cada evento tem até duas tentativas, com três segundos entre elas;
-depois de dez eventos seguidos com falha, o endpoint entra em circuit breaker até uma entrega dar certo.
+Responda `2xx` rápido e processe depois. Falhas de conexão, timeout, 408, 429 e 5xx recebem até seis tentativas,
+em torno de dez minutos entre elas. Depois de dez entregas seguidas com falha, o endpoint fica pausado
+(`is_held`): a API o testa após 3, 15 e 60 minutos e depois a cada 6 horas. Quando um teste funciona, os eventos
+perdidos são reenviados do mais antigo para o mais novo.
 
 As operações antigas de assinatura (`register`, `getSubscription`, `inactivate`) continuam funcionando e
 agem sobre o endpoint mais antigo da conta:
@@ -631,6 +635,33 @@ byte[] imagemPagina = client.documents.downloadPage(doc.getId(), pageId);
 DocumentVerification verificacao = client.documents.verify(signatureHash);
 boolean valido = Boolean.TRUE.equals(verificacao.getIsValid());
 ```
+
+### Contratos acompanhados
+
+Em planos com acompanhamento de contratos, `client.contracts` registra termos no documento e acompanha
+vencimento, renovação e instrumentos de alteração. Use `updated_at` nas mutações para recusar uma gravação
+baseada em dados antigos; renovações também aceitam o termo atual para que uma repetição não renove duas vezes.
+
+```java
+DocumentContract contrato = (DocumentContract) client.contracts.set(doc.getId(),
+    new DocumentContractInput()
+        .setStatus("active")
+        .setCounterpartyName("Empresa Exemplo")
+        .setValue(new BigDecimal("120000.00"))
+        .setCurrency("BRL")
+        .setEndDate("2027-10-31")
+        .setAutoRenew(true)
+        .setRenewalTermMonths(12));
+
+PaginatedResult<DocumentContract> vencendo = client.contracts.list(Map.of(
+    "status", "active", "ending_within_days", "30", "sort", "end_date"));
+client.contracts.renew(doc.getId(), new ContractRenewalPayload()
+    .setTerm(contrato.getTerm()).setUpdatedAt(contrato.getUpdatedAt()));
+```
+
+`contracts.get` devolve `DocumentContract` para o documento principal ou `DocumentContractAmendment` para um
+instrumento vinculado. `contracts.related` devolve a família; `contracts.terminate` encerra o ciclo de alertas.
+Os payloads, filtros, respostas e eventos estão na [referência da API](docs/API_REFERENCE.md).
 
 Apague apenas o que é seu e apenas quando o status permitir — `documents.statuses()` informa quais
 status são deletáveis.

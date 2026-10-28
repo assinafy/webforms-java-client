@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-/** The nine configurable owner-facing email notification switches. Null fields are omitted on update. */
+/** The configurable owner-facing email notification switches. Null fields are omitted on update. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public final class NotificationPreferences {
@@ -27,6 +27,14 @@ public final class NotificationPreferences {
     private Boolean templateProcessingFailed;
     @JsonProperty("SignerWhatsappFailed")
     private Boolean signerWhatsappFailed;
+    @JsonProperty("ContractRenewalNotice")
+    private Boolean contractRenewalNotice;
+    @JsonProperty("ContractExpiring")
+    private Boolean contractExpiring;
+    @JsonProperty("ContractExpired")
+    private Boolean contractExpired;
+    @JsonProperty("ContractRenewed")
+    private Boolean contractRenewed;
 
     /** Creates an empty preference set for either deserialization or a partial update. */
     public NotificationPreferences() {}
@@ -165,5 +173,73 @@ public final class NotificationPreferences {
      */
     public NotificationPreferences setSignerWhatsappFailed(Boolean value) {
         signerWhatsappFailed = value; return this;
+    }
+
+    /**
+     * Returns wire {@code ContractRenewalNotice}, or {@code null} when unset.
+     *
+     * @return wire {@code ContractRenewalNotice}, or {@code null} when unset
+     */
+    public Boolean getContractRenewalNotice() { return contractRenewalNotice; }
+
+    /**
+     * Sets wire {@code ContractRenewalNotice}; {@code null} omits it.
+     *
+     * @param value wire {@code ContractRenewalNotice}; {@code null} omits it
+     * @return this payload
+     */
+    public NotificationPreferences setContractRenewalNotice(Boolean value) {
+        contractRenewalNotice = value; return this;
+    }
+
+    /**
+     * Returns wire {@code ContractExpiring}, or {@code null} when unset.
+     *
+     * @return wire {@code ContractExpiring}, or {@code null} when unset
+     */
+    public Boolean getContractExpiring() { return contractExpiring; }
+
+    /**
+     * Sets wire {@code ContractExpiring}; {@code null} omits it.
+     *
+     * @param value wire {@code ContractExpiring}; {@code null} omits it
+     * @return this payload
+     */
+    public NotificationPreferences setContractExpiring(Boolean value) {
+        contractExpiring = value; return this;
+    }
+
+    /**
+     * Returns wire {@code ContractExpired}, or {@code null} when unset.
+     *
+     * @return wire {@code ContractExpired}, or {@code null} when unset
+     */
+    public Boolean getContractExpired() { return contractExpired; }
+
+    /**
+     * Sets wire {@code ContractExpired}; {@code null} omits it.
+     *
+     * @param value wire {@code ContractExpired}; {@code null} omits it
+     * @return this payload
+     */
+    public NotificationPreferences setContractExpired(Boolean value) {
+        contractExpired = value; return this;
+    }
+
+    /**
+     * Returns wire {@code ContractRenewed}, or {@code null} when unset.
+     *
+     * @return wire {@code ContractRenewed}, or {@code null} when unset
+     */
+    public Boolean getContractRenewed() { return contractRenewed; }
+
+    /**
+     * Sets wire {@code ContractRenewed}; {@code null} omits it.
+     *
+     * @param value wire {@code ContractRenewed}; {@code null} omits it
+     * @return this payload
+     */
+    public NotificationPreferences setContractRenewed(Boolean value) {
+        contractRenewed = value; return this;
     }
 }

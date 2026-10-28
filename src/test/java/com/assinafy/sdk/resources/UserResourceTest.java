@@ -89,7 +89,7 @@ class UserResourceTest {
     }
 
     @Test
-    void updatePreferencesUsesAllNineCaseSensitiveKeys() throws Exception {
+    void updatePreferencesUsesAllCaseSensitiveKeys() throws Exception {
         NotificationPreferences all = new NotificationPreferences()
                 .setDocumentCompleted(true)
                 .setSignerDeclined(false)
@@ -99,7 +99,11 @@ class UserResourceTest {
                 .setDocumentExpirationReset(false)
                 .setDocumentProcessingFailed(true)
                 .setTemplateProcessingFailed(false)
-                .setSignerWhatsappFailed(true);
+                .setSignerWhatsappFailed(true)
+                .setContractRenewalNotice(false)
+                .setContractExpiring(true)
+                .setContractExpired(false)
+                .setContractRenewed(true);
         server.enqueue(okJson(MAPPER.convertValue(all, Map.class)));
 
         NotificationPreferences response = resource.updateNotificationPreferences(all);
@@ -108,8 +112,13 @@ class UserResourceTest {
         assertThat(MAPPER.readTree(body).fieldNames()).toIterable().containsExactlyInAnyOrder(
                 "DocumentCompleted", "SignerDeclined", "DocumentCancelled", "DocumentAboutToExpire",
                 "DocumentExpired", "DocumentExpirationReset", "DocumentProcessingFailed",
-                "TemplateProcessingFailed", "SignerWhatsappFailed");
+                "TemplateProcessingFailed", "SignerWhatsappFailed", "ContractRenewalNotice",
+                "ContractExpiring", "ContractExpired", "ContractRenewed");
         assertThat(response.getSignerWhatsappFailed()).isTrue();
         assertThat(response.getTemplateProcessingFailed()).isFalse();
+        assertThat(response.getContractRenewalNotice()).isFalse();
+        assertThat(response.getContractExpiring()).isTrue();
+        assertThat(response.getContractExpired()).isFalse();
+        assertThat(response.getContractRenewed()).isTrue();
     }
 }

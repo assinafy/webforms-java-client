@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-10-28
+
+### Added
+- `client.contracts` covers contract listing, terms and amendment reads/writes, related instruments, renewal,
+  and termination with typed request and response models.
+- Template document creation can find or create a signer from `email`, `name`, and
+  `whatsapp_phone_number` when no signer ID is supplied.
+- Contract notification preferences, document verification links, workspace plan limits, assignment document
+  and creation fields, and webhook pause/retry state are available on their response models.
+- Document activities accept `sort`, and webhook endpoints can be filtered by their exact registered URL.
+
+### Fixed
+- Digital-certificate signers are allowed in template workflows without placed signer fields and are rejected
+  before HTTP when they share a signing step with another signer.
+
+### Changed
+- OkHttp is updated to 5.5.1 and Jackson to 2.22.4; the compiler, test, install, and deploy plugins use their
+  latest Maven 3-compatible releases.
+
 ## [2.8.1] - 2026-10-19
 
 ### Fixed

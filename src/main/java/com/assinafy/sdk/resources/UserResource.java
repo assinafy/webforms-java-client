@@ -40,7 +40,7 @@ public final class UserResource extends BaseResource {
     /**
      * {@code GET /users/self/notification-preferences}.
      *
-     * @return all nine email notification switches
+     * @return all owner-facing email notification switches
      */
     public NotificationPreferences getNotificationPreferences() {
         return httpGet("/users/self/notification-preferences", NotificationPreferences.class);

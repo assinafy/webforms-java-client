@@ -62,6 +62,15 @@ public final class DocumentDetails {
     @JsonProperty("download_final_url")
     private String downloadFinalUrl;
 
+    @JsonProperty("verification_code")
+    private String verificationCode;
+
+    @JsonProperty("verification_url")
+    private String verificationUrl;
+
+    @JsonProperty("has_contract")
+    private Boolean hasContract;
+
     private List<DocumentActivity> activities;
 
     /**
@@ -315,6 +324,49 @@ public final class DocumentDetails {
      * @param downloadFinalUrl value of {@code download_final_url}
      */
     public void setDownloadFinalUrl(String downloadFinalUrl) { this.downloadFinalUrl = downloadFinalUrl; }
+
+    /**
+     * Returns the public code printed on the certificate page, or {@code null} before certification.
+     *
+     * @return public verification code, or {@code null}
+     */
+    public String getVerificationCode() { return verificationCode; }
+
+    /**
+     * Sets public verification code.
+     *
+     * @param verificationCode public verification code
+     */
+    public void setVerificationCode(String verificationCode) { this.verificationCode = verificationCode; }
+
+    /**
+     * Returns the public document-verification page, or {@code null} before certification.
+     *
+     * @return public verification URL, or {@code null}
+     */
+    public String getVerificationUrl() { return verificationUrl; }
+
+    /**
+     * Sets public verification URL.
+     *
+     * @param verificationUrl public verification URL
+     */
+    public void setVerificationUrl(String verificationUrl) { this.verificationUrl = verificationUrl; }
+
+    /**
+     * Returns whether contract terms can be read for this document. This field is contextual: {@code null}
+     * means the owner lookup did not include it, not that the document has no contract.
+     *
+     * @return whether the document has contract terms, or {@code null} when unknown
+     */
+    public Boolean getHasContract() { return hasContract; }
+
+    /**
+     * Sets contextual contract-presence flag.
+     *
+     * @param hasContract whether the document has contract terms, or {@code null}
+     */
+    public void setHasContract(Boolean hasContract) { this.hasContract = hasContract; }
 
     /**
      * Returns activity history when included by the endpoint.

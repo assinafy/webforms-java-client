@@ -9,6 +9,7 @@ import com.assinafy.sdk.models.DocumentVerification;
 import com.assinafy.sdk.models.CreateSignerPayload;
 import com.assinafy.sdk.models.CreateTagPayload;
 import com.assinafy.sdk.models.DocumentDetails;
+import com.assinafy.sdk.models.DocumentContract;
 import com.assinafy.sdk.models.DocumentListItem;
 import com.assinafy.sdk.models.DocumentStatus;
 import com.assinafy.sdk.models.FieldDefinition;
@@ -817,6 +818,16 @@ class LiveSmokeTest {
         } finally {
             client.documents.delete(doc.getId());
         }
+    }
+
+    @Test
+    @Order(40)
+    @DisplayName("Tracked contracts list parses when the production route reaches the sandbox")
+    void listContracts() {
+        PaginatedResult<DocumentContract> page = publishedSandboxRoute(
+                () -> client().contracts.list(Map.of("per-page", "1")));
+        assertThat(page.getData()).isNotNull();
+        assertThat(page.getMeta()).isNotNull();
     }
 
     private static Signer ensureTestSigner(AssinafyClient client) {

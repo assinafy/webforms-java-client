@@ -361,16 +361,26 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
-     * {@code GET /documents/{document_id}/activities}.
+     * {@code GET /documents/{document_id}/activities} — list activity entries, optionally oldest first with
+     * {@code sort=id}; the default is newest first ({@code -id}).
+     *
+     * @param documentId required document identifier
+     * @param sort optional {@code id} or {@code -id}
+     * @return activity entries, never {@code null}
+     */
+    public List<DocumentActivity> activities(String documentId, String sort) {
+        String id = requireId(documentId, "Document ID");
+        return orEmpty(httpGet("/documents/" + id + "/activities", queryParams("sort", sort),
+                new TypeReference<List<DocumentActivity>>() {}));
+    }
+
+    /**
+     * {@code GET /documents/{document_id}/activities} in the default newest-first order.
      *
      * @param documentId required document identifier
      * @return activity entries, never {@code null}
      */
-    public List<DocumentActivity> activities(String documentId) {
-        String id = requireId(documentId, "Document ID");
-        return orEmpty(httpGet("/documents/" + id + "/activities",
-                new TypeReference<List<DocumentActivity>>() {}));
-    }
+    public List<DocumentActivity> activities(String documentId) { return activities(documentId, null); }
 
     /**
      * {@code DELETE /documents/{document_id}}.
@@ -408,15 +418,15 @@ public final class DocumentResource extends BaseResource {
      * {@code POST /accounts/{account_id}/templates/{template_id}/documents} — generate a document from a
      * template. Each {@link TemplateSigner} binds a template role to a signer; optional {@code name},
      * {@code message}, {@code expires_at}, {@code editor_fields}, and {@code tags} are taken from {@code options}.
-     * Certificate signers are refused until the API enforces their virtual-only rule after deriving the
-     * assignment method from the template's placed fields.
+     * The API derives the assignment method from the template and refuses certificate signers when their role
+     * has placed fields. Certificate signers must also be alone in their signing step.
      *
      * @param templateId required template identifier
      * @param signers required template role-to-signer mappings
      * @param options optional document, invitation, editor-field, and tag values
      * @param accountId account override, or {@code null} for the client default
      * @return created document
-     * @throws ValidationException when a signer uses {@code DigitalCertificate}, or another input is invalid
+     * @throws ValidationException when a certificate signer shares a step, or another input is invalid
      */
     public DocumentDetails createFromTemplate(String templateId, List<TemplateSigner> signers,
             CreateDocumentFromTemplateOptions options, String accountId) {
@@ -468,14 +478,14 @@ public final class DocumentResource extends BaseResource {
      * {@link CostEstimate#getNeedsExtraDocument()}, {@link CostEstimate#getBlockingReason()}
      * ({@code PendingPayment} / {@code InsufficientDocuments} / {@code InsufficientCredits}),
      * {@link CostEstimate#getHasSufficientResources()}, and {@link CostEstimate#getBreakdown()} to decide.
-     * Certificate signers are refused because the SDK cannot prove that the template will produce the required
-     * virtual assignment before this potentially billable request reaches the API.
+     * The API derives whether the template produces a virtual assignment; certificate signers must be alone in
+     * their signing step.
      *
      * @param templateId required template identifier
      * @param signers required role and optional assignment settings
      * @param accountId account override, or {@code null} for the client default
      * @return template-generation credit estimate
-     * @throws ValidationException when a signer uses {@code DigitalCertificate}, or another input is invalid
+     * @throws ValidationException when a certificate signer shares a step, or another input is invalid
      */
     public CostEstimate estimateCostFromTemplate(String templateId, List<TemplateSigner> signers,
             String accountId) {
@@ -739,7 +749,7 @@ public final class DocumentResource extends BaseResource {
         return (int) signers.stream().filter(signer -> Boolean.TRUE.equals(signer.getCompleted())).count();
     }
 
-    private void validateTemplateSigners(List<TemplateSigner> signers, boolean requireSignerId) {
+    private void validateTemplateSigners(List<TemplateSigner> signers, boolean requireSignerIdentity) {
         if (signers == null || signers.isEmpty()) {
             throw new ValidationException("At least one template signer is required");
         }
@@ -747,13 +757,12 @@ public final class DocumentResource extends BaseResource {
             if (signer == null || signer.getRoleId() == null || signer.getRoleId().isBlank()) {
                 throw new ValidationException("Template signer role ID is required");
             }
-            if (requireSignerId && (signer.getId() == null || signer.getId().isBlank())) {
-                throw new ValidationException("Template signer ID is required when creating a document");
-            }
-            if ("DigitalCertificate".equals(signer.getVerificationMethod())) {
-                throw AssignmentResource.digitalCertificateRequiresVirtualMethod(null);
+            if (requireSignerIdentity && (signer.getId() == null || signer.getId().isBlank())) {
+                requireEmail(signer.getEmail(), "Template signer email");
             }
         }
+        AssignmentResource.validateDigitalCertificateSteps(signers, TemplateSigner::getVerificationMethod,
+                TemplateSigner::getStep);
     }
 
     private void validateTags(List<String> tags, boolean allowEmpty) {

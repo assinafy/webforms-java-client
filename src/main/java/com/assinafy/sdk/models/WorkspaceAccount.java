@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import java.util.Map;
 
 /** Workspace account visible to the authenticated user. */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -28,6 +29,8 @@ public final class WorkspaceAccount {
 
     @JsonProperty("created_at")
     private String createdAt;
+
+    private Map<String, Object> limits;
 
     /** Creates an empty workspace-account model for JSON deserialization. */
     public WorkspaceAccount() {}
@@ -151,4 +154,19 @@ public final class WorkspaceAccount {
      * @param createdAt wire {@code created_at} timestamp
      */
     public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
+
+    /**
+     * Returns limits of the workspace's current plan. Present only on single-account reads; currently includes
+     * {@code webhook_endpoints}, and the API may add keys.
+     *
+     * @return plan limits, or {@code null} when not included
+     */
+    public Map<String, Object> getLimits() { return limits; }
+
+    /**
+     * Sets workspace plan limits.
+     *
+     * @param limits workspace plan limits
+     */
+    public void setLimits(Map<String, Object> limits) { this.limits = limits; }
 }

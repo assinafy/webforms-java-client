@@ -5,8 +5,8 @@
 Java client SDK for the [Assinafy API](https://api.assinafy.com.br/v1/docs), the Brazilian digital signature
 platform.
 
-Covers all 112 operations in the official API contract: accounts, users, authentication, OAuth, documents,
-signers, assignments, fields, templates, tags, webhooks, and the signer-facing signing flows.
+Covers all 118 operations in the official API contract: accounts, users, authentication, OAuth, documents,
+contracts, signers, assignments, fields, templates, tags, webhooks, and the signer-facing signing flows.
 
 > This artifact uses `new AssinafyClientOptions().setApiKey(...)`. The `webforms` name is historical;
 > the SDK serves the Assinafy API. Assinafy recommends `com.assinafy:assinafy-sdk` for new integrations.
@@ -31,14 +31,14 @@ stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-oper
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.8.1</version>
+    <version>2.9.0</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.8.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.9.0'
 ```
 
 The artifact is published to Maven Central, with no repository configuration or authentication. See
@@ -215,8 +215,8 @@ client.documents.replaceTags(doc.getId(), List.of(contractTagId, quarterTagId));
 boolean detached = client.documents.detachTag(doc.getId(), tagId);
 ```
 
-Templates produce a document and its assignment in a single call. Provide one signer entry per template role;
-the signers must already exist in the account.
+Templates produce a document and its assignment in a single call. Provide one entry per role: use an existing
+signer ID, or an email to find or create the signer in the account.
 
 ```java
 PaginatedResult<TemplateListItem> templates = client.templates.list(Map.of("search", "NDA"));
@@ -234,10 +234,9 @@ DocumentDetails generated = client.documents.createFromTemplate(
     new CreateDocumentFromTemplateOptions().setTags(List.of("Generated")));
 ```
 
-The server derives a template assignment's method from its placed fields. Until the API enforces the
-virtual-only certificate rule atomically, the SDK rejects `DigitalCertificate` in both `createFromTemplate`
-and `estimateCostFromTemplate` with the same stable validation code. Create a direct `virtual` assignment for
-certificate signers instead.
+The server derives a template assignment's method from its placed fields and rejects `DigitalCertificate`
+when the role has placed fields. For both creation and estimation, the SDK also requires each certificate
+signer to be alone in its signing step.
 
 An uploaded PDF is not immediately assignable: the API extracts page metadata first. `waitUntilReady` polls
 `GET /documents/{id}` until the status reaches `metadata_ready`, `pending_signature`, or `certificated`,
@@ -371,6 +370,9 @@ The SDK rejects certificate signers on a `collect` assignment in both `assignmen
 `ValidationException.getErrors().get("code")` equal to
 `AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD` (stable value
 `digital_certificate_requires_virtual_method`), not on the human-readable message.
+If a certificate signer shares its step, the code is
+`AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP` (value
+`digital_certificate_requires_exclusive_step`). The same validation applies to template creation and pricing.
 
 The ordinary signing endpoint **rejects** certificate signers: their signature comes from a two-step handshake
 with the Web PKI extension (`POST /v1/signers/certificate/start`, then `.../complete`). Those two routes are
@@ -571,8 +573,10 @@ handle(event.event(), event.object());
 verifier = new WebhookVerifier(client.webhooks.rotateEndpointSecret(endpoint.id()));
 ```
 
-Answer `2xx` quickly and process afterwards. Each event gets up to two attempts, three seconds apart; after ten
-consecutive failed events the endpoint enters a circuit breaker until a delivery succeeds.
+Answer `2xx` quickly and process afterwards. Connection failures, timeouts, 408, 429, and 5xx responses get up
+to six attempts, about ten minutes apart. After ten failed deliveries in a row the endpoint is paused
+(`is_held`): the API probes it after 3, 15, and 60 minutes, then every 6 hours. When a probe succeeds, missed
+events are delivered oldest first.
 
 The older subscription operations (`register`, `getSubscription`, `inactivate`) keep working and act on the
 account's oldest endpoint:
@@ -600,6 +604,33 @@ byte[] pageImage = client.documents.downloadPage(doc.getId(), pageId);
 DocumentVerification verification = client.documents.verify(signatureHash);
 boolean valid = Boolean.TRUE.equals(verification.getIsValid());
 ```
+
+### Tracked contracts
+
+On plans with contract tracking, `client.contracts` stores terms on a document and tracks expiration, renewal,
+and amendment instruments. Supply `updated_at` on mutations to reject a write based on stale data; renewals can
+also name the current term so repeating a request cannot renew twice.
+
+```java
+DocumentContract contract = (DocumentContract) client.contracts.set(doc.getId(),
+    new DocumentContractInput()
+        .setStatus("active")
+        .setCounterpartyName("Example Company")
+        .setValue(new BigDecimal("120000.00"))
+        .setCurrency("BRL")
+        .setEndDate("2027-10-31")
+        .setAutoRenew(true)
+        .setRenewalTermMonths(12));
+
+PaginatedResult<DocumentContract> endingSoon = client.contracts.list(Map.of(
+    "status", "active", "ending_within_days", "30", "sort", "end_date"));
+client.contracts.renew(doc.getId(), new ContractRenewalPayload()
+    .setTerm(contract.getTerm()).setUpdatedAt(contract.getUpdatedAt()));
+```
+
+`contracts.get` returns `DocumentContract` for the root document or `DocumentContractAmendment` for a linked
+instrument. `contracts.related` returns the family; `contracts.terminate` stops its lifecycle alerts. The full
+payloads, filters, responses, and events are in the [API reference](docs/API_REFERENCE.md).
 
 Delete only what you own and only when the status allows it — `documents.statuses()` reports which statuses
 are deletable.

@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -147,6 +148,10 @@ class WebhookResourceTest {
         String body = MAPPER.writeValueAsString(Map.of("status", 200, "data", List.of(
                 Map.of(
                         "id", "dispatch-1",
+                        "webhook_id", "webhook-1",
+                        "attempt", 2,
+                        "kind", "scheduled",
+                        "will_retry", true,
                         "event", "document_ready",
                         "payload", Map.of("account_id", "acc"),
                         "created_at", "2024-01-15T10:30:00Z",
@@ -160,6 +165,10 @@ class WebhookResourceTest {
         PaginatedResult<WebhookDispatch> result = resource.listDispatches();
 
         WebhookDispatch dispatch = result.getData().get(0);
+        assertThat(dispatch.getWebhookId()).isEqualTo("webhook-1");
+        assertThat(dispatch.getAttempt()).isEqualTo(2);
+        assertThat(dispatch.getKind()).isEqualTo("scheduled");
+        assertThat(dispatch.isWillRetry()).isTrue();
         assertThat(dispatch.getPayload()).containsEntry("account_id", "acc");
         assertThat(dispatch.getCreatedAt()).isEqualTo("2024-01-15T10:30:00Z");
     }
@@ -184,6 +193,7 @@ class WebhookResourceTest {
     void getSubscription_getsSubscriptionsPath() throws Exception {
         server.enqueue(okJson(Map.of("is_active", false, "url", "https://hooks/x",
                 "email", "ops@example.com", "events", List.of("document_ready"),
+                "is_held", true, "held_since", 1784342102L,
                 "updated_at", "2026-07-18T02:36:02Z")));
 
         WebhookSubscription sub = resource.getSubscription();
@@ -192,6 +202,8 @@ class WebhookResourceTest {
         assertThat(req.getMethod()).isEqualTo("GET");
         assertThat(req.getPath()).isEqualTo("/accounts/acc/webhooks/subscriptions");
         assertThat(sub.getEvents()).containsExactly("document_ready");
+        assertThat(sub.isHeld()).isTrue();
+        assertThat(sub.getHeldSince()).isEqualTo(1784342102L);
         assertThat(sub.getUpdatedAt()).isEqualTo("2026-07-18T02:36:02Z");
     }
 
@@ -234,9 +246,20 @@ class WebhookResourceTest {
     }
 
     private static Map<String, Object> endpointJson() {
-        return Map.of("id", "ep1", "name", "ERP", "url", "https://example.com/hook", "email", "ops@example.com",
-                "events", List.of("document_ready"), "is_active", true, "signing_enabled", true,
-                "created_at", "2026-10-01T12:00:00Z", "updated_at", "2026-10-01T12:00:00Z");
+        Map<String, Object> endpoint = new LinkedHashMap<>();
+        endpoint.put("id", "ep1");
+        endpoint.put("name", "ERP");
+        endpoint.put("url", "https://example.com/hook");
+        endpoint.put("email", "ops@example.com");
+        endpoint.put("events", List.of("document_ready"));
+        endpoint.put("is_active", true);
+        endpoint.put("signing_enabled", true);
+        endpoint.put("resource", "workspace");
+        endpoint.put("is_held", true);
+        endpoint.put("held_since", 1790856060L);
+        endpoint.put("created_at", "2026-10-01T12:00:00Z");
+        endpoint.put("updated_at", "2026-10-01T12:00:00Z");
+        return endpoint;
     }
 
     @Test
@@ -250,7 +273,24 @@ class WebhookResourceTest {
         assertThat(req.getPath()).isEqualTo("/accounts/acc/webhooks/endpoints");
         assertThat(endpoints).containsExactly(new WebhookEndpoint("ep1", "ERP", "https://example.com/hook",
                 "ops@example.com", List.of("document_ready"), true, true,
-                "2026-10-01T12:00:00Z", "2026-10-01T12:00:00Z"));
+                "2026-10-01T12:00:00Z", "2026-10-01T12:00:00Z", null,
+                "workspace", true, 1790856060L));
+    }
+
+    @Test
+    void listEndpointsByUrlPreservesTheExactUrlAndAccountOverride() throws Exception {
+        String url = "https://example.invalid/hook?tenant=a&token=b+c%20d";
+        server.enqueue(okJson(List.of(endpointJson())));
+
+        List<WebhookEndpoint> endpoints = resource.listEndpointsByUrl(url, "other");
+
+        RecordedRequest req = server.takeRequest();
+        assertThat(req.getRequestUrl().encodedPath()).isEqualTo("/accounts/other/webhooks/endpoints");
+        assertThat(req.getRequestUrl().queryParameter("url")).isEqualTo(url);
+        assertThat(endpoints).hasSize(1);
+
+        assertThatThrownBy(() -> resource.listEndpointsByUrl("relative"))
+                .isInstanceOf(ValidationException.class);
     }
 
     @Test

@@ -1,6 +1,6 @@
 # Assinafy Java SDK API Reference
 
-This reference maps the Java SDK to the 112 operations documented at the
+This reference maps the Java SDK to the 118 operations documented at the
 [Assinafy API documentation](https://api.assinafy.com.br/v1/docs). Paths below omit the `/v1` prefix, except
 for the OAuth protected-resource metadata, which the API serves at its host root.
 
@@ -8,7 +8,8 @@ for the OAuth protected-resource metadata, which the API serves at its host root
 
 Construct with `new AssinafyClient(options)`, `AssinafyClient.create(apiKey, accountId[, configurator])`, or
 `AssinafyClient.fromConfig(map)`. The client exposes `accounts`, `users`, `auth`, `oauth`, `documents`,
-`signers`, `assignments`, `fields`, `templates`, `tags`, `webhooks`, and `signerSelf`. `getBaseUrl()` returns
+`contracts`, `signers`, `assignments`, `fields`, `templates`, `tags`, `webhooks`, and `signerSelf`.
+`getBaseUrl()` returns
 the normalized base URL; `getHttpClient()` exposes the configured OkHttp client for advanced integration and
 diagnostics.
 
@@ -132,6 +133,9 @@ null to clear a value.
 | API-key creation | `{ "password": string* }` |
 | Document rename | `{ "name": string* }`, maximum 255 characters |
 | Document tag replace/append | `{ "tags": [tagId, ...] }` |
+| `DocumentContractInput` | Non-empty partial contract terms or amendment link; properties and null semantics are listed under [Tracked contracts](#tracked-contracts) |
+| `ContractRenewalPayload` | Any of `end_date`, `value`, `term`, `updated_at`; `term` is required unless an explicit later `end_date` is sent |
+| `ContractTerminationPayload` | Optional `reason` (maximum 500 characters) and `updated_at` write precondition |
 | Public token | `{ "channel": "email"*, "recipient": signer-email* }` |
 | `CreateSignerPayload` | `{ "full_name": string*, "email": string?, "whatsapp_phone_number": E.164?, "government_id": CPF/CNPJ? }` |
 | `UpdateSignerPayload` | Any non-empty subset of `full_name`, `email`, `whatsapp_phone_number`, `government_id` (CPF/CNPJ) |
@@ -238,6 +242,9 @@ a `collect` assignment.
 before sending a request. The resulting `ValidationException` has
 `getErrors().get("code") == AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD`, whose stable
 value is `digital_certificate_requires_virtual_method`; `getErrors().get("method")` is `"collect"`.
+They also reject a certificate signer that shares a step with any other signer. That error uses
+`AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP`, whose stable value is
+`digital_certificate_requires_exclusive_step`, and includes the conflicting `step` in `getErrors()`.
 
 The signer completes the ICP-Brasil Web PKI flow in a browser, through the
 `POST /signers/certificate/start` and `POST /signers/certificate/complete` routes, which the API deploys but
@@ -367,6 +374,9 @@ Use `signEntries(..., List.of(new AssignmentSignEntry(itemId, fieldId, pageId, v
     {
       "role_id": "template-role-id",
       "id": "existing-signer-id",
+      "email": "signer@example.com",
+      "name": "Example Signer",
+      "whatsapp_phone_number": "+5548999990000",
       "verification_method": "Email | Whatsapp | DigitalCertificate | IdDocumentFaceMatchBasic",
       "notification_methods": ["Email | Whatsapp"],
       "step": 1
@@ -382,16 +392,50 @@ Use `signEntries(..., List.of(new AssignmentSignEntry(itemId, fieldId, pageId, v
 }
 ```
 
-Creation requires `role_id` and `id` for each signer role. Estimation sends each signer as
+Creation requires `role_id` and either `id` or `email` for each signer role. When `id` is absent, the API
+reuses the account signer with that email or creates one using `name` and optional `whatsapp_phone_number`.
+When both are sent, `id` wins. Estimation sends each signer as
 `{ "role_id"*, "verification_method", "notification_methods" }`; signer `id` and `step` are not sent. Template default tags are always applied and `tags` are
 merged on top. Use `new TemplateEditorField(fieldId, value)` with `setTemplateEditorFields`; the untyped
 `setEditorFields(List<?>)` overload remains available for raw maps.
 
-The API derives a template assignment's method from its placed fields. Until the API rejects certificate
-signers when that derived method is `collect`, both `documents.createFromTemplate` and
-`documents.estimateCostFromTemplate` reject every `DigitalCertificate` template signer before sending a
-request. They use the same stable `digital_certificate_requires_virtual_method` validation code described
-above and set its `method` detail to `null`, because the method is not present in either request.
+The API derives a template assignment's method from its placed fields and rejects a certificate signer when
+that role has placed fields. Both `documents.createFromTemplate` and `documents.estimateCostFromTemplate`
+enforce the certificate-exclusive step rule before sending a request.
+
+### Tracked contracts
+
+`DocumentContractInput` is a partial update. An uncalled setter omits the property; a called setter includes it
+even when its value is null. Null clears the property, except `auto_renew` returns to false, `currency` returns
+to `BRL` while a value remains, and `status` does not accept null. The body must contain at least one property.
+
+| Property | Type and rules |
+|---|---|
+| `status` | `draft`, `active`, `expired`, or `terminated`; after creation, callers set only `draft` or `active` |
+| `counterparty_name` | String or null; maximum 255 characters |
+| `counterparty_taxpayer_id` | Valid CPF/CNPJ, formatted or unformatted, or null |
+| `value` | Decimal from 0 to 9,999,999,999,999.99 with at most two decimal places, or null |
+| `currency` | Three-letter ISO 4217 code or null |
+| `start_date`, `end_date` | `YYYY-MM-DD` or null; end date cannot precede start date |
+| `auto_renew` | Boolean |
+| `renewal_term_months` | 1–600 or null; the server default is 12 |
+| `notice_period_days` | 0–3650 or null |
+| `owner_id` | Active workspace member ID or null |
+| `metadata` | Up to 50 string values; keys are 1–40 letters, digits, `_`, `-`, or `.`, values at most 500 characters; null clears it |
+| `external_references` | Up to 20 `{ "system": string, "id": string }` items; replaces the list; empty or null clears it |
+| `parent_document_id` | Links this document as an instrument for a root contract; null unlinks a pending instrument |
+| `relation_type` | `amendment`, `renewal`, or `termination`; required on the first instrument link |
+| `updated_at` | Last-read contract or pending-link timestamp; a stale value returns 409 `ContractChanged` without writing |
+
+With `parent_document_id`, the other supplied properties are the instrument's delta rather than terms of its
+own. The delta applies to the root after that instrument document is certificated. Applied instruments are
+read-only; `contracts.related(documentId)` returns the root and every instrument in its family.
+
+`ContractRenewalPayload` starts the next term with an explicit later `end_date`, or with the current `term` so
+the server advances by `renewal_term_months`. It can also replace or clear `value`; `updated_at` is the same
+optional 409 precondition. `ContractTerminationPayload` carries an optional private `reason` of at most 500
+characters and the same precondition. Mutating contract calls are sent once; renewal's term/date inputs make a
+caller retry safe to recognize and refuse instead of advancing twice.
 
 ### Webhook subscription
 
@@ -430,11 +474,12 @@ is set. Create requires `url`, `email`, and at least one event:
 none and keeps the current one otherwise; disabling it discards the secret. A signed endpoint creation returns
 `secret` once: store `endpoint.secret()` immediately, including with OAuth. List/view/update responses omit it.
 Only API keys and user sessions may retrieve or rotate it later; OAuth apps must delete and recreate a lost endpoint.
-`WebhookEndpoint` keeps its nine-argument constructor; record patterns include the tenth `secret` component.
+`WebhookEndpoint` keeps its original nine-argument constructor and the ten-argument creation-secret
+constructor. The canonical record also exposes `resource`, `is_held`, and `held_since`.
 
 ### Notification preferences
 
-`NotificationPreferences` is a partial update request and a complete response. Its nine case-sensitive boolean
+`NotificationPreferences` is a partial update request and a complete response. Its 13 case-sensitive boolean
 keys are:
 
 ```json
@@ -447,7 +492,11 @@ keys are:
   "DocumentExpirationReset": true,
   "DocumentProcessingFailed": true,
   "TemplateProcessingFailed": true,
-  "SignerWhatsappFailed": true
+  "SignerWhatsappFailed": true,
+  "ContractRenewalNotice": true,
+  "ContractExpiring": true,
+  "ContractExpired": true,
+  "ContractRenewed": true
 }
 ```
 
@@ -458,7 +507,9 @@ keys are:
 | Paginated lists | `page`, `per-page` (maximum 100 where enforced) |
 | Documents list | `status`, `method` (`virtual\|collect`), `search`, comma-separated tag IDs in `tags` (all IDs must match), `sort` (`name` or `updated_at`), pagination |
 | Document search | `search`, `status`, pagination |
-| Assignments list | `accountId` (set from the account override or client default), `page`, `per-page` |
+| Assignments list | `accountId` (set from the account override or client default), `sort`, `page`, `per-page` |
+| Document activities | `sort=id` for oldest first or `sort=-id` for newest first (default) |
+| Contracts list | `status` (comma-separated), `counterparty`, `search`, `end_date_from`, `end_date_to`, `ending_within_days`, `external_system`, `external_id`, `sort` (`end_date` or `updated_at`, prefixed with `-` for descending), `expand=document`, pagination |
 | Fields list | `include_inactive`, `include_standard` |
 | Signers list | `search`, pagination |
 | Templates list | `search`, pagination |
@@ -469,6 +520,7 @@ keys are:
 | Signing view | optional `has_accepted_terms=true\|false` |
 | Signature upload | `type`, optional `reuse` |
 | Webhook deletion by URL | `url` (required), matched exactly against the registered URL |
+| Webhook endpoint list | Optional `url`, matched exactly against the registered URL |
 | Webhook history (`ListDispatchesParams`) | `endpoint_id`, `event`, `delivered`, Unix timestamps `from`/`to`, pagination |
 
 ## Response payload catalog
@@ -477,7 +529,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 
 | Java model / wire schema | Complete `data` properties |
 |---|---|
-| `WorkspaceAccount` / Account | `resource`, `id`, `name`, `primary_color?`, `secondary_color?`, `notification_sender_type` (`User\|Account`), `roles[]`, `is_delete_allowed`, `created_at` |
+| `WorkspaceAccount` / Account | `resource`, `id`, `name`, `primary_color?`, `secondary_color?`, `notification_sender_type` (`User\|Account`), `roles[]`, `is_delete_allowed`, `limits?` (currently `webhook_endpoints`; detail only and forward-compatible), `created_at` |
 | `AccountTheme` | `account_name`, `primary_color`, `secondary_color?`, `logo` |
 | `User` | `id`, `name`, `email`, `telephone?`, `government_id?`, `is_email_verified`, `has_accepted_terms`, `is_password_set` (`false` for a social-login-only account), `is_mfa_enabled`, `created_at`, `to_be_deleted_at?` |
 | `AuthenticationResult` | `access_token`, `user` (`User`), `accounts[]` (stored as `WorkspaceAccount`; authentication populates `id`, `name`, `roles`, `is_delete_allowed`, `created_at`); a login for a user with two-factor authentication carries `mfa_token` instead of `access_token` |
@@ -487,7 +539,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | Two-factor method removal | `{ "is_mfa_enabled": boolean }`; the SDK returns the boolean |
 | `ApiKeyResponse` | `api_key` (full only on creation, masked on read, null when none exists) |
 | `EmailResponse` | `email` |
-| `NotificationPreferences` | The nine boolean keys listed above |
+| `NotificationPreferences` | The 13 boolean keys listed above |
 | `DocumentStatsRow` | `period` (`YYYY-MM` or `YYYY-MM-DD`), `documents_uploaded`, `documents_sent`, `signature_requests`, `signature_requests_notification_email`, `signature_requests_notification_whatsapp`, `signature_requests_notification_bypass`, `signature_requests_verification_email`, `signature_requests_verification_whatsapp`, `signature_requests_verification_bypass`, `signature_requests_verification_digital_certificate`, `signature_requests_viewed`, `signature_requests_completed`, `documents_certified` |
 | `Signer` | `resource`, `id`, `full_name`, `email?`, `whatsapp_phone_number?`, `government_id?`, `has_accepted_terms`; contextual fields: `has_signature`, `has_initial`, `is_signature_reusable`, `verification_method`, `identity_verification_status?` (`Pending\|InReview\|Approved\|Declined\|Expired\|Abandoned`), `notification_methods[]`, `step`, `notified`, `completed`, `notification_history[]` |
 | `IdentityVerificationStatus` | `can_start`, `status?`, `url?`, `expires_at?`, `completed_at?` |
@@ -500,7 +552,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `SignerIdentityReview.Check` | `name`, `result` (`pass`, `review`, `skipped`, or a provider failure), `score?`, `reasons[]` |
 | `SignerIdentityReview.Reviewer` | `id`, `name` |
 | `AssignmentSignerNotification` | `event`, `status` (`sent\|failed`), `error_code?`, `error_message?`, `sent_at?`, `failed_at?` |
-| `Assignment` | `resource`, `id`, `sender_email`, `method` (`virtual\|collect`), `expires_at?`, `message?`, `signers[]`, `copy_receivers[]` (`Signer` objects), `items[]`, `summary`, `signing_urls[]` |
+| `Assignment` | `resource`, `id`, `document_id?` (null only after document deletion), `sender_email`, `method` (`virtual\|collect`), `expires_at?`, `message?`, `signers[]`, `copy_receivers[]` (`Signer` objects), `items[]`, `summary`, `signing_urls[]`, `created_at` |
 | `AssignmentItem` | `id`, `page?`, `signer`, `field?`, `display_settings`, `value?`, `completed` |
 | `AssignmentSummary` | `signer_count`, `completed_count`, `signers[]` |
 | `SigningUrl` | `signer_id`, `url` |
@@ -509,13 +561,16 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `ResendResult` | `is_sent`, `document_id`, `signer_id` |
 | `ResendCostEstimate` | Documented `CostEstimate` fields; also accepts compact `total`, `breakdown[]` (`code`, `name`, `cost`), `credit_balance`, `has_sufficient_credits` |
 | `WhatsappNotification` | `sent_at` (Unix seconds), `header`, `body`, `buttons[]` (`text`), `phone_number`, `signer_id` |
-| `DocumentDetails` / Document | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; public/signer contexts can add `page_count`, `created_by`, `current_signer`, `download_url`, `download_final_url`, `activities` |
-| `DocumentListItem` | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; lightweight search may omit expanded relationships |
+| `DocumentDetails` / Document | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `verification_code?`, `verification_url?`, `has_contract?` (workspace detail with contract tracking only), `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; public/signer contexts can add `page_count`, `created_by`, `current_signer`, `download_url`, `download_final_url`, `activities` |
+| `DocumentListItem` | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `verification_code?`, `verification_url?`, `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; lightweight search may omit expanded relationships |
 | `DocumentArtifacts` | URL map keyed by `original`, `certificated`, `certificate-page`, `pades`, `bundle`, and contextual `thumbnail` |
 | `DocumentPage` | `id`, `number`, `height`, `width`, `download_url` |
 | `DocumentStatus` | `code`, `deletable` |
 | `DocumentVerification` | `hash`, `id?`, `agreement_code?` (printed on the document certificate), `status?`, `page_count?` (string), `signer_count?` (string), `completed_count?`, `completed_at?`, `verified_at`, `is_valid`, `message` |
 | `DocumentActivity` | `id`, `event`, `message`, `payload?`, `origin?`, `created_at`. `payload` is typed `Object` because its shape varies by event — a JSON object for most events, a JSON array for others such as `document_prepared`. `origin` is a JSON object of `ip` and `user-agent`, and is null for server-generated events |
+| `DocumentContract` | `resource`, `document_id`, `status`, `counterparty_name?`, `counterparty_taxpayer_id?`, `value?`, `currency?`, `start_date?`, `end_date?`, `auto_renew`, `renewal_term_months?`, `notice_period_days?`, `term`, `owner_id?`, `metadata?`, `external_references[]`, `document?` (with `expand=document`), `amendments[]` (single/related reads), `created_at`, `updated_at` |
+| `DocumentContractAmendment` | `resource`, `document_id`, `document_name`, `parent_document_id`, `relation_type`, `number?`, `status`, `document_status`, `apply_error?`, `currency?`, `terms?`, `changes?` (each field as `{from,to}`), `applied_at?`, `created_at`, `updated_at` |
+| `ContractExternalReference` | `system`, `id` |
 | `FieldDefinition` | `resource`, `id`, `name`, `type`, `regex?`, `is_pre_defined`, `is_active`, `is_required`, `is_standard`, `is_read_only`, `is_visible` |
 | `FieldTypeInfo` | `type`, `name` |
 | `FieldValidationResult` | Single: `type`, `success`, `error_message`; multiple also includes `field_id` |
@@ -526,11 +581,11 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `TemplatePage` | `id`, `number`, `height`, `width`, `download_url`, `fields[]` |
 | `TemplateFieldPlacement` | `id`, `field_id`, `role_id`, `label`, `display_settings`, `created_at`, `updated_at` |
 | `TemplateRole` | `id`, `name`, `assignment_type`, `created_at`, `updated_at` |
-| `WebhookSubscription` | `events[]`, `is_active`, `url?`, `email?`, `updated_at?` |
-| `WebhookEndpoint` | `id`, `name?`, `url`, `email`, `events[]`, `is_active`, `signing_enabled`, `created_at`, `updated_at`, `secret?` (only on signed endpoint creation) |
+| `WebhookSubscription` | `events[]`, `is_active`, `is_held`, `held_since?` (Unix seconds), `url?`, `email?`, `updated_at?` |
+| `WebhookEndpoint` | `resource`, `id`, `name?`, `url`, `email`, `events[]`, `is_active`, `is_held`, `held_since?` (Unix seconds), `signing_enabled`, `created_at`, `updated_at`, `secret?` (only when generated on create/update) |
 | Webhook endpoint secret | `{ "secret": "whsec_..." }`; the SDK returns the string |
 | `WebhookEvent` | Webhook delivery body; see [Webhook deliveries](#webhook-deliveries) |
-| `WebhookDispatch` | `resource`, `id`, `event`, `activity_id`, `endpoint?`, `endpoint_id?`, `payload?`, `delivered`, `http_status?`, `response_body?`, `error?`, `created_at`, `updated_at` |
+| `WebhookDispatch` | `resource`, `id`, `event`, `activity_id`, `endpoint?`, `endpoint_id?`, `payload?`, `delivered`, `webhook_id?`, `attempt?`, `kind` (`scheduled\|probe\|manual`), `will_retry`, `http_status?`, `response_body?`, `error?`, `created_at`, `updated_at` |
 | `WebhookEventTypeInfo` | `id`, `description` |
 | `AcceptTermsResponse` | Optional response fields `full_name`, `email`, `has_accepted_terms`; the documented success payload has no data, so the Java return may be null |
 | `VerifyEmailResponse` | Optional response fields `message`, `access_token`; the documented success payload has no data, so the Java return may be null |
@@ -609,6 +664,17 @@ documented error codes; the platform may additionally return global transport st
 | **POST** `/users/api-keys` | `auth.createApiKey(password)` | API-key creation | `ApiKeyResponse` | 200, 401, 500 |
 | **DELETE** `/users/api-keys` | `auth.deleteApiKey()` | — | `void` | 200, 401, 500 |
 
+### Contracts — 6 operations
+
+| Operation | SDK method | Request | Return | Statuses |
+|---|---|---|---|---|
+| **GET** `/accounts/{accountId}/contracts` | `contracts.list([params][, accountId])` | Contract-list query | `PaginatedResult<DocumentContract>` | 200, 400, 401, 500 |
+| **GET** `/accounts/{accountId}/documents/{documentId}/contract` | `contracts.get(documentId[, accountId])` | — | `DocumentContractResult` (`DocumentContract` or `DocumentContractAmendment`) | 200, 401, 404, 500 |
+| **PUT** `/accounts/{accountId}/documents/{documentId}/contract` | `contracts.set(documentId, input[, accountId])` | `DocumentContractInput` | `DocumentContractResult` | 200, 400, 401, 403, 404, 409, 500 |
+| **GET** `/accounts/{accountId}/documents/{documentId}/contract/related` | `contracts.related(documentId[, accountId])` | — | Root `DocumentContract` with `amendments[]` | 200, 401, 404, 500 |
+| **POST** `/accounts/{accountId}/documents/{documentId}/contract/renew` | `contracts.renew(documentId[, payload][, accountId])` | Optional `ContractRenewalPayload` | `DocumentContract` | 200, 400, 401, 403, 404, 409, 500 |
+| **POST** `/accounts/{accountId}/documents/{documentId}/contract/terminate` | `contracts.terminate(documentId[, payload][, accountId])` | Optional `ContractTerminationPayload` | `DocumentContract` | 200, 400, 401, 403, 404, 409, 500 |
+
 ### Documents — 18 operations
 
 | Operation | SDK method | Request | Return | Statuses |
@@ -622,7 +688,7 @@ documented error codes; the platform may additionally return global transport st
 | **PATCH** `/documents/{documentId}` | `documents.rename(documentId, name)` | Document rename | `DocumentDetails` | 200, 400, 401, 404, 500 |
 | **GET** `/documents/{documentId}/download/{artifactName}` | `documents.download(documentId[, artifactName])` | Artifact path value | Raw `byte[]` | 200, 401, 404, 500 |
 | **GET** `/documents/{documentSignatureHash}/verify` | `documents.verify(hash)` | — | `DocumentVerification` | 200, 500 |
-| **GET** `/documents/{documentId}/activities` | `documents.activities(documentId)` | — | `List<DocumentActivity>` | 200, 401, 500 |
+| **GET** `/documents/{documentId}/activities` | `documents.activities(documentId[, sort])` | Optional `sort=id\|-id` | `List<DocumentActivity>` | 200, 401, 500 |
 | **GET** `/documents/{documentId}/thumbnail` | `documents.thumbnail(documentId)` | — | Raw `byte[]` | 200, 401, 404, 500 |
 | **GET** `/documents/{documentId}/pages/{pageId}/download` | `documents.downloadPage(documentId, pageId)` | — | Raw `byte[]` | 200, 401, 404, 500 |
 | **GET** `/accounts/{accountId}/documents/{documentId}/tags` | `documents.listTags(documentId[, accountId])` | — | `List<Tag>` | 200, 401, 500 |
@@ -734,7 +800,7 @@ official documentation categorizes them.
 | **GET** `/accounts/{accountId}/webhooks/subscriptions` | `webhooks.getSubscription([accountId])` | — | `WebhookSubscription` | 200, 401, 500 |
 | **PUT** `/accounts/{accountId}/webhooks/subscriptions` | `webhooks.register(payload[, accountId])` / `update(...)` | Webhook subscription | `WebhookSubscription` | 200, 400, 401, 500 |
 | **PUT** `/accounts/{accountId}/webhooks/inactivate` | `webhooks.inactivate([accountId])` | — | `WebhookSubscription` | 200, 401, 500 |
-| **GET** `/accounts/{accountId}/webhooks/endpoints` | `webhooks.listEndpoints([accountId])` | — | `List<WebhookEndpoint>`, oldest first | 200, 401, 500 |
+| **GET** `/accounts/{accountId}/webhooks/endpoints` | `webhooks.listEndpoints([accountId])` / `listEndpointsByUrl(url[, accountId])` | Optional exact `url` | `List<WebhookEndpoint>`, oldest first | 200, 401, 500 |
 | **POST** `/accounts/{accountId}/webhooks/endpoints` | `webhooks.createEndpoint(payload[, accountId])` | Webhook endpoint | `WebhookEndpoint` | 200, 400, 401, 403 (plan limit), 500 |
 | **DELETE** `/accounts/{accountId}/webhooks/endpoints` | `webhooks.deleteEndpointByUrl(url[, accountId])` | Required `url` query | `void` | 200, 400, 401, 404, 500 |
 | **GET** `/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `webhooks.getEndpoint(endpointId[, accountId])` | — | `WebhookEndpoint` | 200, 401, 404, 500 |
@@ -790,10 +856,13 @@ individual resource methods for collect or digital-certificate assignments.
 
 An account registers one webhook endpoint, or up to three on paid plans. Assinafy sends an HTTP `POST` with
 `Content-Type: application/json` to every active endpoint subscribed to the event; each endpoint is delivered
-to independently and has its own failure count. Any 2xx response is successful. Delivery is attempted at most
-twice (initial attempt plus one retry) with a three-second wait. After ten consecutive failed events the circuit
-breaker pauses normal delivery and probes about five percent of events until a delivery succeeds. The history
-stores the first 2,000 characters of the receiver response.
+to independently and has its own failure count. Any 2xx response is successful. A connection error, timeout,
+408, 429, or 5xx response is attempted up to six times, about ten minutes apart; other non-2xx responses are
+final. After ten failed deliveries in a row, the endpoint is paused (`is_held`). The API probes it with its
+oldest missed event after 3, 15, and 60 minutes, then every 6 hours. A successful probe lifts the pause and
+delivers missed events oldest first. Editing the URL, sending `is_active: true`, or a successful manual retry
+also lifts it. The history is retained for seven days and stores the first 2,000 response-body characters;
+`will_retry` says whether another automatic attempt follows.
 
 | Header | Value |
 |---|---|
@@ -872,6 +941,14 @@ The event catalog includes:
 | `template_created` | User | Template | — |
 | `template_processed` | User | Template | — |
 | `template_processing_failed` | Account | Template | `error_message` |
+| `document_contract_updated` | User or Account | Document | `user_name?`, `end_date`, `changed[]` |
+| `document_contract_renewal_notice` | Account | Document | `end_date` |
+| `document_contract_expiring` | Account | Document | `days_before`, `end_date` |
+| `document_contract_expired` | Account | Document | `end_date`, `changed[]` |
+| `document_contract_renewed` | Account or User | Document | `end_date`, `changed[]`, `user_name?` |
+| `document_contract_terminated` | User | Document | `user_name`, `reason?`, `end_date`, `changed[]` |
+| `document_contract_amended` | Account or User | Parent Document | `document_id`, `relation_type`, `number`, `changes?`, `end_date`, `changed[]` |
+| `document_contract_amendment_updated` | User | Instrument Document | `user_name`, `parent_document_id?`, `relation_type?`, `terms?`, `changed[]` |
 
 `assignment_created` and `document_metadata_ready` have no guaranteed order. Consumers should deduplicate on
 the `webhook-id` header, which also tells deliveries of the same event to different endpoints apart, tolerate

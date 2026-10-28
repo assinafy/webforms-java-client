@@ -21,6 +21,15 @@ public final class WebhookDispatch {
     @JsonProperty("endpoint_id")
     private String endpointId;
 
+    @JsonProperty("webhook_id")
+    private String webhookId;
+
+    private Integer attempt;
+    private String kind;
+
+    @JsonProperty("will_retry")
+    private boolean willRetry;
+
     private Map<String, Object> payload;
     private boolean delivered;
 
@@ -118,6 +127,62 @@ public final class WebhookDispatch {
      * @param endpointId wire {@code endpoint_id}
      */
     public void setEndpointId(String endpointId) { this.endpointId = endpointId; }
+
+    /**
+     * Returns the {@code webhook-id} header shared by every attempt of this event to this endpoint.
+     *
+     * @return webhook message identifier, or {@code null}
+     */
+    public String getWebhookId() { return webhookId; }
+
+    /**
+     * Sets webhook message identifier.
+     *
+     * @param webhookId webhook message identifier
+     */
+    public void setWebhookId(String webhookId) { this.webhookId = webhookId; }
+
+    /**
+     * Returns the one-based delivery-attempt number.
+     *
+     * @return delivery-attempt number, or {@code null}
+     */
+    public Integer getAttempt() { return attempt; }
+
+    /**
+     * Sets delivery-attempt number.
+     *
+     * @param attempt delivery-attempt number
+     */
+    public void setAttempt(Integer attempt) { this.attempt = attempt; }
+
+    /**
+     * Returns {@code scheduled}, {@code probe}, or {@code manual}.
+     *
+     * @return delivery kind
+     */
+    public String getKind() { return kind; }
+
+    /**
+     * Sets delivery kind.
+     *
+     * @param kind delivery kind
+     */
+    public void setKind(String kind) { this.kind = kind; }
+
+    /**
+     * Returns whether another automatic attempt follows this entry.
+     *
+     * @return whether another attempt follows
+     */
+    public boolean isWillRetry() { return willRetry; }
+
+    /**
+     * Sets whether another automatic attempt follows this entry.
+     *
+     * @param willRetry whether another attempt follows
+     */
+    public void setWillRetry(boolean willRetry) { this.willRetry = willRetry; }
 
     /**
      * Returns JSON webhook payload.
