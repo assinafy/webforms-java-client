@@ -3,7 +3,10 @@ package com.assinafy.sdk.models;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Partial signer update; omitted properties remain unchanged. */
+/**
+ * Partial signer update. A {@code null} property is omitted; an empty email, WhatsApp number, or government
+ * identifier clears that property.
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public final class UpdateSignerPayload {
 
@@ -31,9 +34,9 @@ public final class UpdateSignerPayload {
     }
 
     /**
-     * Sets optional wire {@code full_name}.
+     * Sets optional wire {@code full_name}; this property cannot be cleared.
      *
-     * @param fullName optional wire {@code full_name}
+     * @param fullName optional non-empty wire {@code full_name}
      * @return this payload
      */
     public UpdateSignerPayload setFullName(String fullName) {
@@ -51,9 +54,9 @@ public final class UpdateSignerPayload {
     }
 
     /**
-     * Sets optional email address.
+     * Sets an optional email address, or an empty string to clear it.
      *
-     * @param email optional email address
+     * @param email optional email address; empty clears it
      * @return this payload
      */
     public UpdateSignerPayload setEmail(String email) {
@@ -71,9 +74,9 @@ public final class UpdateSignerPayload {
     }
 
     /**
-     * Sets optional E.164 wire {@code whatsapp_phone_number}.
+     * Sets optional E.164 wire {@code whatsapp_phone_number}, or an empty string to clear it.
      *
-     * @param whatsappPhoneNumber optional E.164 wire {@code whatsapp_phone_number}
+     * @param whatsappPhoneNumber optional E.164 wire {@code whatsapp_phone_number}; empty clears it
      * @return this payload
      */
     public UpdateSignerPayload setWhatsappPhoneNumber(String whatsappPhoneNumber) {
@@ -91,9 +94,9 @@ public final class UpdateSignerPayload {
     }
 
     /**
-     * Sets the signer's CPF/CNPJ; the API normalizes it to digits on save.
+     * Sets the signer's CPF/CNPJ, or an empty string to clear it; the API normalizes identifiers on save.
      *
-     * @param governmentId optional wire {@code government_id}
+     * @param governmentId optional wire {@code government_id}; empty clears it
      * @return this payload
      */
     public UpdateSignerPayload setGovernmentId(String governmentId) {

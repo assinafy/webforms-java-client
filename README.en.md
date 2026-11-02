@@ -2,912 +2,183 @@
 
 *[Leia em português](README.md) · English*
 
-Java client SDK for the [Assinafy API](https://api.assinafy.com.br/v1/docs), the Brazilian digital signature
-platform.
+Java 25 client for all 118 operations in the [Assinafy API](https://api.assinafy.com.br/v1/docs). The
+`webforms` name is historical; new integrations should also consider `com.assinafy:assinafy-sdk`.
 
-Covers all 118 operations in the official API contract: accounts, users, authentication, OAuth, documents,
-contracts, signers, assignments, fields, templates, tags, webhooks, and the signer-facing signing flows.
+Detailed operation, request, and response documentation lives in [API_REFERENCE.md](docs/API_REFERENCE.md),
+with runnable endpoint examples in [EXAMPLES.md](docs/EXAMPLES.md) and repository setup in
+[INSTALLATION.md](docs/INSTALLATION.md).
 
-> This artifact uses `new AssinafyClientOptions().setApiKey(...)`. The `webforms` name is historical;
-> the SDK serves the Assinafy API. Assinafy recommends `com.assinafy:assinafy-sdk` for new integrations.
+## Install
 
-This README follows one document from installation to a signed, downloaded PDF. Each section is the next step
-of that journey, so reading top to bottom gives you the whole integration; jumping to a heading gives you one
-stage of it. The [complete API reference](docs/API_REFERENCE.md) is the per-operation lookup table,
-[worked examples](docs/EXAMPLES.md) hold longer runnable programs, and
-[docs/INSTALLATION.md](docs/INSTALLATION.md) covers build-tool setup in depth.
-
----
-
-## 1. Requirements and installation
-
-- Java 25+ (the SDK is compiled and verified on the current Java 25 LTS)
-- Maven 3.9.16 or newer 3.x (the wrapper pins 3.9.16); for Gradle, use a release that supports JDK 25
-- TLS 1.2 or later: the client refuses TLS 1.0 and 1.1
-
-**Maven**
+The SDK requires Java 25+, Maven 3.9.16+ when using Maven, and TLS 1.2+.
 
 ```xml
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.9.0</version>
+    <version>2.9.1</version>
 </dependency>
 ```
 
-**Gradle**
-
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.9.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.9.1'
 ```
 
-The artifact is published to Maven Central, with no repository configuration or authentication. See
-[docs/INSTALLATION.md](docs/INSTALLATION.md) for the Gradle Kotlin DSL, GitHub Packages and the sources/Javadoc jars.
+Maven Central needs no repository credentials. GitHub Packages and Gradle Kotlin DSL are covered in the
+installation guide.
 
----
+## Configure the client
 
-## 2. Building the client
-
-One `AssinafyClient` per credential and account. It is thread-safe, holds a shared connection pool, and is
-meant to be created once and reused for the life of the application.
-
-Keep credentials in environment variables or a deployment secret manager. The SDK does not read `.env` files,
-so applications pass secret values explicitly. Never put credentials in source, logs, exception messages, Maven
-properties, or browser code.
-
-```bash
-export ASSINAFY_API_KEY=your_api_key
-export ASSINAFY_ACCOUNT_ID=your_account_id
-```
+Create one thread-safe client per credential/account and reuse it. Keep credentials in environment variables
+or secret storage; the SDK does not read `.env` files.
 
 ```java
-import com.assinafy.sdk.AssinafyClient;
-import com.assinafy.sdk.AssinafyClientOptions;
-
 AssinafyClient client = new AssinafyClient(new AssinafyClientOptions()
     .setApiKey(System.getenv("ASSINAFY_API_KEY"))
     .setAccountId(System.getenv("ASSINAFY_ACCOUNT_ID"))
     .setTimeoutMs(30_000)
-    .setMaxRetries(2)); // safe reads only; mutations are never replayed
+    .setMaxRetries(2));
 ```
 
-| Option       | Type   | Default                          | Description                                                                   |
-|--------------|--------|----------------------------------|-------------------------------------------------------------------------------|
-| `apiKey`     | String | —                                | Preferred credential, sent as the `X-Api-Key` header                          |
-| `token`      | String | —                                | Bearer access token, used only when no API key is set                         |
-| `accountId`  | String | —                                | Default workspace for every account-scoped method                             |
-| `baseUrl`    | String | `https://api.assinafy.com.br/v1` | HTTPS API root; loopback HTTP is accepted only for local tests                |
-| `timeoutMs`  | int    | `30000`                          | Connect, read, and write timeout; must be positive                            |
-| `maxRetries` | int    | `0`                              | Extra attempts for safe reads on HTTP 429/503; mutating requests are never replayed |
+API keys are preferred over bearer tokens when both are set. `maxRetries` applies only to safe reads that
+receive 429/503; uploads and every mutation are sent once. The production base URL is
+`https://api.assinafy.com.br/v1`. Binary endpoints return `byte[]`; list endpoints return
+`PaginatedResult<T>`; other JSON endpoints unwrap the API envelope into typed models. `ApiException` exposes
+API, OAuth, retry, and rate-limit details.
 
-Two shortcuts exist for the common cases:
+## End-to-end signing flow
+
+Upload a PDF (maximum 25 MB/2,000 pages), wait for metadata, and optionally attach tracked contract terms.
 
 ```java
-// Positional factory with an optional customizer.
-AssinafyClient configured = AssinafyClient.create("api-key", "account-id",
-    opts -> opts.setTimeoutMs(60_000));
+DocumentDetails document = client.documents.upload(new File("contract.pdf"));
+document = client.documents.waitUntilReady(document.getId(), 60_000, 2_000);
 
-// From string configuration (snake_case or camelCase keys).
-AssinafyClient fromMap = AssinafyClient.fromConfig(Map.of(
-    "api_key", System.getenv("ASSINAFY_API_KEY"),
-    "account_id", System.getenv("ASSINAFY_ACCOUNT_ID")
-));
+DocumentContractResult terms = client.contracts.set(document.getId(), new DocumentContractInput()
+    .setStatus("active").setCounterpartyName("Example Company")
+    .setStartDate("2026-11-01").setEndDate("2027-10-31"));
 ```
 
-An API key is the right credential for a back-end integration. A bearer token works too, and a client with no
-credential at all is valid — it is what you use for the public endpoints (login, password reset, document
-verification, and the public document views).
+Create or reuse an account signer, then estimate the exact assignment before creating it.
 
 ```java
-// Bearer session: Authorization: Bearer <token>
-new AssinafyClient(new AssinafyClientOptions().setToken("jwt_xxx").setAccountId("acc_xxx"));
-
-// Unauthenticated: login and public signer flows only.
-new AssinafyClient(new AssinafyClientOptions());
-```
-
-Section 10 covers obtaining a token and managing API keys, and section 11 covers OAuth, which is how an
-application acts in *other people's* workspaces.
-
----
-
-## 3. What every call returns
-
-JSON responses are wrapped as `{ "status": <int>, "message": "<string>", "data": <payload> }`. The SDK unwraps
-`data` into the typed model, so your code never handles the envelope. It raises `ApiException` for a non-success
-HTTP status **or** for `status >= 400` inside the envelope — the API sometimes returns an error envelope under
-HTTP 200, and the SDK treats that as the error it is.
-
-Three response shapes follow from that:
-
-- **Typed models** for ordinary JSON endpoints — `DocumentDetails`, `Assignment`, `Signer`, and so on.
-- **`PaginatedResult<T>`** for list endpoints. `getData()` is the array; `getMeta()` carries `currentPage`,
-  `perPage`, `total`, and `lastPage`, read from the `X-Pagination-*` response headers. Query maps accept
-  `per-page`, `per_page`, or `perPage`; the SDK always sends `per-page`.
-- **`byte[]`** for binary downloads (logos, document artifacts, page images, thumbnails, signature images).
-  These are not envelopes; when the server answers one with an error envelope instead, the SDK detects the JSON
-  body and raises `ApiException` rather than handing you the error as if it were a PDF.
-
-The OAuth endpoints in section 11 are the one documented exception: RFC 6749, OpenID Connect, and RFC 8615 each
-require a flat object, so they answer with the object rather than the envelope. The SDK reads it directly and
-still raises `ApiException` on failure.
-
-Retries are opt-in and deliberately narrow. With `maxRetries` above zero the client retries only `GET`, `HEAD`,
-and `OPTIONS` that receive 429 or 503. It honors a numeric `Retry-After` or `X-Rate-Limit-Reset`, caps the wait
-at 30 seconds, and preserves thread interruption. It never replays an upload, create, update, delete,
-notification, or signature.
-
----
-
-## 4. Preparing the workspace
-
-Everything below is account-scoped. Methods take an optional trailing `accountId` that overrides the client
-default, so one client can serve several workspaces.
-
-```java
-List<WorkspaceAccount> workspaces = client.accounts.list();
-WorkspaceAccount workspace = client.accounts.get();
-WorkspaceAccount created = client.accounts.create(new AccountPayload("Legal Operations")
-    .setNotificationSenderType("Account"));
-client.accounts.update(new AccountPayload().setName("Legal"));
-
-AccountTheme theme = client.accounts.getTheme();
-byte[] logo = client.accounts.downloadLogo();
-client.accounts.uploadLogo(pngBytes, "logo.png");
-client.accounts.deleteLogo();
-
-User me = client.users.getSelf();
-NotificationPreferences preferences = client.users.getNotificationPreferences();
-client.users.updateNotificationPreferences(
-    new NotificationPreferences().setDocumentCompleted(true).setSignerDeclined(true));
-
-// Permanent; force=true also cancels an active paid subscription.
-client.accounts.delete(false, created.getId());
-```
-
-**Tags** organise documents, and **field definitions** describe the inputs a `collect` assignment can place on
-a page. Both are workspace-level and are usually created once, before any document exists.
-
-```java
-Tag contracts = client.tags.create(new CreateTagPayload("Contracts").setColor("ff8800"));
-Tag renamed = client.tags.update(contracts.getId(),
-    new UpdateTagPayload().setName("Sales Contracts").clearColor());
-PaginatedResult<Tag> tags = client.tags.list(Map.of("search", "contract"));
-boolean deleted = client.tags.delete(renamed.getId(), true); // force detaches it from documents first
-
-FieldDefinition reference = client.fields.create(
-    new CreateFieldPayload("text", "Reference").setRequired(true));
-PaginatedResult<FieldDefinition> fields = client.fields.list(Map.of("include_standard", "true"));
-client.fields.update(reference.getId(), new UpdateFieldPayload().setName("Internal Reference"));
-List<FieldTypeInfo> fieldTypes = client.fields.listTypes();
-client.fields.delete(reference.getId());
-
-// Validate a value against a field's type/regex rules before submitting it.
-FieldValidationResult check = client.fields.validateAsWorkspace(reference.getId(), "ABC-123");
-List<FieldValidationResult> checks = client.fields.validateMultipleAsWorkspace(List.of(
-    new FieldValidationPayload(reference.getId(), "ABC-123")));
-// While signing, use validate(..., signerAccessCode): the code alone authenticates the request.
-```
-
----
-
-## 5. Creating the document
-
-A document starts either from an uploaded PDF or from a template. Uploads are `multipart/form-data` with one
-`file` part, at most 25 MB and 2,000 pages.
-
-```java
-// From a file or from bytes already in memory.
-DocumentDetails doc = client.documents.upload(new File("contract.pdf"));
-DocumentDetails fromBytes = client.documents.upload(pdfBytes, "contract.pdf");
-
-// Rename is allowed only before an assignment exists.
-DocumentDetails renamed = client.documents.rename(doc.getId(), "Signed contract.pdf");
-
-// Full listing, and a lightweight search for typeahead (no expanded assignment/pages).
-PaginatedResult<DocumentListItem> page = client.documents.list(Map.of("page", "1", "per_page", "20"));
-PaginatedResult<DocumentListItem> hits = client.documents.search(Map.of("search", "invoice"));
-
-// Tags on this document.
-List<Tag> attached = client.documents.listTags(doc.getId());
-client.documents.appendTags(doc.getId(), List.of(urgentTagId));
-client.documents.replaceTags(doc.getId(), List.of(contractTagId, quarterTagId));
-boolean detached = client.documents.detachTag(doc.getId(), tagId);
-```
-
-Templates produce a document and its assignment in a single call. Provide one entry per role: use an existing
-signer ID, or an email to find or create the signer in the account.
-
-```java
-PaginatedResult<TemplateListItem> templates = client.templates.list(Map.of("search", "NDA"));
-TemplateDetails template = client.templates.get(templateId);
-
-CostEstimate templateCost = client.documents.estimateCostFromTemplate(templateId,
-    List.of(new TemplateSigner(template.getRoles().get(0).getId()).setVerificationMethod("Email")));
-
-DocumentDetails generated = client.documents.createFromTemplate(
-    templateId,
-    List.of(new TemplateSigner(template.getRoles().get(0).getId(), signerId)
-        .setVerificationMethod("Email")
-        .setNotificationMethods(List.of("Email"))
-        .setStep(1)),
-    new CreateDocumentFromTemplateOptions().setTags(List.of("Generated")));
-```
-
-The server derives a template assignment's method from its placed fields and rejects `DigitalCertificate`
-when the role has placed fields. For both creation and estimation, the SDK also requires each certificate
-signer to be alone in its signing step.
-
-An uploaded PDF is not immediately assignable: the API extracts page metadata first. `waitUntilReady` polls
-`GET /documents/{id}` until the status reaches `metadata_ready`, `pending_signature`, or `certificated`,
-raising `ValidationException` if the document fails, expires, is rejected, or the wait budget elapses.
-
-```java
-DocumentDetails ready = client.documents.waitUntilReady(doc.getId());          // 30s budget, 2s interval
-DocumentDetails patient = client.documents.waitUntilReady(doc.getId(), 120_000, 5_000);
-```
-
-A `virtual` assignment can be created while metadata is still processing; a `collect` assignment cannot,
-because its field placements reference specific page IDs.
-
----
-
-## 6. Identifying the signers
-
-Signers live at the account level and are reused across documents, so the same person is one record no matter
-how many contracts they sign.
-
-```java
-// Strict create: always sends POST and reports a duplicate email as an ApiException.
-Signer signer = client.signers.create(
-    new CreateSignerPayload("John Doe", "john@example.com")
+Signer signer = client.signers.findOrCreate(
+    new CreateSignerPayload("Example Signer", "signer@example.com")
         .setWhatsappPhoneNumber("+5548999990000")
-        .setGovernmentId("52998224725"));    // CPF, optional
+        .setGovernmentId("39053344705"));
 
-// Explicit reuse policy: search by exact case-insensitive email, POST only when absent.
-// It does not update an existing signer's fields.
-Signer reusable = client.signers.findOrCreate(
-    new CreateSignerPayload("John Doe", "john@example.com"));
-
-Signer existing = client.signers.findByEmail("john@example.com");
-Signer fetched = client.signers.get(signer.getId());
-PaginatedResult<Signer> list = client.signers.list(Map.of("search", "john"));
-client.signers.update(signer.getId(), new UpdateSignerPayload()
-    .setFullName("Johnny Doe")
-    .setGovernmentId("39053344705"));
-client.signers.delete(signer.getId());
-```
-
-Pick `create` when the signer is genuinely new and a duplicate should be an error; pick `findOrCreate` when
-"this person, whether or not we have met them before" is what you mean. Changing a signer's email or WhatsApp
-number is refused while that channel is verified on an in-flight document, and rotates the access codes of any
-unverified in-flight requests — resend after such a change.
-
----
-
-## 7. Pricing and requesting signatures
-
-Estimate first. The estimate endpoint takes the same payload shape as the create call, charges nothing, and
-tells you whether the account can fund the request.
-
-```java
-CreateAssignmentPayload request = new CreateAssignmentPayload()
-    .setMethod("virtual")
-    .setSignerStrings(signer.getId())
-    .setMessage("Please review and sign")
-    .setExpiresAt("2030-12-31T23:59:00Z");
-
-CostEstimate estimate = client.assignments.estimateCost(doc.getId(), request);
+CreateAssignmentPayload request = new CreateAssignmentPayload().setMethod("virtual").setSigners(List.of(
+    SignerRef.of(signer.getId()).setVerificationMethod("Email")
+        .setNotificationMethods(List.of("Email")).setStep(1)));
+CostEstimate estimate = client.assignments.estimateCost(document.getId(), request);
 if (!Boolean.TRUE.equals(estimate.getHasSufficientResources())) {
-    throw new IllegalStateException("Assignment cannot be funded: " + estimate.getBlockingReason());
+    throw new IllegalStateException(estimate.getBlockingReason());
 }
-
-Assignment assignment = client.assignments.create(doc.getId(), request);
+Assignment assignment = client.assignments.create(document.getId(), request);
 ```
 
-`blocking_reason` is `PendingPayment`, `InsufficientDocuments`, or `InsufficientCredits`;
-`getBreakdown()` itemises what drove the number.
+Supported verification/notification pairs are:
 
-**`virtual` versus `collect`.** A virtual assignment asks for a signature and nothing else. A collect
-assignment additionally places input fields at coordinates on specific pages, so it needs a `metadata_ready`
-document and one entry per page:
+| Verification | Notification | Requirements |
+|---|---|---|
+| `Email` | `Email` | Default, one-time code |
+| `Whatsapp` | `Whatsapp` | Paid-plan notification channel |
+| `IdDocumentFaceMatchBasic` | `Email` or `Whatsapp` | Feature enabled, signer CPF, explicit biometric consent |
+| `DigitalCertificate` | `Email` or `Whatsapp` | Feature enabled, CPF/CNPJ, `virtual`, signer alone in its step |
 
-```java
-CreateAssignmentPayload collect = new CreateAssignmentPayload()
-    .setMethod("collect")
-    .setSignerStrings(signer.getId())
-    .setCollectEntries(List.of(new CollectAssignmentEntry(pageId, List.of(
-        new CollectFieldPlacement(signer.getId(), fieldId,
-            new DisplaySettings(100, 100, 240, 40, 12))))));
-```
+DigitalCertificate supports the signer's ICP-Brasil A1/A3 certificate through the browser Web PKI flow and
+produces a qualified PAdES artifact. Biometric `InReview` allows signing but holds certification until the
+workspace approves or rejects the private evidence. Estimate first because plan features and credits vary.
 
-### Verification and notification methods
-
-Set per signer at assignment time through `SignerRef.setVerificationMethod(...)` and
-`setNotificationMethods(...)`. Verification and notification are **coupled**: send one, both, or neither, and
-the missing side is inferred. With neither, both default to `Email`.
-
-| Method | How it works | Cost per signer |
-| --- | --- | --- |
-| `Email` *(default)* | A one-time code by email, required before signing | Free |
-| `Whatsapp` | A one-time code over WhatsApp | Verification is free; the WhatsApp notification it requires costs 0.45 credits, on paid plans only |
-| `DigitalCertificate` | The signer signs with their **own ICP-Brasil certificate (A1 or A3)** through the Web PKI browser extension, producing a **qualified PAdES** signature; requires `method: "virtual"` | 0.5 credits, plus the notification cost |
-| `IdDocumentFaceMatchBasic` | Hosted government-ID capture, face match, and liveness check; requires the account feature and a valid CPF in `government_id` | Per-signer fee plus notification; use the estimate |
-
-Allowed pairings — an invalid one answers HTTP 400:
-
-| Verification | Accepted notifications |
-| --- | --- |
-| `Email` | `Email` |
-| `Whatsapp` | `Whatsapp` |
-| `DigitalCertificate` | `Email` **or** `Whatsapp` |
-| `IdDocumentFaceMatchBasic` | `Email` **or** `Whatsapp` |
-
-One notification channel per signer. Email and WhatsApp verification are billed through their notification
-channel; certificate signatures and biometric verification add their own per-signer fee. Use
-`assignments.estimateCost` before creating the assignment to check feature availability, credits, and the total.
+Signer-facing calls use only `signer-access-code`; the client deliberately withholds workspace credentials.
 
 ```java
-CreateAssignmentPayload overWhatsapp = new CreateAssignmentPayload()
-    .setMethod("virtual")
-    .setSigners(List.of(SignerRef.of(signer.getId())
-        .setVerificationMethod("Whatsapp")
-        .setNotificationMethods(List.of("Whatsapp"))
-        .setStep(1)));
-```
-
-**ICP-Brasil digital certificates (A1 and A3).** These require `method: "virtual"`, the **Digital Certificate**
-feature on the account (Standard and Pro plans), a CPF or CNPJ in the signer's `government_id`, and exactly
-**one certificate signer alone in that step**. A certificate flow completes the signer's virtual item; it
-cannot submit placed fields through the ordinary `collect` signing endpoint. A CPF requires that person's own
-certificate (an e-CPF, or an e-CNPJ naming them as legal representative); a CNPJ requires the company's e-CNPJ.
-A1 (a file) and A3 (a token or smartcard) both work — they differ only in where the signer's key is stored, and
-both are reached through the same Web PKI extension. The 0.5-credit charge appears in the estimate under
-`SignatureDigitalCertificate`.
-
-The SDK rejects certificate signers on a `collect` assignment in both `assignments.create` and
-`assignments.estimateCost` before any request. Branch on
-`ValidationException.getErrors().get("code")` equal to
-`AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD` (stable value
-`digital_certificate_requires_virtual_method`), not on the human-readable message.
-If a certificate signer shares its step, the code is
-`AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP` (value
-`digital_certificate_requires_exclusive_step`). The same validation applies to template creation and pricing.
-
-The ordinary signing endpoint **rejects** certificate signers: their signature comes from a two-step handshake
-with the Web PKI extension (`POST /v1/signers/certificate/start`, then `.../complete`). Those two routes are
-browser certificate operations without published OpenAPI request/response schemas, so this
-server-side SDK does not wrap them. Once the flow completes, download the qualified PDF with
-`client.documents.download(documentId, "pades")`.
-
-**Signing order.** `step` sequences the signers: everyone sharing a step signs in parallel, and the next step
-is notified only after the previous one completes. If you use it, every signer needs one, and the values must
-be contiguous from 1.
-
-Once an assignment exists you can list, re-notify, and re-schedule it:
-
-```java
-PaginatedResult<Assignment> assignments = client.assignments.list(Map.of("page", "1", "per-page", "20"));
-
-ResendResult resent = client.assignments.resendNotification(doc.getId(), assignment.getId(), signer.getId());
-ResendCostEstimate resendCost = client.assignments.estimateResendCost(
-    doc.getId(), assignment.getId(), signer.getId());
-
-client.assignments.resetExpiration(doc.getId(), assignment.getId(), "2027-06-30T00:00:00Z");
-client.assignments.clearExpiration(doc.getId(), assignment.getId()); // sends expires_at: null
-
-List<WhatsappNotification> whatsapp =
-    client.assignments.whatsappNotifications(doc.getId(), assignment.getId());
-```
-
-### Biometric identity verification
-
-Set `SignerRef.setVerificationMethod("IdDocumentFaceMatchBasic")` and choose Email or WhatsApp notification.
-The signer uses their access code to read `client.signerSelf.getIdentityVerification(signerAccessCode)`.
-After explicit consent, call `startIdentityVerification(signerAccessCode, true)` and open the returned `url()`
-unchanged, including its fragment. It is a bearer link: keep it out of logs and browser storage.
-
-A new session is allowed only when `canStart()` is true: before capture starts or after an unused session
-expires. Pending, InReview, Approved, Declined, and Abandoned sessions cannot restart. A resend preserves the
-session; a declined or abandoned verification needs a new document and assignment.
-
-`InReview` lets the signer continue and sign. Once all signers finish, the document waits in
-`pending_identity_review` until the account decides every open review. Use
-`assignments.getIdentityVerification(documentId, assignmentId, signerId)` for the evidence summary and
-`downloadIdentityVerificationImage(..., name)` for the listed images, available only while the review is open.
-An authorized account reviewer calls `reviewIdentityVerification(..., "Approved", note)` or `"Rejected"`.
-Rejection cancels the document and notifies signers and copy receivers; the private note is not shown to them.
-Handle the identity webhook events listed in [the API reference](docs/API_REFERENCE.md#webhook-deliveries).
-Complete request and response examples are in [EXAMPLES](docs/EXAMPLES.md#biometric-identity-verification).
-
-### The one-call shortcut
-
-For the plain virtual path, `uploadAndRequestSignatures` composes upload, optional readiness polling,
-`findOrCreate` per signer, and assignment creation, returning the document, the assignment, and the signer IDs.
-
-```java
-UploadAndRequestSignaturesResult result = client.uploadAndRequestSignatures(
-    new UploadAndRequestSignaturesOptions(new File("contract.pdf"), List.of(
-            new UploadAndRequestSignaturesSigner("John Doe", "john@example.com")))
-        .setMessage("Please review and sign"));
-```
-
-The API has no transaction spanning those calls. If a later stage fails, the helper makes a best-effort attempt
-to delete the uploaded document and attaches any cleanup failure to the original exception as a suppressed
-exception. Account-scoped signers are never deleted automatically, because another workflow may already
-reference them.
-
----
-
-## 8. The signer's side
-
-These endpoints are authorised by a short-lived `signer-access-code` sent as a query parameter, not by the
-account API key. They are normally called from a signer landing page rather than from your back end, and the
-SDK exposes them so you can build that page or simulate the flow in tests.
-
-```java
-// The document the signer was invited to sign. Returns HTTP 409 while it is still being prepared —
-// surfaced as ApiException with getStatusCode() == 409; retry with backoff.
 DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
-
-// Identity: profile, terms, one-time code, and confirmed personal data.
-Signer self = client.signerSelf.getSelf(signerAccessCode);
 client.signerSelf.acceptTerms(signerAccessCode);
-client.signerSelf.verifyEmail("123456", signerAccessCode);
-Signer confirmed = client.signerSelf.confirmSignerData(doc.getId(), signerAccessCode,
-    new ConfirmSignerDataPayload().setFullName("John Doe").setEmail("signer@example.com")
-        .setGovernmentId("15774136604"));
+client.signerSelf.verifyEmail("123456", signerAccessCode); // Whatsapp uses verifyWhatsapp
+client.signerSelf.confirmSignerData(document.getId(), signerAccessCode,
+    new ConfirmSignerDataPayload().setFullName("Example Signer").setGovernmentId("39053344705"));
 
-// Signature image. PNG is the published media type; the SDK also detects JPEG bytes.
-// reuse=true lets the saved signature be reused across documents (sets is_signature_reusable).
-client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
-client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature", true);
-byte[] saved = client.signerSelf.downloadSignature(signerAccessCode, "signature");
+IdentityVerificationStatus identity = client.signerSelf.getIdentityVerification(signerAccessCode);
+if (identity.canStart()) {
+    IdentityVerificationSession session =
+        client.signerSelf.startIdentityVerification(signerAccessCode, true);
+    redirectSignerTo(session.url()); // preserve the bearer URL and fragment; never log it
+}
+
+client.signerSelf.uploadSignature(signerAccessCode, signaturePng, "signature", true);
+// Submit the non-empty AssignmentSignEntry values represented by signingView.getAssignment().getItems().
 ```
 
-A signer with a digital certificate must confirm their data *and* accept the terms before `getSign` will
-return the document; otherwise it answers HTTP 400. A signer using a virtual assignment must confirm their data
-before signing, or the sign call answers HTTP 400.
-
-Signing itself, and declining, are mutually exclusive:
+Complete ordinary assignments with `assignments.signEntries`; every entry carries the returned item, field, and
+page IDs plus its string value. Certificate signing is completed in the browser, not by fabricating certificate
+material in the SDK. Poll status or consume signed webhooks idempotently, then download the final artifact.
 
 ```java
-client.assignments.signEntries(doc.getId(), assignment.getId(), signerAccessCode, List.of(
-    new AssignmentSignEntry("item-1", "field-1", "page-1", "John Doe")));
-
-// Alternative to the above, not a follow-up:
-// client.assignments.decline(doc.getId(), assignment.getId(), signerAccessCode, "Clause 3 is unacceptable");
+DocumentDetails current = client.documents.details(document.getId());
+byte[] signedPdf = client.documents.download(document.getId(), "certificated");
+byte[] qualifiedPdf = client.documents.download(document.getId(), "pades"); // DigitalCertificate only
 ```
 
-A signer with several pending documents can work through them in bulk, and can browse and download their own
-copies:
+## Signed webhooks
+
+New or changed endpoint URLs must use HTTPS; legacy stored HTTP URLs remain available for exact lookup/deletion.
+Store a creation secret immediately because list/view/update responses omit it.
 
 ```java
-DocumentDetails current = client.signerSelf.getCurrentDocument(signerId, signerAccessCode);
-PaginatedResult<DocumentDetails> mine = client.signerSelf.listDocuments(
-    signerId, signerAccessCode, Map.of("page", "1", "per_page", "20"));
-PaginatedResult<DocumentDetails> found =
-    client.signerSelf.searchDocuments(signerId, signerAccessCode, "invoice");
-
-// The artifact route is public; an overload also sends the access code where an environment requires it.
-byte[] signerCopy = client.signerSelf.downloadDocument(signerId, doc.getId(), "pades");
-byte[] authorizedCopy = client.signerSelf.downloadDocument(
-    signerId, doc.getId(), "original", signerAccessCode);
-
-client.signerSelf.signMultiple(signerAccessCode, List.of(doc1.getId(), doc2.getId()));
-// Alternative to the above for the same documents, not a follow-up:
-// client.signerSelf.declineMultiple(signerAccessCode, List.of(doc1.getId()), "Not interested");
-```
-
-Two public endpoints support a signer landing page before any access code exists — an unauthenticated document
-view, and a request to re-send the one-time access token:
-
-```java
-AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
-DocumentDetails publicInfo = publicClient.documents.getPublic(doc.getId());
-
-// The document must be in pending_signature. The token goes to the signer by email.
-SendTokenResult sent = publicClient.documents.sendTokenByEmail(doc.getId(), "signer@example.com");
-```
-
----
-
-## 9. Tracking progress and collecting the result
-
-Poll for state, or — better — subscribe to webhooks and fetch state when one arrives.
-
-```java
-DocumentDetails currentState = client.documents.details(doc.getId());
-SigningProgress progress = client.documents.getSigningProgress(doc.getId());
-boolean done = client.documents.isFullySigned(doc.getId());
-List<DocumentActivity> activity = client.documents.activities(doc.getId());
-List<DocumentStatsRow> accountStats = client.accounts.stats(Map.of("granularity", "monthly"));
-List<DocumentStatsRow> allAccountStats = client.users.stats(Map.of("granularity", "monthly"));
-```
-
-An account registers one webhook endpoint, or up to three on paid plans. Each endpoint has its own URL, event
-list, and signing setting, and every active endpoint subscribed to an event receives it. Creating an endpoint
-past the plan's limit returns `403`; reusing another endpoint's URL returns `400`.
-
-```java
-List<String> events = List.of("document_ready", "signer_signed_document");
 WebhookEndpoint endpoint = client.webhooks.createEndpoint(new WebhookEndpointPayload()
-    .setUrl("https://example.com/webhooks/assinafy")
-    .setEmail("ops@example.com")
-    .setEvents(events)
-    .setName("ERP")
-    .setSigningEnabled(true));            // sign every delivery (Standard Webhooks)
-
-List<WebhookEndpoint> endpoints = client.webhooks.listEndpoints();          // oldest first
-client.webhooks.getEndpoint(endpoint.id());
-client.webhooks.updateEndpoint(endpoint.id(), new WebhookEndpointPayload().setActive(false)); // only what changed
-client.webhooks.deleteEndpoint(endpoint.id());                               // frees the slot
-// Alternative: client.webhooks.deleteEndpointByUrl(endpoint.url());
-
-List<WebhookEventTypeInfo> eventTypes = client.webhooks.listEventTypes();
-PaginatedResult<WebhookDispatch> dispatches = client.webhooks.listDispatches(
-    new ListDispatchesParams().setEndpointId(endpoint.id()).setEvent("document_ready").setDelivered(false));
-client.webhooks.retryDispatch(dispatchId);
-```
-
-With `signing_enabled`, every delivery carries the `webhook-id`, `webhook-timestamp`, and `webhook-signature`
-headers. Creation returns the secret (`whsec_...`) once as `endpoint.secret()`: store it immediately.
-Only an API key or user session can retrieve or rotate it later. An OAuth application that loses it must
-delete and recreate the endpoint. `WebhookVerifier` checks the signature in constant time,
-rejects deliveries more than five minutes from the local clock (replays), and returns the typed body. Pass the
-**raw** body exactly as received; re-serialized JSON does not verify.
-
-```java
+    .setUrl("https://example.com/webhooks/assinafy").setEmail("ops@example.com")
+    .setEvents(List.of("document_ready", "signer_signed_document")).setSigningEnabled(true));
 WebhookVerifier verifier = new WebhookVerifier(endpoint.secret());
-
-// In the HTTP receiver:
-WebhookEvent event = verifier.verify(
-    request.getHeader("webhook-id"),
-    request.getHeader("webhook-timestamp"),
-    request.getHeader("webhook-signature"),
-    rawBody);                             // byte[] or String; throws ValidationException when it does not verify
-if (alreadyProcessed(request.getHeader("webhook-id"))) return;  // the same id repeats on the retry
-handle(event.event(), event.object());
-
-// API key or user session only. Rotation takes effect immediately.
-verifier = new WebhookVerifier(client.webhooks.rotateEndpointSecret(endpoint.id()));
+WebhookEvent event = verifier.verify(webhookId, webhookTimestamp, webhookSignature, rawBody);
 ```
 
-Answer `2xx` quickly and process afterwards. Connection failures, timeouts, 408, 429, and 5xx responses get up
-to six attempts, about ten minutes apart. After ten failed deliveries in a row the endpoint is paused
-(`is_held`): the API probes it after 3, 15, and 60 minutes, then every 6 hours. When a probe succeeds, missed
-events are delivered oldest first.
+Verify the raw body before acknowledging, deduplicate by `webhook-id`, answer 2xx quickly, and process later.
+Only API keys/user sessions can later read or rotate a secret; an OAuth app must recreate an endpoint if its
+creation secret is lost.
 
-The older subscription operations (`register`, `getSubscription`, `inactivate`) keep working and act on the
-account's oldest endpoint:
+## OAuth 2.1 marketplace connections
 
-```java
-WebhookSubscription sub = client.webhooks.register(
-    new RegisterWebhookPayload("https://example.com/webhooks", "ops@example.com")
-        .setEvents(events).setActive(true));
-client.webhooks.getSubscription();
-client.webhooks.inactivate();             // stops deliveries and keeps the configuration
-```
-
-Once the document reaches `certificated`, its artifacts are available. `original` is the uploaded PDF,
-`certificated` is the signed one, `certificate-page` is the signature evidence page, `pades` exists only when a
-digital-certificate signer took part, and `bundle` is a zip of the rest.
-
-```java
-byte[] signedPdf = client.documents.download(doc.getId());               // defaults to "certificated"
-byte[] original = client.documents.download(doc.getId(), "original");
-byte[] bundle = client.documents.download(doc.getId(), "bundle");
-byte[] thumbnail = client.documents.thumbnail(doc.getId());
-byte[] pageImage = client.documents.downloadPage(doc.getId(), pageId);
-
-// Public, unauthenticated verification by the hash printed on a signed document.
-DocumentVerification verification = client.documents.verify(signatureHash);
-boolean valid = Boolean.TRUE.equals(verification.getIsValid());
-```
-
-### Tracked contracts
-
-On plans with contract tracking, `client.contracts` stores terms on a document and tracks expiration, renewal,
-and amendment instruments. Supply `updated_at` on mutations to reject a write based on stale data; renewals can
-also name the current term so repeating a request cannot renew twice.
-
-```java
-DocumentContract contract = (DocumentContract) client.contracts.set(doc.getId(),
-    new DocumentContractInput()
-        .setStatus("active")
-        .setCounterpartyName("Example Company")
-        .setValue(new BigDecimal("120000.00"))
-        .setCurrency("BRL")
-        .setEndDate("2027-10-31")
-        .setAutoRenew(true)
-        .setRenewalTermMonths(12));
-
-PaginatedResult<DocumentContract> endingSoon = client.contracts.list(Map.of(
-    "status", "active", "ending_within_days", "30", "sort", "end_date"));
-client.contracts.renew(doc.getId(), new ContractRenewalPayload()
-    .setTerm(contract.getTerm()).setUpdatedAt(contract.getUpdatedAt()));
-```
-
-`contracts.get` returns `DocumentContract` for the root document or `DocumentContractAmendment` for a linked
-instrument. `contracts.related` returns the family; `contracts.terminate` stops its lifecycle alerts. The full
-payloads, filters, responses, and events are in the [API reference](docs/API_REFERENCE.md).
-
-Delete only what you own and only when the status allows it — `documents.statuses()` reports which statuses
-are deletable.
-
-```java
-boolean deletable = client.documents.statuses().stream()
-    .anyMatch(status -> currentState.getStatus().equals(status.getCode())
-        && Boolean.TRUE.equals(status.getDeletable()));
-if (deletable) {
-    client.documents.delete(doc.getId());
-}
-```
-
----
-
-## 10. Sessions, passwords, two-factor authentication, and API keys
-
-The `auth` resource covers the credential lifecycle itself. The password-reset routes are public; the rest need
-a bearer token or an API key.
-
-```java
-AuthenticationResult session = client.auth.login("user@example.com", "password");
-if (session.getMfaToken() != null) {
-    // Two-factor user: login returns a single-use challenge valid for 5 minutes.
-    session = client.auth.verifyMfa(session.getMfaToken(), authenticatorCode); // or a recovery code
-}
-String accessToken = session.getAccessToken();
-
-AuthenticationResult googleSession = client.auth.socialLogin(
-    new SocialLoginPayload("google", googleToken, true));
-
-// Rotate keys through a bearer session so the client does not retain a key it just revoked.
-AssinafyClient tokenClient = new AssinafyClient(new AssinafyClientOptions().setToken(accessToken));
-ApiKeyResponse masked = tokenClient.auth.getApiKey();     // masked; the full key is never retrievable
-ApiKeyResponse created = tokenClient.auth.createApiKey("password"); // replaces any previous key
-tokenClient.auth.deleteApiKey();
-
-tokenClient.auth.linkSocialLogin("google", googleToken);
-tokenClient.auth.changePassword("user@example.com", "old-password", "new-password");
-
-// Two-factor authentication (authenticator app, TOTP).
-TotpEnrollment enrollment = tokenClient.auth.startTotpEnrollment("My phone");
-// Render enrollment.provisioningUri() as a QR code; the secret is returned only by this call.
-List<String> recoveryCodes = tokenClient.auth.confirmTotpEnrollment(
-    enrollment.id(), codeFromNewDevice, null, null);  // store the codes: they are shown only once
-MfaMethods methods = tokenClient.auth.listMfaMethods();
-List<String> freshCodes = tokenClient.auth.regenerateRecoveryCodes("password", null);
-boolean stillEnabled = tokenClient.auth.removeMfaMethod(methods.methods().get(0).id(), "password", null);
-
-AssinafyClient publicClient = new AssinafyClient(new AssinafyClientOptions());
-publicClient.auth.requestPasswordReset("user@example.com");
-publicClient.auth.resetPassword("user@example.com", resetToken, "new-password");
-```
-
----
-
-## 11. OAuth — acting in someone else's workspace
-
-Everything above assumes the workspace is yours. OAuth is the other case: an application that *other* Assinafy
-customers connect to *their* workspace. They approve it once, and you receive tokens limited to the permissions
-they granted and to the one workspace they chose — never their password or API key, and they can switch it off
-at any time. If you are automating your own account, keep the API key and skip this section.
-
-Register the application in the Assinafy app under **Settings → OAuth applications**. You receive a
-`client_id`, plus a `client_secret` if it is *confidential* (runs on a server you control). PKCE is mandatory
-for every application, confidential ones included.
-
-**1. Start a connection.** Generate a verifier and a state per attempt and keep both in the user's session.
+Use API keys for your own workspace. For customer workspaces, register exact HTTPS callbacks and use state plus
+S256 PKCE. Validate callback `state` and issuer before exchanging the single-use code.
 
 ```java
 String verifier = OAuthResource.generateCodeVerifier();
 String state = OAuthResource.generateState();
+String authorizeUrl = client.oauth.authorizationUrl(new OAuthAuthorizationRequest(
+    "client-id", "https://example.com/oauth/callback")
+    .setScopes(List.of("documents:read", "documents:write", "offline_access"))
+    .setState(state).setCodeVerifier(verifier));
 
-String authorizeUrl = client.oauth.authorizationUrl(
-    new OAuthAuthorizationRequest("your-client-id", "https://myapp.example/oauth/callback")
-        .setScopes(List.of("documents:read", "documents:write", "offline_access"))
-        .setState(state)
-        .setCodeVerifier(verifier));
-```
-
-Send the browser there with a full page navigation. `response_type=code` and `code_challenge_method=S256` are
-fixed, the challenge is derived from the verifier, and `resource` defaults to the origin of the client's base
-URL. The redirect URI must be HTTPS, carry no fragment, and match a registered value character for character —
-`…/callback` and `…/callback/` are different URIs. If the client ID or redirect URI is wrong, the user is *not*
-sent back to you: the authorization server shows an error on its own page.
-
-| Scope | Lets your app |
-|---|---|
-| `documents:read` | Read documents, their signers, assignments, and activity |
-| `documents:write` | Create documents and send them for signature |
-| `templates:read` / `templates:write` | Read, and create or change, templates |
-| `account:read` | Read the workspace profile, theme, and logo |
-| `webhooks:write` | Create, change, and remove the workspace webhook endpoints (the secret is returned on creation; reading or rotating it later needs an API key or user session) |
-| `openid` / `profile` / `email` | Identify the user, and read their name and email |
-| `offline_access` | Receive a refresh token, so the app keeps working while the user is away |
-
-Request the minimum: the user approves everything or nothing, and each permission is another line they read.
-Billing, account lifecycle, credentials, and administration are never reachable with an OAuth token.
-
-**2. Handle the return.** Check `state` against the stored value and `iss` against
-`https://auth.assinafy.com.br` before anything else, including on an `error=` return (such as `access_denied`
-when the user declines), which carries no code to exchange. Then exchange the code from your server — it is
-single-use and expires 60 seconds after approval.
-
-```java
 OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
-    "your-client-id", "your-client-secret",   // null secret for a public application
-    code, "https://myapp.example/oauth/callback", storedVerifier);
-```
-
-Read `tokens.getScope()` for what you actually received rather than assuming. `getRefreshToken()` is populated
-only when `offline_access` was granted, and `getIdToken()` only when `openid` was; the SDK does not validate the
-`id_token`, so check it with an OpenID Connect library before trusting it.
-
-**3. Call the API as the user.** A token belongs to exactly one workspace, and the workspace list returns that
-one; store its ID beside the tokens.
-
-```java
+    "client-id", clientSecret, code, "https://example.com/oauth/callback", verifier);
 AssinafyClient asUser = new AssinafyClient(
     new AssinafyClientOptions().setToken(tokens.getAccessToken()));
-String workspaceId = asUser.accounts.list().get(0).getId();
 ```
 
-Calling any other workspace answers 403, even one the same user belongs to. If a customer uses several, connect
-each separately and keep tokens per workspace.
-
-**4. Keep it alive.** Access tokens last one hour. A refresh token is valid for 30 days, and every refresh
-returns a new one with a fresh 30 days; a connection only expires if your app goes 30 days without refreshing,
-after which the user has to reconnect.
+Store tokens atomically per workspace. Serialize refreshes: every successful refresh rotates the refresh token
+and grants a fresh 30 days. Save the replacement before use; never replay a token after an uncertain outcome.
+Revoke the latest token on disconnect. OAuth tokens are restricted to the approved scopes and one workspace.
 
 ```java
-OAuthTokens renewed = client.oauth.refreshToken("your-client-id", "your-client-secret", store.load());
-store.save(renewed.getRefreshToken());   // before using anything else in the response
-
-// A client keeps the token it was built with: call the API through one built with the renewed token.
-asUser = new AssinafyClient(new AssinafyClientOptions().setToken(renewed.getAccessToken()));
+OAuthTokens renewed = client.oauth.refreshToken("client-id", clientSecret, storedRefreshToken);
+tokenStore.replaceAtomically(renewed);
+client.oauth.revoke("client-id", clientSecret, renewed.getRefreshToken(), "refresh_token");
 ```
 
-Every refresh issues a new refresh token and retires the old one. A reused refresh token cannot be told apart
-from a stolen one being replayed, so it ends the whole connection. Refresh one at a time per connection, and
-never re-send a refresh token after a failure that may have reached the server — a timeout, a dropped
-connection, a 5xx — because the first attempt may already have retired it; the SDK itself never re-sends it.
-Re-read your storage instead: continue only if it holds a different, newer token; if it still holds the one you
-sent, the outcome is unknown, so ask the user to reconnect. Only a failure that provably happened before sending
-is safe to retry: a `NetworkException` caused by an `UnknownHostException` (DNS), a `ConnectException`
-(connection refused), or an `SSLHandshakeException`. `refreshToken` returns only when the response carries a new
-refresh token; otherwise it throws `ValidationException`, and the user has to reconnect.
-
-**5. Handle the two OAuth failures.** A missing permission answers 403 with a challenge naming it; the SDK
-surfaces both parts.
-
-```java
-catch (ApiException e) {
-    if ("insufficient_scope".equals(e.getOAuthError())) {
-        reconnectRequesting(e.getRequiredScope());   // reconnect, not retry
-    } else if (e.getStatusCode() == 401) {
-        // Expired or revoked: refresh, and if that fails ask the user to connect again.
-    }
-}
-```
-
-A 403 *without* that code has another cause: a different workspace, the user's own role, or an area OAuth
-tokens can never reach.
-
-**6. Identify and disconnect.**
-
-```java
-OAuthUserInfo who = asUser.oauth.userInfo();   // needs openid; name needs profile, email needs email
-
-// On disconnect, revoke rather than only forgetting the token, and revoke the refresh token saved most recently:
-// every refresh retired the one before it, and every token outcome answers 200, a retired token included.
-client.oauth.revoke("your-client-id", "your-client-secret", store.load(), "refresh_token");
-```
-
-`client.oauth.protectedResourceMetadata()` reads the RFC 9728 document at the API host root, naming the
-canonical resource identifier and the authorization server. Most OAuth libraries need only the issuer,
-`https://auth.assinafy.com.br`, and read the rest from its own `/.well-known/oauth-authorization-server`
-document, which the authorization server serves — not this API.
-
-Before going live: a new verifier and state per attempt; `state` and `iss` checked; the secret only on your
-server; the new refresh token saved before use; 401 handled; the workspace ID stored per connection; every
-production redirect URI registered; only the permissions you need; tokens revoked on disconnect. A new
-application is unverified and can connect to at most 25 workspaces until Assinafy reviews it.
-
----
-
-## 12. Errors
-
-Everything the SDK throws descends from `AssinafyException`, so one catch block can be the backstop while the
-three subtypes let you separate "my input was wrong" from "the API said no" from "the network failed".
-
-```java
-import com.assinafy.sdk.exceptions.*;
-
-try {
-    client.documents.upload(new File("contract.pdf"));
-} catch (ValidationException e) {
-    // Caught before any request was sent: missing IDs, bad email, oversized file, malformed payload.
-    System.err.println("Validation: " + e.getMessage() + " " + e.getErrors());
-} catch (ApiException e) {
-    // The API rejected it. getResponseBody() keeps the complete error JSON.
-    System.err.println("API error " + e.getStatusCode() + ": " + e.getMessage());
-    Integer backoff = e.getRetryAfterSeconds(); // populated only for retryable 429/503
-    Integer remaining = e.getRateLimitRemaining(); // X-Rate-Limit-Remaining, when present
-    String oauthError = e.getOAuthError();      // RFC 6749 code on an OAuth failure; see section 11
-} catch (NetworkException e) {
-    // Transport failure, or a response body that could not be parsed.
-    System.err.println("Network: " + e.getMessage());
-} catch (AssinafyException e) {
-    System.err.println("SDK error: " + e.getMessage());
-}
-```
-
-The standard error body is `{ "status": integer, "message": string, "data": object|null }`. Treat both 400 and
-422 as validation failures. A blocked account deletion adds a `restrictions` array naming each blocker.
-
----
-
-## 13. Environments
-
-| Environment | Base URL |
-| --- | --- |
-| Production | `https://api.assinafy.com.br/v1` (default) |
-| Sandbox | `https://sandbox.assinafy.com.br/v1` — set it with `setBaseUrl(...)`; this artifact exposes no sandbox constant |
-
-The sandbox trails production. A route the sandbox router answers 404 for while `api.assinafy.com.br` serves it
-can indicate deployment lag. OAuth endpoints are available in the sandbox; production apps and
-authorizations use production credentials and workspaces.
-
----
-
-## 14. Development
+## Build and support
 
 ```bash
-# Run tests in Docker (recommended)
-docker compose run --rm test
-
-# Or run the complete local verification with the Maven Wrapper (requires JDK 25+)
 ./mvnw verify
-
-# The release gate: Javadoc doclint plus the sources and javadoc jars. CI runs this as a separate step,
-# because doclint warnings fail here and not under `verify`.
-./mvnw -DskipTests -Prelease package
-
-# Live smoke tests against the sandbox (skipped unless credentials are set; defaults to the sandbox base URL)
-ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ./mvnw test -Dtest=LiveSmokeTest
-
-# Explicit opt-in for the tests that dispatch real signing-request email
-ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ASSINAFY_LIVE_EMAILS=true \
-  ASSINAFY_TEST_EMAIL=... ASSINAFY_SECOND_TEST_EMAIL=... ./mvnw test -Dtest=LiveSmokeTest
+docker compose run --rm test
 ```
 
-`LiveSmokeTest` refuses non-sandbox base URLs. Keep live credentials in environment/CI secrets, never Maven
-properties or source files.
+The build enforces Java 25, compiler warnings as errors, unit tests, and release-profile Javadoc doclint. Live
+sandbox tests require the environment variables documented in `AGENTS.md`; they never target production.
 
-The automated sandbox suite covers API-key workflows through assignment creation. Completing a signature also
-requires the short-lived signer access code and one-time verification code delivered out of band, plus an
-account with document/credit capacity. Use the signer self-service sequence from section 8 with a disposable
-assignment when validating that final step; CI does not fabricate or persist either credential.
-
-The GitLab manual job uses protected, masked, sandbox-scoped variables; notification-producing
-cases require an explicit opt-in.
-
-CI runs `./mvnw verify` on the current JDK 25 LTS. GitLab is the source of truth and mirrors to GitHub, where
-the equivalent Actions workflows run. Releases publish to Maven Central and GitHub Packages on a `v*` tag via the
-`release` profile (`-Prelease`, which also builds `-sources` and `-javadoc` jars).
-
----
-
-## Documentation
-
-- [docs/API_REFERENCE.md](docs/API_REFERENCE.md) — the per-operation lookup table
-- [docs/EXAMPLES.md](docs/EXAMPLES.md) — longer runnable programs
-- [docs/INSTALLATION.md](docs/INSTALLATION.md) — build setup
-- [README.md](README.md) — this same guide, in Portuguese
-- [API documentation](https://api.assinafy.com.br/v1/docs)
-
-## License
-
-Distributed under the [MIT](LICENSE) license.
+- [API reference](docs/API_REFERENCE.md) — every operation and complete payload catalog
+- [Examples](docs/EXAMPLES.md) — endpoint-by-endpoint Java and JSON
+- [Installation](docs/INSTALLATION.md) — repositories and build tools
+- [Changelog](CHANGELOG.md) — released behavior
+- [License](LICENSE) — MIT

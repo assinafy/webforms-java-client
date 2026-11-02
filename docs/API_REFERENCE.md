@@ -138,7 +138,7 @@ null to clear a value.
 | `ContractTerminationPayload` | Optional `reason` (maximum 500 characters) and `updated_at` write precondition |
 | Public token | `{ "channel": "email"*, "recipient": signer-email* }` |
 | `CreateSignerPayload` | `{ "full_name": string*, "email": string?, "whatsapp_phone_number": E.164?, "government_id": CPF/CNPJ? }` |
-| `UpdateSignerPayload` | Any non-empty subset of `full_name`, `email`, `whatsapp_phone_number`, `government_id` (CPF/CNPJ) |
+| `UpdateSignerPayload` | Any non-empty subset of `full_name`, `email`, `whatsapp_phone_number`, `government_id` (CPF/CNPJ); an empty contact/identifier value clears it, while `null` omits it |
 | Assignment expiration | `{ "expires_at": ISO-8601 date-time\|null* }`; `clearExpiration` sends `null` to remove the expiration |
 | Assignment decline | `{ "decline_reason": string* }`, at most 2000 characters |
 | `AssignmentSignEntry[]` | `[{ "itemId": string*, "fieldId": string*, "pageId": string*, "value": string* }, ...]` |
@@ -158,6 +158,10 @@ null to clear a value.
 | OAuth token exchange | `application/x-www-form-urlencoded` with `grant_type=authorization_code`*, `code`*, `redirect_uri`*, `code_verifier`*, `client_id`*, `client_secret`?, `resource` |
 | OAuth token refresh | `application/x-www-form-urlencoded` with `grant_type=refresh_token`*, `refresh_token`*, `client_id`*, `client_secret`? |
 | OAuth token revocation | `application/x-www-form-urlencoded` with `token`*, `token_type_hint` (`access_token`\|`refresh_token`)?, `client_id`*, `client_secret`? |
+
+On signer updates, `full_name` cannot be cleared. Changing or clearing an email/WhatsApp channel already
+verified on an in-flight document returns HTTP 400; changing an unverified channel rotates its pending access
+and verification codes, so resend the invitation.
 
 Document tag requests carry tag IDs; the SDK forwards the supplied strings without rewriting them. The SDK also
 exposes environment-specific request forms in [SDK extensions](#sdk-extensions).
@@ -469,7 +473,9 @@ is set. Create requires `url`, `email`, and at least one event:
 }
 ```
 
-`url` must be an absolute HTTP or HTTPS URL that no other endpoint of the account uses. `is_active` defaults to
+New or changed `url` values must be absolute HTTPS URLs that no other endpoint of the account uses. A stored
+legacy HTTP URL remains valid for exact lookup and deletion. The API rejects private or reserved hosts and
+does not follow delivery redirects. `is_active` defaults to
 `true` and `signing_enabled` to `false` on create. Enabling signing generates a secret when the endpoint has
 none and keeps the current one otherwise; disabling it discards the secret. A signed endpoint creation returns
 `secret` once: store `endpoint.secret()` immediately, including with OAuth. List/view/update responses omit it.

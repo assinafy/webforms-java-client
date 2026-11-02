@@ -72,7 +72,7 @@ public final class WebhookResource extends BaseResource {
      * @return matching endpoint list, never {@code null}
      */
     public List<WebhookEndpoint> listEndpointsByUrl(String url, String accountId) {
-        requireWebhookUrl(url);
+        requireWebhookUrl(url, false);
         String id = accountId(accountId);
         return orEmpty(httpGet("/accounts/" + id + "/webhooks/endpoints", Map.of("url", url),
                 new TypeReference<List<WebhookEndpoint>>() {}));
@@ -87,7 +87,8 @@ public final class WebhookResource extends BaseResource {
     public List<WebhookEndpoint> listEndpointsByUrl(String url) { return listEndpointsByUrl(url, null); }
 
     /**
-     * {@code POST /accounts/{account_id}/webhooks/endpoints} — register a URL to receive the account's events.
+     * {@code POST /accounts/{account_id}/webhooks/endpoints} — register an HTTPS URL to receive the account's
+     * events.
      * Requires {@code url}, {@code email}, and {@code events}. Creating an endpoint past the plan's limit
      * (1, or 3 on paid plans) fails with HTTP 403; reusing another endpoint's URL fails with HTTP 400. When
      * {@code signing_enabled} is {@code true} a signing secret is returned once in {@link WebhookEndpoint#secret()}.
@@ -101,7 +102,7 @@ public final class WebhookResource extends BaseResource {
         if (payload == null) {
             throw new ValidationException("Webhook endpoint payload is required");
         }
-        requireWebhookUrl(payload.getUrl());
+        requireWebhookUrl(payload.getUrl(), true);
         requireEmail(payload.getEmail(), "Webhook email");
         requireEvents(payload.getEvents());
         String id = accountId(accountId);
@@ -142,7 +143,7 @@ public final class WebhookResource extends BaseResource {
     /**
      * {@code PUT /accounts/{account_id}/webhooks/endpoints/{endpoint_id}} — change only the fields set on the
      * payload. Enabling signing generates a secret when the endpoint has none; disabling it discards the
-     * secret.
+     * secret. A changed URL must use HTTPS.
      *
      * @param endpointId required endpoint identifier
      * @param payload fields to change; at least one must be set
@@ -155,7 +156,7 @@ public final class WebhookResource extends BaseResource {
                 && payload.getSigningEnabled() == null)) {
             throw new ValidationException("At least one webhook endpoint attribute is required");
         }
-        if (payload.getUrl() != null) requireWebhookUrl(payload.getUrl());
+        if (payload.getUrl() != null) requireWebhookUrl(payload.getUrl(), true);
         if (payload.getEmail() != null) requireEmail(payload.getEmail(), "Webhook email");
         if (payload.getEvents() != null) requireEvents(payload.getEvents());
         return httpPut(endpointPath(endpointId, accountId), payload, WebhookEndpoint.class);
@@ -200,7 +201,7 @@ public final class WebhookResource extends BaseResource {
      * @param accountId account override, or null for the client default
      */
     public void deleteEndpointByUrl(String url, String accountId) {
-        requireWebhookUrl(url);
+        requireWebhookUrl(url, false);
         httpDelete("/accounts/" + accountId(accountId) + "/webhooks/endpoints",
                 new TypeReference<Object>() {}, Map.of("url", url));
     }
@@ -265,7 +266,7 @@ public final class WebhookResource extends BaseResource {
     /**
      * {@code PUT /accounts/{account_id}/webhooks/subscriptions} — create or replace the account's oldest
      * webhook endpoint. The body carries {@code url}, {@code email}, {@code events}, and {@code is_active}
-     * (defaults to {@code true} when {@code payload.active} is {@code null}).
+     * (defaults to {@code true} when {@code payload.active} is {@code null}); the URL must use HTTPS.
      *
      * @param payload required subscription values
      * @param accountId account override, or {@code null} for the client default
@@ -275,7 +276,7 @@ public final class WebhookResource extends BaseResource {
         if (payload == null) {
             throw new ValidationException("Webhook payload is required");
         }
-        requireWebhookUrl(payload.getUrl());
+        requireWebhookUrl(payload.getUrl(), true);
         requireEmail(payload.getEmail(), "Webhook email");
         requireEvents(payload.getEvents());
 
@@ -455,15 +456,18 @@ public final class WebhookResource extends BaseResource {
         return secret;
     }
 
-    private static void requireWebhookUrl(String url) {
+    private static void requireWebhookUrl(String url, boolean httpsRequired) {
         if (url == null || url.isBlank()) {
             throw new ValidationException("Webhook URL is required");
         }
         try {
             URI uri = new URI(url);
-            if (!uri.isAbsolute() || uri.getHost() == null || (!"http".equalsIgnoreCase(uri.getScheme())
-                    && !"https".equalsIgnoreCase(uri.getScheme()))) {
-                throw new ValidationException("Webhook URL must be an absolute HTTP or HTTPS URL");
+            boolean supportedScheme = "https".equalsIgnoreCase(uri.getScheme())
+                    || (!httpsRequired && "http".equalsIgnoreCase(uri.getScheme()));
+            if (!uri.isAbsolute() || uri.getHost() == null || !supportedScheme) {
+                throw new ValidationException(httpsRequired
+                        ? "Webhook URL must be an absolute HTTPS URL"
+                        : "Webhook URL must be an absolute HTTP or HTTPS URL");
             }
         } catch (URISyntaxException e) {
             throw new ValidationException("Webhook URL must be a valid URI");

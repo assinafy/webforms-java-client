@@ -34,10 +34,10 @@ public final class WebhookEndpointPayload {
     public String getUrl() { return url; }
 
     /**
-     * Sets the absolute HTTP or HTTPS URL that receives the events. It must differ from the URL of every other
-     * endpoint in the workspace.
+     * Sets the absolute HTTPS URL that receives the events. It must differ from the URL of every other endpoint
+     * in the workspace.
      *
-     * @param url absolute HTTP or HTTPS URL
+     * @param url absolute HTTPS URL
      * @return this payload
      */
     public WebhookEndpointPayload setUrl(String url) { this.url = url; return this; }

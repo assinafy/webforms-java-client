@@ -50,7 +50,7 @@ class WebhookResourceTest {
 
     @Test
     void deleteEndpointByUrlPreservesTheExactUrlAndAccountOverride() throws Exception {
-        String url = "https://example.invalid/hook?tenant=a&token=b+c%20d";
+        String url = "http://example.invalid/hook?tenant=a&token=b+c%20d";
         for (String account : new String[]{null, "other"}) {
             server.enqueue(okJson(List.of()));
             resource.deleteEndpointByUrl(url, account);
@@ -97,6 +97,10 @@ class WebhookResourceTest {
 
     @Test
     void register_validatesUriEmailAndEventValuesBeforeRequest() {
+        assertThatThrownBy(() -> resource.register(
+                new RegisterWebhookPayload("http://example.com", "ops@example.com")
+                        .setEvents(List.of("document_ready"))))
+                .isInstanceOf(ValidationException.class).hasMessageContaining("HTTPS");
         assertThatThrownBy(() -> resource.register(new RegisterWebhookPayload("relative", "ops@example.com")
                 .setEvents(List.of("document_ready"))))
                 .isInstanceOf(ValidationException.class).hasMessageContaining("URL");
@@ -279,7 +283,7 @@ class WebhookResourceTest {
 
     @Test
     void listEndpointsByUrlPreservesTheExactUrlAndAccountOverride() throws Exception {
-        String url = "https://example.invalid/hook?tenant=a&token=b+c%20d";
+        String url = "http://example.invalid/hook?tenant=a&token=b+c%20d";
         server.enqueue(okJson(List.of(endpointJson())));
 
         List<WebhookEndpoint> endpoints = resource.listEndpointsByUrl(url, "other");
@@ -335,6 +339,9 @@ class WebhookResourceTest {
     void createEndpoint_requiresUrlEmailAndEventsBeforeRequest() {
         assertThatThrownBy(() -> resource.createEndpoint(null)).isInstanceOf(ValidationException.class);
         assertThatThrownBy(() -> resource.createEndpoint(new WebhookEndpointPayload()
+                .setUrl("http://example.com").setEmail("ops@example.com").setEvents(List.of("document_ready"))))
+                .isInstanceOf(ValidationException.class).hasMessageContaining("HTTPS");
+        assertThatThrownBy(() -> resource.createEndpoint(new WebhookEndpointPayload()
                 .setUrl("ftp://example.com").setEmail("ops@example.com").setEvents(List.of("document_ready"))))
                 .isInstanceOf(ValidationException.class).hasMessageContaining("HTTP");
         assertThatThrownBy(() -> resource.createEndpoint(new WebhookEndpointPayload()
@@ -384,6 +391,9 @@ class WebhookResourceTest {
     void updateEndpoint_rejectsEmptyOrInvalidChangesBeforeRequest() {
         assertThatThrownBy(() -> resource.updateEndpoint("ep1", new WebhookEndpointPayload()))
                 .isInstanceOf(ValidationException.class).hasMessageContaining("attribute");
+        assertThatThrownBy(() -> resource.updateEndpoint("ep1",
+                new WebhookEndpointPayload().setUrl("http://example.com")))
+                .isInstanceOf(ValidationException.class).hasMessageContaining("HTTPS");
         assertThatThrownBy(() -> resource.updateEndpoint("ep1", new WebhookEndpointPayload().setEvents(List.of())))
                 .isInstanceOf(ValidationException.class).hasMessageContaining("event");
         assertThatThrownBy(() -> resource.updateEndpoint("../x", new WebhookEndpointPayload().setName("n")))

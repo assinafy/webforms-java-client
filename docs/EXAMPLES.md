@@ -756,8 +756,13 @@ PaginatedResult<Signer> list = client.signers.list(Map.of("search", "john"));// 
 client.signers.update(signer.getId(), new UpdateSignerPayload()               // PUT .../signers/{id}
     .setFullName("Johnny Doe")
     .setGovernmentId("39053344705")); // CPF/CNPJ; normalized to digits by the API
+client.signers.update(signer.getId(), new UpdateSignerPayload().setEmail("")); // clear email
 client.signers.delete(signer.getId());                                       // DELETE .../signers/{id}
 ```
+
+An empty `email`, `whatsapp_phone_number`, or `government_id` clears it; a Java `null` omits it. The API blocks
+changing a channel already verified on an in-flight document. Changing an unverified channel rotates pending
+access/verification codes, so resend the invitation.
 
 ## Assignments
 

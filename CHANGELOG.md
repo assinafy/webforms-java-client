@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [2.9.1] - 2026-11-02
+
+### Fixed
+- Signer updates can clear `email` with an empty string while Java `null` continues to omit the property.
+- New or changed webhook endpoint URLs require HTTPS; exact lookup and deletion still accept stored legacy
+  HTTP URLs.
+
 ## [2.9.0] - 2026-10-28
 
 ### Added

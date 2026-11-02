@@ -170,6 +170,7 @@ public final class SignerResource extends BaseResource {
     /**
      * {@code PUT /accounts/{account_id}/signers/{signer_id}} — update any supplied {@code full_name},
      * {@code email}, {@code whatsapp_phone_number}, or {@code government_id} field and return the signer.
+     * An empty contact or government identifier clears that field; {@code null} omits it.
      *
      * @param signerId required signer identifier
      * @param payload required partial signer update
@@ -182,7 +183,7 @@ public final class SignerResource extends BaseResource {
         if (payload == null) {
             throw new ValidationException("Signer update payload is required");
         }
-        if (payload.getEmail() != null) {
+        if (payload.getEmail() != null && !payload.getEmail().isEmpty()) {
             requireEmail(payload.getEmail(), "Signer email");
         }
         return httpPut("/accounts/" + id + "/signers/" + sid, normaliseUpdatePayload(payload), Signer.class);

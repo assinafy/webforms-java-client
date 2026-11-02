@@ -283,6 +283,15 @@ class SignerResourceTest {
     }
 
     @Test
+    void update_sendsAnEmptyEmailToClearIt() throws Exception {
+        server.enqueue(okJson(Map.of("id", "s1", "full_name", "John")));
+
+        resource.update("s1", new UpdateSignerPayload().setEmail(""));
+
+        assertThat(server.takeRequest().getBody().readUtf8()).isEqualTo("{\"email\":\"\"}");
+    }
+
+    @Test
     void update_rejectsEmptyPayloadWithoutSendingRequest() {
         assertThatThrownBy(() -> resource.update("s1", new UpdateSignerPayload()))
                 .isInstanceOf(ValidationException.class)
