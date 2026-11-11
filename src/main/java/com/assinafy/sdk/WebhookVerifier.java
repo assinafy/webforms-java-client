@@ -19,12 +19,14 @@ import java.util.Base64;
  *
  * <p>Deliveries to an endpoint with {@code signing_enabled} carry three headers: {@code webhook-id},
  * {@code webhook-timestamp}, and {@code webhook-signature}. Build one verifier per endpoint from the secret
- * returned by {@code webhooks.getEndpointSecret(...)}, and pass it the headers and the <strong>raw</strong>
- * request body exactly as received; re-serialized JSON does not verify. Deliveries whose timestamp is more than
+ * returned on creation or rotation (or {@code webhooks.getEndpointSecret(...)} for API keys/user sessions).
+ * Pass it the headers and the <strong>raw</strong> request body exactly as received; re-serialized JSON does
+ * not verify. Deliveries whose timestamp is more than
  * {@link #TOLERANCE} away from the local clock are rejected as replays.</p>
  *
  * <p>The {@code webhook-id} header is identical on every attempt of the same event to the same endpoint; use it
- * to deduplicate. Rotating the secret takes effect immediately, so replace the verifier at the same time.</p>
+ * to deduplicate. Rotation normally replaces the secret immediately. With {@code keep_previous=true},
+ * deliveries carry both signatures for 24 hours, allowing the verifier to switch during that window.</p>
  *
  * <p>Instances are immutable and thread-safe.</p>
  */

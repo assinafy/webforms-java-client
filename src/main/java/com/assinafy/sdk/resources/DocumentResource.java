@@ -426,7 +426,7 @@ public final class DocumentResource extends BaseResource {
      * @param options optional document, invitation, editor-field, and tag values
      * @param accountId account override, or {@code null} for the client default
      * @return created document
-     * @throws ValidationException when a certificate signer shares a step, or another input is invalid
+     * @throws ValidationException when required role or signer identity is absent
      */
     public DocumentDetails createFromTemplate(String templateId, List<TemplateSigner> signers,
             CreateDocumentFromTemplateOptions options, String accountId) {
@@ -441,9 +441,15 @@ public final class DocumentResource extends BaseResource {
             if (options.getExpiresAt() != null) body.put("expires_at", options.getExpiresAt());
             if (options.getEditorFields() != null) body.put("editor_fields", options.getEditorFields());
             if (options.getTags() != null) body.put("tags", options.getTags());
+            if (options.getMaxTotalCredits() != null) {
+                if (options.getMaxTotalCredits().signum() < 0) {
+                    throw new ValidationException("Credit ceiling must be non-negative");
+                }
+                body.put("max_total_credits", options.getMaxTotalCredits());
+            }
         }
-        return httpPost("/accounts/" + accId + "/templates/" + tmplId + "/documents", body,
-                DocumentDetails.class);
+        return httpPostIdempotent("/accounts/" + accId + "/templates/" + tmplId + "/documents", body,
+                DocumentDetails.class, options == null ? null : options.getIdempotencyKey());
     }
 
     /**
@@ -485,7 +491,7 @@ public final class DocumentResource extends BaseResource {
      * @param signers required role and optional assignment settings
      * @param accountId account override, or {@code null} for the client default
      * @return template-generation credit estimate
-     * @throws ValidationException when a certificate signer shares a step, or another input is invalid
+     * @throws ValidationException when required role or signer identity is absent
      */
     public CostEstimate estimateCostFromTemplate(String templateId, List<TemplateSigner> signers,
             String accountId) {
@@ -761,8 +767,7 @@ public final class DocumentResource extends BaseResource {
                 requireEmail(signer.getEmail(), "Template signer email");
             }
         }
-        AssignmentResource.validateDigitalCertificateSteps(signers, TemplateSigner::getVerificationMethod,
-                TemplateSigner::getStep);
+        // Only the server knows which template roles are copy receivers and do not occupy signing steps.
     }
 
     private void validateTags(List<String> tags, boolean allowEmpty) {
@@ -777,5 +782,49 @@ public final class DocumentResource extends BaseResource {
                 throw new ValidationException("Tag values cannot be blank");
             }
         }
+    }
+
+    /**
+     * {@code GET /documents/{documentId}} with optional workspace expansions.
+     * @param documentId document identifier
+     * @param params optional expand=envelope_id,envelope
+     * @return document details
+     */
+    public DocumentDetails details(String documentId, Map<String, String> params) {
+        return httpGet("/documents/" + requireId(documentId, "Document ID"), params, DocumentDetails.class);
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/activities} with pagination metadata.
+     * @param documentId document identifier
+     * @param params optional sort, page and per-page
+     * @return activity page
+     */
+    public PaginatedResult<DocumentActivity> activitiesPage(String documentId, Map<String, String> params) {
+        return httpGetList("/documents/" + requireId(documentId, "Document ID") + "/activities", params,
+                DocumentActivity.class);
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/thumbnail} with the selected render.
+     * @param documentId document identifier
+     * @param artifact original or certificated
+     * @return thumbnail bytes
+     */
+    public byte[] thumbnail(String documentId, String artifact) {
+        return httpGetBinary("/documents/" + requireId(documentId, "Document ID") + "/thumbnail",
+                queryParams("artifact", artifact));
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/pages/{pageId}/download} with the selected render.
+     * @param documentId document identifier
+     * @param pageId page identifier
+     * @param artifact original or certificated
+     * @return page image bytes
+     */
+    public byte[] downloadPage(String documentId, String pageId, String artifact) {
+        return httpGetBinary("/documents/" + requireId(documentId, "Document ID") + "/pages/"
+                + requireId(pageId, "Page ID") + "/download", queryParams("artifact", artifact));
     }
 }

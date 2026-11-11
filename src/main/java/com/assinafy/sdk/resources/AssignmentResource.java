@@ -354,7 +354,9 @@ public final class AssignmentResource extends BaseResource {
         for (SignerRef ref : signerRefs) {
             normalisedSigners.add(normaliseSignerRef(ref, estimate));
         }
-        validateDigitalCertificateSteps(signerRefs, SignerRef::getVerificationMethod, SignerRef::getStep);
+        if (!estimate) {
+            validateDigitalCertificateSteps(signerRefs, SignerRef::getVerificationMethod, SignerRef::getStep);
+        }
         if (!"virtual".equals(method) && normalisedSigners.stream()
                 .anyMatch(signer -> "DigitalCertificate".equals(signer.get("verification_method")))) {
             throw digitalCertificateRequiresVirtualMethod(method);
@@ -364,6 +366,12 @@ public final class AssignmentResource extends BaseResource {
         body.put("method", method);
         body.put("signers", normalisedSigners);
         if (!estimate) {
+            if (payload.getMaxTotalCredits() != null) {
+                if (payload.getMaxTotalCredits().signum() < 0) {
+                    throw new ValidationException("Credit ceiling must be non-negative");
+                }
+                body.put("max_total_credits", payload.getMaxTotalCredits());
+            }
             if (payload.getMessage() != null) body.put("message", payload.getMessage());
             if (payload.getExpiresAt() != null) body.put("expires_at", payload.getExpiresAt());
             if (payload.getCopyReceivers() != null && !payload.getCopyReceivers().isEmpty()) {
@@ -399,6 +407,7 @@ public final class AssignmentResource extends BaseResource {
         if (ref.getNotificationMethods() != null && !ref.getNotificationMethods().isEmpty()) {
             result.put("notification_methods", ref.getNotificationMethods());
         }
+        if (!estimate && ref.getEmbedded() != null) result.put("embedded", ref.getEmbedded());
         if (!estimate && ref.getStep() != null) {
             result.put("step", ref.getStep());
         }

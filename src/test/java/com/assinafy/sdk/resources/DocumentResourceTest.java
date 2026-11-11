@@ -378,21 +378,19 @@ class DocumentResourceTest {
     }
 
     @Test
-    void templateCreationAndEstimateRejectCertificateSignerSharingAStep() {
+    void templateRoleRulesAreResolvedByTheServerAndEstimatesOmitSteps() throws Exception {
         List<TemplateSigner> signers = List.of(
-                new TemplateSigner("role-1", "signer-1")
+                new TemplateSigner("signing-role", "signer-1")
                         .setVerificationMethod("DigitalCertificate").setStep(1),
-                new TemplateSigner("role-2", "signer-2").setVerificationMethod("Email").setStep(1));
-
-        assertThatThrownBy(() -> resource.createFromTemplate("template-1", signers))
-                .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
-                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP)
-                        .containsEntry("step", 1));
-        assertThatThrownBy(() -> resource.estimateCostFromTemplate("template-1", signers))
-                .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
-                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP)
-                        .containsEntry("step", 1));
-        assertThat(server.getRequestCount()).isZero();
+                new TemplateSigner("copy-receiver-role", "signer-2").setVerificationMethod("Email").setStep(1));
+        server.enqueue(okJson(Map.of("id", "doc-1")));
+        assertThat(resource.createFromTemplate("template-1", signers).getId()).isEqualTo("doc-1");
+        assertThat(MAPPER.readTree(server.takeRequest().getBody().readUtf8()).path("signers")).hasSize(2);
+        server.enqueue(okJson(Map.of("total_credits", 2)));
+        assertThat(resource.estimateCostFromTemplate("template-1", signers).getTotalCredits()).isEqualTo(2);
+        JsonNode priced = MAPPER.readTree(server.takeRequest().getBody().readUtf8()).path("signers");
+        assertThat(priced.get(0).has("step")).isFalse();
+        assertThat(priced.get(1).has("id")).isFalse();
     }
 
     @Test

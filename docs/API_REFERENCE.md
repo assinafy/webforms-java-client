@@ -1,6 +1,6 @@
 # Assinafy Java SDK API Reference
 
-This reference maps the Java SDK to the 118 operations documented at the
+This reference maps the Java SDK to the 147 operations documented at the
 [Assinafy API documentation](https://api.assinafy.com.br/v1/docs). Paths below omit the `/v1` prefix, except
 for the OAuth protected-resource metadata, which the API serves at its host root.
 
@@ -8,7 +8,7 @@ for the OAuth protected-resource metadata, which the API serves at its host root
 
 Construct with `new AssinafyClient(options)`, `AssinafyClient.create(apiKey, accountId[, configurator])`, or
 `AssinafyClient.fromConfig(map)`. The client exposes `accounts`, `users`, `auth`, `oauth`, `documents`,
-`contracts`, `signers`, `assignments`, `fields`, `templates`, `tags`, `webhooks`, and `signerSelf`.
+`contracts`, `envelopes`, `embed`, `signers`, `assignments`, `fields`, `templates`, `tags`, `webhooks`, and `signerSelf`.
 `getBaseUrl()` returns
 the normalized base URL; `getHttpClient()` exposes the configured OkHttp client for advanced integration and
 diagnostics.
@@ -24,7 +24,8 @@ diagnostics.
 
 Every option has a `getX()` accessor and fluent `setX(value)`. Request payload setters are also fluent. Response
 model getters map the snake_case wire properties listed in the response catalog to ordinary Java camelCase
-names; response setters exist for Jackson deserialization.
+names; response setters exist for Jackson deserialization. Immutable response records expose component accessors such
+as `id()`, `documents()`, and `secret()`; their nullable components preserve omitted server fields.
 
 ## Environments and authentication
 
@@ -42,7 +43,8 @@ Signer-facing methods take a `signerAccessCode` and send it as the `signer-acces
 client's API key or bearer token. Routes that accept either a signer code or workspace credentials have separate
 `...AsWorkspace` methods for the workspace form: `signerSelf.listDocumentsAsWorkspace`,
 `signerSelf.searchDocumentsAsWorkspace`, `fields.validateAsWorkspace`, and `fields.validateMultipleAsWorkspace`. The
-document verification, public-document lookup/token, and signer artifact download routes are public. The four
+document verification and public-document lookup/token routes are public. Signer original downloads require a
+signer access code. Certified copies use the separate bearer download token, without workspace credentials. The four
 password/social-login entry points are also usable before authentication, as are the three OAuth endpoints that
 precede a token.
 
@@ -81,7 +83,11 @@ when absent). Past the limit the API answers 429 with `Retry-After` in seconds, 
 `insufficient_scope` rejection `getRequiredScope()` names the scope to reconnect with.
 `ValidationException.getErrors()` returns structured validation details when present.
 
-The standard error body is `{ "status": integer, "message": string, "data": object|null }`. Callers should
+The standard error body is `{ "status": integer, "message": string, "data": object|null, "code"?: string,
+"errors"?: [{ "field": string, "code": string, "message": string }] }`. Field codes include `Required`,
+`UnknownField` and `Invalid`; actionable refusal codes include `PlanRestricted`, `InsufficientScope`,
+`DocumentNotReady`, `TagInUse`, `ContractChanged`, `EnvelopeOpen`, `CreditCeilingExceeded` and
+`IdempotencyKeyInUse`. Read these from the preserved response body; do not branch on translated messages. Callers should
 handle both 400 and 422 as validation failures. A blocked account deletion may also include
 `restrictions: [{ "code": "ActivePaidSubscription"|"PendingDocuments", "message": string,
 "account_ids": [string, ...] }]`. The SDK preserves the complete error JSON in
@@ -147,7 +153,7 @@ null to clear a value.
 | Signer verification (Email or Whatsapp) | `{ "verification-code": string* }` |
 | Biometric session start | `{ "consent": true* }`; explicit signer consent is required |
 | Biometric review decision | `{ "decision": "Approved"\|"Rejected"*, "note": string\|null? }`; note at most 2000 characters |
-| `ConfirmSignerDataPayload` | Any of `full_name`, `email`, `government_id` |
+| `ConfirmSignerDataPayload` | `email?`, `whatsapp_phone_number?`, `has_accepted_terms?`; legacy `full_name`/`government_id` setters remain available, subject to server validation |
 | `CreateFieldPayload` | `{ "type": string*, "name": string*, "regex": string\|null?, "is_required": boolean? }` |
 | `UpdateFieldPayload` | Any of `name`, `regex`, `is_active`; `clearRegex()` explicitly sends `"regex": null` |
 | Single field validation | `{ "value": any* }` |
@@ -246,7 +252,8 @@ a `collect` assignment.
 before sending a request. The resulting `ValidationException` has
 `getErrors().get("code") == AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL_METHOD`, whose stable
 value is `digital_certificate_requires_virtual_method`; `getErrors().get("method")` is `"collect"`.
-They also reject a certificate signer that shares a step with any other signer. That error uses
+Assignment creation also rejects a certificate signer that shares a step with any other signer.
+Estimates omit steps and do not apply that creation-only rule. That error uses
 `AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP`, whose stable value is
 `digital_certificate_requires_exclusive_step`, and includes the conflicting `step` in `getErrors()`.
 
@@ -313,7 +320,7 @@ disagree (`invalid_target`). `setResource(...)` accepts only that value. Overrid
 | `templates:read` | Read templates, their pages, roles, fields, and tags |
 | `templates:write` | Create, update, and delete templates and their contents |
 | `account:read` | Read the workspace profile, theme, and logo |
-| `webhooks:write` | Create, update, and delete workspace webhook endpoints; creation returns its signing secret once, while later retrieval/rotation requires an API key or user session |
+| `webhooks:write` | Create, update, and delete workspace webhook endpoints; creation and rotation return a signing secret; retrieval requires an API key or user session |
 | `openid` | Identify the user and enable `GET /oauth/userinfo` |
 | `profile` | Include the user's name in the `id_token` and userinfo claims |
 | `email` | Include the user's email and its verification status in those claims |
@@ -405,7 +412,7 @@ merged on top. Use `new TemplateEditorField(fieldId, value)` with `setTemplateEd
 
 The API derives a template assignment's method from its placed fields and rejects a certificate signer when
 that role has placed fields. Both `documents.createFromTemplate` and `documents.estimateCostFromTemplate`
-enforce the certificate-exclusive step rule before sending a request.
+leave certificate-step validation to the server, which knows each role’s signer/copy-receiver type.
 
 ### Tracked contracts
 
@@ -479,12 +486,13 @@ does not follow delivery redirects. `is_active` defaults to
 `true` and `signing_enabled` to `false` on create. Enabling signing generates a secret when the endpoint has
 none and keeps the current one otherwise; disabling it discards the secret. A signed endpoint creation returns
 `secret` once: store `endpoint.secret()` immediately, including with OAuth. List/view/update responses omit it.
-Only API keys and user sessions may retrieve or rotate it later; OAuth apps must delete and recreate a lost endpoint.
+Only API keys and user sessions may retrieve it later. OAuth apps can rotate it with `webhooks:write`.
 `WebhookEndpoint` keeps its original nine-argument constructor and the ten-argument creation-secret
 constructor. The canonical record also exposes `resource`, `is_held`, and `held_since`.
 
 ### Notification preferences
 
+Personal email preferences are unavailable to third-party OAuth apps.
 `NotificationPreferences` is a partial update request and a complete response. Its 13 case-sensitive boolean
 keys are:
 
@@ -510,11 +518,11 @@ keys are:
 
 | Operation group | Supported query parameters |
 |---|---|
-| Paginated lists | `page`, `per-page` (maximum 100 where enforced) |
+| Paginated lists | `page`, `per-page` (default 20, maximum 50 unless the endpoint specifies otherwise) |
 | Documents list | `status`, `method` (`virtual\|collect`), `search`, comma-separated tag IDs in `tags` (all IDs must match), `sort` (`name` or `updated_at`), pagination |
 | Document search | `search`, `status`, pagination |
 | Assignments list | `accountId` (set from the account override or client default), `sort`, `page`, `per-page` |
-| Document activities | `sort=id` for oldest first or `sort=-id` for newest first (default) |
+| Document activities | `sort=id` for oldest first or `sort=-id` for newest first (default), `page`, `per-page`; use `activitiesPage` for metadata |
 | Contracts list | `status` (comma-separated), `counterparty`, `search`, `end_date_from`, `end_date_to`, `ending_within_days`, `external_system`, `external_id`, `sort` (`end_date` or `updated_at`, prefixed with `-` for descending), `expand=document`, pagination |
 | Fields list | `include_inactive`, `include_standard` |
 | Signers list | `search`, pagination |
@@ -561,19 +569,19 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `Assignment` | `resource`, `id`, `document_id?` (null only after document deletion), `sender_email`, `method` (`virtual\|collect`), `expires_at?`, `message?`, `signers[]`, `copy_receivers[]` (`Signer` objects), `items[]`, `summary`, `signing_urls[]`, `created_at` |
 | `AssignmentItem` | `id`, `page?`, `signer`, `field?`, `display_settings`, `value?`, `completed` |
 | `AssignmentSummary` | `signer_count`, `completed_count`, `signers[]` |
-| `SigningUrl` | `signer_id`, `url` |
+| `SigningUrl` | `signer_id`, `url`, `embedded?` |
 | `CostEstimate` | `documents`, `credits`, `needs_extra_document`, `extra_document_cost`, `total_credits`, `breakdown[]`, `document_balance`, `credit_balance`, `has_sufficient_resources`, `blocking_reason?`, `message?` |
 | `CostEstimateBreakdownItem` | `code`, `name`, `cost`, `quantity`, `unit_cost` |
 | `ResendResult` | `is_sent`, `document_id`, `signer_id` |
 | `ResendCostEstimate` | Documented `CostEstimate` fields; also accepts compact `total`, `breakdown[]` (`code`, `name`, `cost`), `credit_balance`, `has_sufficient_credits` |
 | `WhatsappNotification` | `sent_at` (Unix seconds), `header`, `body`, `buttons[]` (`text`), `phone_number`, `signer_id` |
-| `DocumentDetails` / Document | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `verification_code?`, `verification_url?`, `has_contract?` (workspace detail with contract tracking only), `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; public/signer contexts can add `page_count`, `created_by`, `current_signer`, `download_url`, `download_final_url`, `activities` |
+| `DocumentDetails` / Document | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `verification_code?`, `verification_url?`, `has_contract?` (workspace detail with contract tracking only), `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; public/signer contexts can add `page_count`, `created_by`, `current_signer`, `download_url`, `download_final_url`, `activities`; `is_signer_access_closed`, `certified_copy`; expansions `envelope_id`, `envelope` |
 | `DocumentListItem` | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts`, `is_closed`, `signing_url`, `verification_code?`, `verification_url?`, `decline_reason?`, `declined_by?`, `tags[]`, `assignment?`, `pages[]`, `created_at`, `updated_at`; lightweight search may omit expanded relationships |
 | `DocumentArtifacts` | URL map keyed by `original`, `certificated`, `certificate-page`, `pades`, `bundle`, and contextual `thumbnail` |
 | `DocumentPage` | `id`, `number`, `height`, `width`, `download_url` |
 | `DocumentStatus` | `code`, `deletable` |
-| `DocumentVerification` | `hash`, `id?`, `agreement_code?` (printed on the document certificate), `status?`, `page_count?` (string), `signer_count?` (string), `completed_count?`, `completed_at?`, `verified_at`, `is_valid`, `message` |
-| `DocumentActivity` | `id`, `event`, `message`, `payload?`, `origin?`, `created_at`. `payload` is typed `Object` because its shape varies by event — a JSON object for most events, a JSON array for others such as `document_prepared`. `origin` is a JSON object of `ip` and `user-agent`, and is null for server-generated events |
+| `DocumentVerification` | `hash`, `id?`, `agreement_code?` (printed on the document certificate), `status?`, `page_count?` (string), `signer_count?` (string), `completed_count?`, `completed_at?`, `verified_at`, `is_valid`, `message`, `certificated_at?` |
+| `DocumentActivity` | `id`, `event`, `message`, `payload?`, `origin?`, `created_at`. `payload` is typed `Object` because its shape varies by event — a JSON object for most events, a JSON array for others such as `document_prepared`. `origin` is a JSON object of `ip` and `user-agent`, and is null for server-generated events, `document_id` and `document_name` on envelope activity pages |
 | `DocumentContract` | `resource`, `document_id`, `status`, `counterparty_name?`, `counterparty_taxpayer_id?`, `value?`, `currency?`, `start_date?`, `end_date?`, `auto_renew`, `renewal_term_months?`, `notice_period_days?`, `term`, `owner_id?`, `metadata?`, `external_references[]`, `document?` (with `expand=document`), `amendments[]` (single/related reads), `created_at`, `updated_at` |
 | `DocumentContractAmendment` | `resource`, `document_id`, `document_name`, `parent_document_id`, `relation_type`, `number?`, `status`, `document_status`, `apply_error?`, `currency?`, `terms?`, `changes?` (each field as `{from,to}`), `applied_at?`, `created_at`, `updated_at` |
 | `ContractExternalReference` | `system`, `id` |
@@ -591,7 +599,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `WebhookEndpoint` | `resource`, `id`, `name?`, `url`, `email`, `events[]`, `is_active`, `is_held`, `held_since?` (Unix seconds), `signing_enabled`, `created_at`, `updated_at`, `secret?` (only when generated on create/update) |
 | Webhook endpoint secret | `{ "secret": "whsec_..." }`; the SDK returns the string |
 | `WebhookEvent` | Webhook delivery body; see [Webhook deliveries](#webhook-deliveries) |
-| `WebhookDispatch` | `resource`, `id`, `event`, `activity_id`, `endpoint?`, `endpoint_id?`, `payload?`, `delivered`, `webhook_id?`, `attempt?`, `kind` (`scheduled\|probe\|manual`), `will_retry`, `http_status?`, `response_body?`, `error?`, `created_at`, `updated_at` |
+| `WebhookDispatch` | `resource`, `id`, `event`, `activity_id`, `endpoint?`, `endpoint_id?`, `payload?`, `delivered`, `webhook_id?`, `attempt?`, `kind` (`scheduled\|probe\|manual`), `will_retry`, `http_status?`, `response_body?`, `error?`, `created_at`, `updated_at`, `duration_ms?` |
 | `WebhookEventTypeInfo` | `id`, `description` |
 | `AcceptTermsResponse` | Optional response fields `full_name`, `email`, `has_accepted_terms`; the documented success payload has no data, so the Java return may be null |
 | `VerifyEmailResponse` | Optional response fields `message`, `access_token`; the documented success payload has no data, so the Java return may be null |
@@ -763,8 +771,8 @@ intended application policy; it does not update an existing signer.
 | **PUT** `/documents/{documentId}/assignments/{assignmentId}/reject` | `assignments.decline(documentId, assignmentId, signerAccessCode, reason)` | Assignment decline | `void` | 200, 401, 500 |
 | **PUT** `/signers/documents/sign-multiple` | `signerSelf.signMultiple(signerAccessCode, documentIds)` | Multi-sign | `void` | 200, 401, 500 |
 | **PUT** `/signers/documents/decline-multiple` | `signerSelf.declineMultiple(signerAccessCode, documentIds, reason)` | Multi-decline | `void` | 200, 401, 500 |
-| **POST** `/verify` | `signerSelf.verifyEmail(code, signerAccessCode)` | Signer verification | `VerifyEmailResponse` or null | 200, 400, 401, 500 |
-| **PUT** `/documents/{documentId}/signers/confirm-data` | `signerSelf.confirmSignerData(documentId, signerAccessCode, payload)` | `ConfirmSignerDataPayload` | `Signer` | 200, 401, 500 |
+| **POST** `/verify` | `signerSelf.verifyEmail(code, signerAccessCode)` / `verifyWhatsapp(...)` | Signer verification | `VerifyEmailResponse` or null for `data: []` | 200, 400, 401, 429, 500 |
+| **PUT** `/documents/{documentId}/signers/confirm-data` | `signerSelf.confirmSignerData(documentId, signerAccessCode, payload)` | `ConfirmSignerDataPayload` | `Signer` or null for `data: []` | 200, 401, 500 |
 | **PUT** `/signers/accept-terms` | `signerSelf.acceptTerms(signerAccessCode)` | Signer access code | `AcceptTermsResponse` or null | 200, 401, 500 |
 | **POST** `/signature` | `signerSelf.uploadSignature(signerAccessCode, bytes, type[, reuse])` | Raw PNG + query | `void` | 200, 401, 500 |
 | **GET** `/signature/{signatureType}` | `signerSelf.downloadSignature(signerAccessCode, type)` | Signer access code | Raw `byte[]` | 200, 401, 404, 500 |
@@ -813,7 +821,7 @@ official documentation categorizes them.
 | **PUT** `/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `webhooks.updateEndpoint(endpointId, payload[, accountId])` | Partial webhook endpoint | `WebhookEndpoint` | 200, 400, 401, 404, 500 |
 | **DELETE** `/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `webhooks.deleteEndpoint(endpointId[, accountId])` | — | `void` | 200, 401, 404, 500 |
 | **GET** `/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` | `webhooks.getEndpointSecret(endpointId[, accountId])` | — | `String` secret | 200, 400 (signing disabled), 401, 404, 500 |
-| **POST** `/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | `webhooks.rotateEndpointSecret(endpointId[, accountId])` | — | `String` new secret | 200, 400 (signing disabled), 401, 404, 500 |
+| **POST** `/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | `webhooks.rotateEndpointSecret(endpointId[, accountId])` / `(endpointId, keepPrevious[, accountId])` | Optional `{keep_previous: boolean}` | `String` / `WebhookSecretRotation` | 200, 400 (signing disabled), 401, 404, 500 |
 | **GET** `/webhooks/event-types` | `webhooks.listEventTypes()` | — | `List<WebhookEventTypeInfo>` | 200, 401, 500 |
 | **GET** `/accounts/{accountId}/webhooks` | `webhooks.listDispatches([params][, accountId])` | Webhook-history query | `PaginatedResult<WebhookDispatch>` | 200, 401, 500 |
 | **POST** `/accounts/{accountId}/webhooks/{historyId}/retry` | `webhooks.retryDispatch(historyId[, accountId])` | — | `WebhookDispatch` | 200, 400, 401, 404, 500 |
@@ -895,7 +903,8 @@ WebhookEvent event = verifier.verify(
 `verify` throws `ValidationException` when a header is missing, the timestamp is more than five minutes
 (`WebhookVerifier.TOLERANCE`) from the local clock, no signature entry matches (compared in constant time), or
 the body is not a webhook event. Pass the body exactly as received; re-serialized JSON does not verify. Rotating
-the secret takes effect immediately, so replace the verifier when calling `rotateEndpointSecret`.
+the secret takes effect immediately by default. `rotateEndpointSecret(id, true)` keeps the replaced secret for
+24 hours and returns `previousSecretExpiresAt()`; deliveries carry both signatures during the overlap.
 
 ### Delivery body
 
@@ -959,3 +968,152 @@ The event catalog includes:
 `assignment_created` and `document_metadata_ready` have no guaranteed order. Consumers should deduplicate on
 the `webhook-id` header, which also tells deliveries of the same event to different endpoints apart, tolerate
 retries, and ignore unknown fields and future event values.
+
+## Envelopes, embedded signing, and delivery controls
+
+`client.envelopes` requires the workspace's Envelopes feature. Each envelope contains 1–20 documents and
+1–20 distinct signers. Documents must be `metadata_ready` and unassigned, and every listed signer must be on
+at least one document. Envelopes have no signing steps. A digital-certificate signer uses virtual documents
+and signs alone on each. Each document keeps its own certificate, status, expiration and copy receivers.
+
+Creation charges one document allowance for the envelope, each signer's notification and biometric check
+once, and each certificate signature on each document. Estimate the creation body first. A successful create
+means the envelope exists; inspect notification history for delivery failures. `max_total_credits` is a
+non-negative `BigDecimal` ceiling; a higher price fails with `409 CreditCeilingExceeded` without creating or
+charging anything. The same field is available on assignments and template creation.
+
+Envelope creation accepts a workspace-scoped `Idempotency-Key`; template document creation accepts a
+**template-scoped** key through `CreateDocumentFromTemplateOptions.setIdempotencyKey`. Keys do not expire.
+Reusing a key returns the original result regardless of the new body. An in-progress request returns
+`409 IdempotencyKeyInUse`. The SDK still sends each mutation once; recovery is an explicit caller decision.
+
+### Operation matrix
+
+Every path below uses the shared transport. Account-scoped methods support a final `accountId` override;
+otherwise they use the configured workspace. Null list responses become empty lists.
+
+| HTTP operation | Java method | Request | Returned data |
+|---|---|---|---|
+| **GET** `/accounts/{accountId}/envelopes` | `envelopes.list([params[, accountId]])` | `search`, `status=open\|closed`, `page`, `per-page` | `PaginatedResult<DocumentEnvelope>` |
+| **POST** `/accounts/{accountId}/envelopes` | `envelopes.create(payload[, idempotencyKey[, accountId]])` | `CreateEnvelopePayload`; optional `Idempotency-Key` header | `DocumentEnvelope` |
+| **POST** `/accounts/{accountId}/envelopes/estimate-cost` | `envelopes.estimateCost(payload[, accountId])` | Creation payload; ceiling ignored | `CostEstimate` |
+| **GET** `/accounts/{accountId}/envelopes/{envelopeId}` | `envelopes.get(id[, accountId])` | — | `DocumentEnvelope` |
+| **PATCH** `/accounts/{accountId}/envelopes/{envelopeId}` | `envelopes.update(id, payload[, accountId])` | `UpdateEnvelopePayload` | `DocumentEnvelope` |
+| **DELETE** `/accounts/{accountId}/envelopes/{envelopeId}` | `envelopes.delete(id[, accountId])` | All documents must be closed | void; documents remain |
+| **GET** `/accounts/{accountId}/envelopes/{envelopeId}/activities` | `envelopes.activities(id, params[, accountId])` | `sort=id\|-id`, `page`, `per-page` | `PaginatedResult<DocumentActivity>` with document ID/name |
+| **GET** `/accounts/{accountId}/envelopes/{envelopeId}/download/{artifactName}` | `envelopes.download(id, artifact[, accountId])` | `original`, `certificated`, `certificate-page`, `pades`, `bundle` | ZIP `byte[]` |
+| **PUT** `/accounts/{accountId}/envelopes/{envelopeId}/cancel` | `envelopes.cancel(id[, accountId])` | — | `List<EnvelopeCancellation>` |
+| **PUT** `/accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/resend` | `envelopes.resend(id, signerId[, accountId])` | — | `EnvelopeResend` |
+| **POST** `/accounts/{accountId}/envelopes/{envelopeId}/documents` | `envelopes.addDocument(id, payload[, accountId])` | `EnvelopeDocumentPayload` | `DocumentEnvelope` |
+| **DELETE** `/accounts/{accountId}/envelopes/{envelopeId}/documents/{documentId}` | `envelopes.removeDocument(id, documentId[, accountId])` | — | `DocumentEnvelope`; removed document is cancelled |
+| **GET** `/accounts/{accountId}/embed-origins` | `embed.listOrigins([accountId])` | — | `List<EmbedOrigin>` |
+| **POST** `/accounts/{accountId}/embed-origins` | `embed.addOrigin(origin[, accountId])` | `{origin: string}` | `EmbedOrigin` |
+| **PUT** `/accounts/{accountId}/embed-origins/{originId}` | `embed.updateOrigin(id, origin[, accountId])` | `{origin: string}` | `EmbedOrigin` |
+| **DELETE** `/accounts/{accountId}/embed-origins/{originId}` | `embed.deleteOrigin(id[, accountId])` | — | void |
+| **POST** `/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/embed-sessions` | `embed.createSession(documentId, assignmentId, signerId)` | — | `EmbedSession` |
+| **POST** `/embed/sessions/{token}/exchange` | `embed.exchange(token, parentOrigin)` | Optional `{parent_origin: string}` | `EmbedSessionExchange`; hosted embed page only |
+| **GET** `/accounts/{accountId}/usage` | `accounts.usage([accountId])` | — | `AccountUsage` |
+| **GET** `/accounts/{accountId}/notification-policy` | `accounts.getNotificationPolicy([accountId])` | — | `NotificationPolicy` |
+| **PUT** `/accounts/{accountId}/notification-policy` | `accounts.updateNotificationPolicy(policy[, accountId])` | Non-empty partial `NotificationPolicy` | Complete `NotificationPolicy` |
+| **GET** `/users/self/push-preferences` | `users.getPushPreferences()` | — | `PushPreferences` |
+| **PUT** `/users/self/push-preferences` | `users.updatePushPreferences(preferences)` | Non-empty partial `PushPreferences` | Complete `PushPreferences` |
+| **GET** `/sign/theme` | `signerSelf.getTheme(code)` | `signer-access-code` | `AccountTheme` |
+| **GET** `/sign/logo` | `signerSelf.downloadLogo(code)` | `signer-access-code` | Image `byte[]` |
+| **POST** `/sign/certified-copy` | `signerSelf.requestCertifiedCopy(code[, documentId])` | `signer-access-code`; optional `{document_id: string}` | `CertifiedCopy` |
+| **GET** `/signers/downloads/{token}` | `signerSelf.downloadCertifiedCopy(token, pades)` | Append `/pades` when requested | PDF `byte[]` |
+| **POST** `/signers/downloads/{token}/resend` | `signerSelf.resendCertifiedCopy(token)` | — | `CertifiedCopy` |
+| **POST** `/accounts/{accountId}/webhooks/endpoints/{endpointId}/test` | `webhooks.testEndpoint(id[, accountId])` | — | `WebhookDispatch` |
+
+Common errors remain `ApiException`: `400` invalid fields, `401` absent credentials, `403` plan/role/scope
+restriction, `404` missing resource, `409` incompatible state or credit ceiling, and `429` rate limiting.
+Envelope deletion fails with `EnvelopeOpen` while documents remain open. Downloads return 404 when no document
+has the requested artifact. Adding documents and resending can notify signers and spend credits; updates to
+name/message/order send no notifications. Cancellation skips documents already closed or entering certification.
+
+### Complete request and response fields
+
+`?` means optional or nullable. Payload beans expose fluent setters; response records expose camelCase
+component accessors. `UpdateEnvelopePayload` includes only called setters and preserves an explicit null
+message. For ordinary nullable payload fields, null means omitted.
+
+| Model | Complete wire fields |
+|---|---|
+| `CreateEnvelopePayload` | `name: string` (1–255, no `<`), `message?: string`, `max_total_credits?: number`, `signers: SignerRef[]` (1–20, distinct, no `step`), `documents: EnvelopeDocumentPayload[]` (1–20) |
+| `EnvelopeDocumentPayload` | `id: string`, `method?: virtual\|collect`, `entries?: CollectAssignmentEntry[]` (required for collect), `signer_ids: string[]` (non-empty, distinct), `expires_at?: string` (ISO 8601 or Unix seconds as text), `copy_receiver_ids?: string[]`, `max_total_credits?: number` (add-document only) |
+| `UpdateEnvelopePayload` | `name?: string`, `message?: string\|null`, `document_ids?: string[]` (every current document exactly once) |
+| `DocumentEnvelope` | `resource?: string`, `id: string`, `name: string`, `message?: string`, `documents: EnvelopeDocument[]`, `counts: map<string,integer>\|null`, `signing_urls: SigningUrl[]`, `created_at: ISO8601` |
+| `EnvelopeDocument` | `id: string`, `position: integer` (from 1), `name: string`, `status: string`, `artifacts: map<string,string>`, `signers: EnvelopeSigner[]` |
+| `EnvelopeSigner` | `id: string`, `full_name: string`, `email: string\|null`, `whatsapp_phone_number: string\|null`, `completed: boolean`, `signed_at: ISO8601\|null` |
+| `EnvelopeCancellation` | `id: string`, `status: string`, `cancelled: boolean` |
+| `EnvelopeResend` | `is_sent: boolean`, `envelope_id: string`, `signer_id: string` |
+| `EmbedOrigin` | `id: string`, `origin: string`, `created_at: ISO8601` |
+| `EmbedSession` | `url: string` (single-use bearer URL), `expires_at: ISO8601` |
+| `EmbedSessionExchange` | `signer_access_code: string`, `signer_id: string`, `document_id: string`, `verification_method: string`, `embed_origins: string[]` |
+| `AccountUsage` | `plan: string\|null`, `documents_renewal_date: date\|null`, `balances: {documents: Balance, credits: Balance}` |
+| `Balance` | `balance: number\|null` (null for unlimited), `limit: number\|null`, `spent: number`; Java uses `BigDecimal` |
+| `NotificationPolicy` | `editable: boolean` (response only, never serialized), `owners_receive_all: boolean`, `events: map<string,boolean>` |
+| `PushPreferences` | Boolean `SignerViewed`, `SignerSigned`, `DocumentCompleted`, `SignerDeclined`, `DocumentAboutToExpire`, `DocumentExpired`, `SignerIdentityReviewRequired`, `SignerWhatsappFailed` |
+| `CertifiedCopy` | `available: boolean`, `notification_method: Email\|Whatsapp\|null`, `resends_left: integer\|null`, `sent_to?: string` (masked contact after delivery) |
+| `WebhookSecretRotation` | `secret: string`, `previous_secret_expires_at: ISO8601\|null` |
+
+`SignerRef` and `TemplateSigner` also accept `embedded?: boolean`. `SigningUrl` returns `embedded?: boolean`
+and a null URL for embedded signers. Assignment creation and `CreateDocumentFromTemplateOptions` accept
+`max_total_credits`; template options additionally carry `idempotencyKey` as a header, never a JSON property.
+
+`WorkspaceAccount.signing_features`, requested with `accounts.get(Map.of("expand", "signing_features"), accountId)`,
+contains boolean `DigitalCertificate`, `VerificationIdDocumentFaceMatchBasic`, `WhatsappNotification`,
+`VerificationBypass`, and `Embed`. Features do not guarantee sufficient credits or eligibility at send time.
+`documents.details(id, params)` supports `expand=envelope_id,envelope`. The expanded envelope is its ID/name;
+other `DocumentEnvelope` components are null. `contracts.related(id, params, accountId)` supports `expand=document`.
+`documents.thumbnail(id, artifact)` and `downloadPage(id, pageId, artifact)` select `original` or `certificated`.
+
+### Embedded signing
+
+Register at most ten exact origins (`https://host[:port]`, without credentials, query, fragment, wildcard or
+path other than `/`). HTTP is allowed only for `localhost` and `127.0.0.1`. The API normalizes hostname case,
+default ports and trailing slash. Origin management requires an API key or user session and the Embed feature.
+
+Create the assignment/template/envelope signer with `embedded=true`, then mint a session each time the signer
+opens the page. Load its URL in an iframe on a registered origin within five minutes. Do not log the URL,
+store it in browser storage or exchange its token in your integration; the hosted page exchanges it once.
+Even a refused exchange spends the token. An invalid/expired token returns `410 embed_session_invalid`;
+session creation may return `409 already_signed`, `document_not_ready`, `document_unavailable` or
+`embed_origins_missing`, and allows at most 30 sessions per signer per hour. Token requests never carry
+workspace credentials, including across redirects. Embedded signers still need the configured identity check.
+
+### Signer access and certified copies
+
+Before reading `/sign` for a digital-certificate signer, confirm their data and terms with
+`confirmSignerData(..., new ConfirmSignerDataPayload().setHasAcceptedTerms(true))`. The current confirmation
+fields are `email`, `whatsapp_phone_number`, and `has_accepted_terms`. Successful confirmation and OTP
+verification return `data: []`, represented by Java null; legacy object responses remain readable.
+Five wrong OTP attempts within fifteen minutes cause 429, even for a correct code until the window ends.
+
+`getSign(code, terms, "envelope", documentId)` selects another document belonging to the same signer's envelope.
+`getCurrentDocument(signerId, code, "envelope")` exposes the envelope summary. Thirty minutes after all of the
+signer's documents close, or after workspace deletion, signer access closes: most signer endpoints return 410.
+`getSign` still returns ID/name/status, limited `current_signer`, `is_signer_access_closed`, and `certified_copy`.
+
+Certified-copy requests use the contact recorded during signing, never a later changed signer record.
+Email permits one resend per two minutes and ten per day; WhatsApp permits one per signature request.
+Completion download links last seven days; resent links last thirty minutes. Expired/unknown links redirect
+to an HTML page, which binary helpers reject with `ApiException`. Public legacy artifact URLs are kept as
+methods for compatibility but no longer provide certified PDFs. A signer access code downloads only `original`;
+use the delivered token for a certified/PAdES copy. Copy-receiver download tokens cannot request a resend.
+
+### Notification policies and webhook tests
+
+Usage, personal email/push preferences, workspace notification policies and embed-origin administration are
+unavailable to third-party OAuth applications regardless of scopes. Only workspace owners update the policy.
+The policy's event map contains the thirteen email preference keys above plus `SignerViewed`, `SignerSigned`
+and `SignerIdentityReviewRequired`. False suppresses an event on all channels for the workspace, except
+identity-review email, which is always sent. `owners_receive_all` enables owners' push alerts for members'
+documents; personal preferences still apply. Unknown event keys, null/non-boolean values and empty updates
+are rejected without changes. Push preferences are separate from email preferences and default to true.
+
+`webhooks.testEndpoint` sends a `webhook_test` immediately, even to an inactive or paused endpoint. It neither
+lifts a pause nor counts toward one. It returns a `WebhookDispatch` with `kind=manual`, `duration_ms`, and the
+attempt outcome; the endpoint has ten seconds to answer. Tests are limited to ten per user per ten minutes.
+The event has null `payload`/`origin`, names the endpoint in `subject`/`object`, carries no secret, and cannot be
+subscribed to. OAuth requires `webhooks:write`. Secret rotation with `keep_previous=true` returns the new
+secret and a 24-hour previous-secret expiration. Store the new secret immediately; rotation is never retried.

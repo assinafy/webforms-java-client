@@ -1,5 +1,7 @@
 package com.assinafy.sdk.resources;
 
+import com.assinafy.sdk.models.NotificationPolicy;
+import com.assinafy.sdk.models.AccountUsage;
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.AccountPayload;
 import com.assinafy.sdk.models.AccountTheme;
@@ -237,5 +239,74 @@ public final class AccountResource extends BaseResource {
         if (!requireName && payload.getName() == null && sender == null) {
             throw new ValidationException("At least one account attribute is required");
         }
+    }
+
+    /**
+     * {@code GET /accounts/{accountId}} with expansions.
+     * @param params optional expand=signing_features
+     * @param accountId workspace override, or null
+     * @return workspace and requested capabilities
+     */
+    public WorkspaceAccount get(Map<String, String> params, String accountId) {
+        return httpGet("/accounts/" + accountId(accountId), params, WorkspaceAccount.class);
+    }
+
+    /**
+     * {@code GET /accounts/{accountId}/usage}. Not available to third-party OAuth applications.
+     * @param accountId workspace override, or null
+     * @return plan, balances and document renewal date
+     */
+    public AccountUsage usage(String accountId) {
+        return httpGet("/accounts/" + accountId(accountId) + "/usage", AccountUsage.class);
+    }
+
+    /**
+     * {@code GET /accounts/{accountId}/usage} in the default workspace.
+     * @return plan and balances
+     */
+    public AccountUsage usage() { return usage(null); }
+
+    /**
+     * {@code GET /accounts/{accountId}/notification-policy}. Not available to third-party OAuth apps.
+     * @param accountId workspace override, or null
+     * @return complete workspace policy
+     */
+    public NotificationPolicy getNotificationPolicy(String accountId) {
+        return httpGet("/accounts/" + accountId(accountId) + "/notification-policy", NotificationPolicy.class);
+    }
+
+    /**
+     * {@code GET /accounts/{accountId}/notification-policy} in the default workspace.
+     * @return complete workspace policy
+     */
+    public NotificationPolicy getNotificationPolicy() { return getNotificationPolicy(null); }
+
+    /**
+     * {@code PUT /accounts/{accountId}/notification-policy}. Owners only; merges supplied switches.
+     * Identity-review email is always sent even when its event switch is false.
+     * @param policy non-empty event switches and/or owners_receive_all
+     * @param accountId workspace override, or null
+     * @return complete updated policy
+     */
+    public NotificationPolicy updateNotificationPolicy(NotificationPolicy policy, String accountId) {
+        if (policy == null || (policy.getOwnersReceiveAll() == null
+                && (policy.getEvents() == null || policy.getEvents().isEmpty()))) {
+            throw new ValidationException("At least one notification policy setting is required");
+        }
+        if (policy.getEvents() != null && policy.getEvents().entrySet().stream()
+                .anyMatch(e -> e.getKey() == null || e.getKey().isBlank() || e.getValue() == null)) {
+            throw new ValidationException("Notification policy events require names and boolean values");
+        }
+        return httpPut("/accounts/" + accountId(accountId) + "/notification-policy", policy,
+                NotificationPolicy.class);
+    }
+
+    /**
+     * {@code PUT /accounts/{accountId}/notification-policy} in the default workspace.
+     * @param policy partial policy update
+     * @return complete updated policy
+     */
+    public NotificationPolicy updateNotificationPolicy(NotificationPolicy policy) {
+        return updateNotificationPolicy(policy, null);
     }
 }

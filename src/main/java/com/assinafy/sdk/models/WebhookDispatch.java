@@ -274,4 +274,21 @@ public final class WebhookDispatch {
      * @param updatedAt wire {@code updated_at} timestamp
      */
     public void setUpdatedAt(String updatedAt) { this.updatedAt = updatedAt; }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("duration_ms")
+    private Long durationMs;
+
+    /**
+     * Returns delivery duration in milliseconds.
+     * @return delivery duration in milliseconds
+     */
+    public Long getDurationMs() { return durationMs; }
+
+    /**
+     * Sets delivery duration in milliseconds.
+     * @param value delivery duration in milliseconds
+     */
+    public void setDurationMs(Long value) {
+        durationMs = value;
+    }
 }

@@ -103,4 +103,22 @@ public final class SignerRef {
         this.step = step;
         return this;
     }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("embedded")
+    private Boolean embedded;
+
+    /**
+     * Returns whether signing uses a hosted embed session.
+     * @return whether signing uses a hosted embed session
+     */
+    public Boolean getEmbedded() { return embedded; }
+
+    /**
+     * Sets whether signing uses a hosted embed session.
+     * @param value whether signing uses a hosted embed session
+     * @return this payload
+     */
+    public SignerRef setEmbedded(Boolean value) {
+        embedded = value; return this;
+    }
 }

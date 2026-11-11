@@ -199,16 +199,12 @@ class AssignmentResourceTest {
     }
 
     @Test
-    void createAndEstimateRejectCertificateSignerSharingAStep() {
+    void creationRejectsCertificateSignerSharingAStep() {
         CreateAssignmentPayload payload = new CreateAssignmentPayload().setSigners(List.of(
                 SignerRef.of("s1").setVerificationMethod("DigitalCertificate").setStep(2),
                 SignerRef.of("s2").setVerificationMethod("Email").setStep(2)));
 
         assertThatThrownBy(() -> resource.create("doc-1", payload))
-                .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
-                        .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP)
-                        .containsEntry("step", 2));
-        assertThatThrownBy(() -> resource.estimateCost("doc-1", payload))
                 .isInstanceOfSatisfying(ValidationException.class, exception -> assertThat(exception.getErrors())
                         .containsEntry("code", AssignmentResource.DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP)
                         .containsEntry("step", 2));

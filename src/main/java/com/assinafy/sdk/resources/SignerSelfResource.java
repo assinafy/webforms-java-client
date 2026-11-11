@@ -1,5 +1,8 @@
 package com.assinafy.sdk.resources;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.assinafy.sdk.models.AccountTheme;
+import com.assinafy.sdk.models.CertifiedCopy;
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.AcceptTermsResponse;
 import com.assinafy.sdk.models.ConfirmSignerDataPayload;
@@ -89,11 +92,7 @@ public final class SignerSelfResource extends BaseResource {
      * @return signer-facing document and assignment details
      */
     public DocumentDetails getSign(String signerAccessCode, Boolean hasAcceptedTerms) {
-        Map<String, String> query = new LinkedHashMap<>(signerAccessCodeQuery(signerAccessCode));
-        if (hasAcceptedTerms != null) {
-            query.put("has_accepted_terms", String.valueOf(hasAcceptedTerms));
-        }
-        return httpGet("/sign", query, DocumentDetails.class);
+        return getSign(signerAccessCode, hasAcceptedTerms, null, null);
     }
 
     /**
@@ -134,26 +133,27 @@ public final class SignerSelfResource extends BaseResource {
             throw new ValidationException("Verification code is required");
         }
         Map<String, Object> body = Map.of("verification-code", verificationCode);
-        return httpPost("/verify", body, VerifyEmailResponse.class, signerAccessCodeQuery(signerAccessCode));
+        return optionalObjectResult(httpPost("/verify", body, JsonNode.class,
+                signerAccessCodeQuery(signerAccessCode)), VerifyEmailResponse.class);
     }
 
     /**
      * {@code PUT /documents/{documentId}/signers/confirm-data} — confirm/update the signer's identifying data
-     * before signing. The request body carries any of {@code full_name}, {@code email}, {@code government_id};
-     * the {@code signer-access-code} is the required query parameter. Returns the updated {@link Signer}.
+     * before signing. Current fields are {@code email}, {@code whatsapp_phone_number} and
+     * {@code has_accepted_terms}; the signer access code is required. Empty success arrays return null.
      *
      * @param documentId required document identifier
      * @param signerAccessCode required signer access code
      * @param payload required identifying data to confirm
-     * @return updated signer
+     * @return optional signer object, or null for an empty success response
      */
     public Signer confirmSignerData(String documentId, String signerAccessCode, ConfirmSignerDataPayload payload) {
         String docId = requireId(documentId, "Document ID");
         if (payload == null) {
             throw new ValidationException("Payload is required");
         }
-        return httpPut("/documents/" + docId + "/signers/confirm-data", payload, Signer.class,
-                signerAccessCodeQuery(signerAccessCode));
+        return optionalObjectResult(httpPut("/documents/" + docId + "/signers/confirm-data", payload, JsonNode.class,
+                signerAccessCodeQuery(signerAccessCode)), Signer.class);
     }
 
     /**
@@ -337,7 +337,7 @@ public final class SignerSelfResource extends BaseResource {
      *
      * @param signerId required signer identifier
      * @param documentId required document identifier
-     * @param artifactName artifact name, or {@code null} for {@code original}
+     * @param artifactName original, or null for original; certified artifacts require a download token
      * @param signerAccessCode required signer access code
      * @return artifact bytes
      */
@@ -348,7 +348,9 @@ public final class SignerSelfResource extends BaseResource {
     }
 
     /**
-     * Public {@code GET /signers/{signerId}/documents/{documentId}/download/{artifactName}} overload.
+     * Legacy {@code GET /signers/{signerId}/documents/{documentId}/download/{artifactName}} overload.
+     * Current servers redirect this no-code route to an expired-link page, which raises ApiException.
+     * Use downloadCertifiedCopy with the bearer token delivered to the signer.
      *
      * @param signerId required signer identifier
      * @param documentId required document identifier
@@ -407,5 +409,107 @@ public final class SignerSelfResource extends BaseResource {
         for (String documentId : documentIds) {
             requireId(documentId, "Document ID");
         }
+    }
+
+    /**
+     * {@code GET /sign} with envelope navigation. Closed codes return limited identity and copy availability.
+     * @param signerAccessCode required signer credential
+     * @param hasAcceptedTerms optional terms acceptance
+     * @param expand optional envelope expansion
+     * @param documentId optional other document of the signer's envelope
+     * @return signer document view
+     */
+    public DocumentDetails getSign(String signerAccessCode, Boolean hasAcceptedTerms,
+                                   String expand, String documentId) {
+        Map<String, String> query = new LinkedHashMap<>(signerAccessCodeQuery(signerAccessCode));
+        if (hasAcceptedTerms != null) query.put("has_accepted_terms", hasAcceptedTerms.toString());
+        if (expand != null) query.put("expand", expand);
+        if (documentId != null) query.put("document_id", requireId(documentId, "Document ID"));
+        return httpGet("/sign", query, DocumentDetails.class);
+    }
+
+    /**
+     * {@code POST /verify}. Verifies the signer's WhatsApp code, using the same endpoint as email.
+     * @param verificationCode one-time code supplied by the signer
+     * @param signerAccessCode required signer credential
+     * @return optional verification object, or null for the empty success response
+     */
+    public VerifyEmailResponse verifyWhatsapp(String verificationCode, String signerAccessCode) {
+        return verifyEmail(verificationCode, signerAccessCode);
+    }
+
+    /**
+     * {@code GET /sign/theme}. Uses the signer credential alone.
+     * @param signerAccessCode required signer credential
+     * @return signing-page branding
+     */
+    public AccountTheme getTheme(String signerAccessCode) {
+        return httpGet("/sign/theme", signerAccessCodeQuery(signerAccessCode), AccountTheme.class);
+    }
+
+    /**
+     * {@code GET /sign/logo}. Uses the signer credential alone.
+     * @param signerAccessCode required signer credential
+     * @return logo image bytes
+     */
+    public byte[] downloadLogo(String signerAccessCode) {
+        return httpGetBinary("/sign/logo", signerAccessCodeQuery(signerAccessCode));
+    }
+
+    /**
+     * {@code POST /sign/certified-copy}. Sends to the contact used during signing, including after code closure.
+     * Email allows one request per two minutes and ten per day; WhatsApp allows one resend per request.
+     * @param signerAccessCode required signer credential
+     * @param documentId optional document of the same envelope
+     * @return delivery and remaining availability
+     */
+    public CertifiedCopy requestCertifiedCopy(String signerAccessCode, String documentId) {
+        return httpPost("/sign/certified-copy", documentId == null ? Map.of()
+                : Map.of("document_id", requireId(documentId, "Document ID")), CertifiedCopy.class,
+                signerAccessCodeQuery(signerAccessCode));
+    }
+
+    /**
+     * {@code POST /sign/certified-copy} for the code's own document.
+     * @param signerAccessCode required signer credential
+     * @return delivery result
+     */
+    public CertifiedCopy requestCertifiedCopy(String signerAccessCode) {
+        return requestCertifiedCopy(signerAccessCode, null);
+    }
+
+    /**
+     * {@code GET /signers/downloads/{token}} or its {@code /pades} variant. No workspace credential is sent.
+     * Completion links last seven days; resent links last thirty minutes. Expired-link HTML is rejected.
+     * @param token bearer download token
+     * @param pades whether to request the qualified PDF
+     * @return certified PDF bytes
+     */
+    public byte[] downloadCertifiedCopy(String token, boolean pades) {
+        return httpGetBinary("/signers/downloads/" + requireId(token, "Download token") + (pades ? "/pades" : ""));
+    }
+
+    /**
+     * {@code POST /signers/downloads/{token}/resend}. Sends a new link using an existing, even expired, token.
+     * No workspace credential is sent. Copy-receiver links cannot request a resend.
+     * @param token bearer download token
+     * @return delivery result
+     */
+    public CertifiedCopy resendCertifiedCopy(String token) {
+        return httpPost("/signers/downloads/" + requireId(token, "Download token") + "/resend", null,
+                CertifiedCopy.class);
+    }
+
+    /**
+     * {@code GET /signers/{signerId}/document} with optional envelope expansion.
+     * @param signerId signer identifier
+     * @param signerAccessCode required signer credential
+     * @param expand optional envelope expansion
+     * @return signer document view
+     */
+    public DocumentDetails getCurrentDocument(String signerId, String signerAccessCode, String expand) {
+        Map<String, String> query = new LinkedHashMap<>(signerAccessCodeQuery(signerAccessCode));
+        if (expand != null) query.put("expand", expand);
+        return httpGet("/signers/" + requireId(signerId, "Signer ID") + "/document", query, DocumentDetails.class);
     }
 }

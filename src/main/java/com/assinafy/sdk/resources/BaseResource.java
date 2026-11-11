@@ -671,6 +671,14 @@ public abstract class BaseResource {
                     && ("json".equalsIgnoreCase(contentType.subtype())
                     || contentType.subtype().toLowerCase(Locale.ROOT).endsWith("+json"));
 
+            if (contentType != null && ("text/html".equalsIgnoreCase(contentType.type() + "/"
+                    + contentType.subtype()) || "application/xhtml+xml".equalsIgnoreCase(contentType.type()
+                    + "/" + contentType.subtype()))) {
+                throw attachResponseHints(new ApiException(response.code(),
+                        "Expected a binary artifact but received an HTML page; the download link may have expired",
+                        null), response);
+            }
+
             // A real binary artifact is never JSON. When the body is JSON (an error envelope returned under
             // HTTP 200) or the HTTP status is an error, route through envelope inspection instead of returning
             // the JSON as if it were the artifact.
@@ -942,5 +950,41 @@ public abstract class BaseResource {
             }
         }
         return params;
+    }
+
+    /**
+     * Sends a creation with an optional idempotency header, without enabling retries.
+     * @param path API path
+     * @param body creation payload
+     * @param dataType response class
+     * @param idempotencyKey optional server-side creation key
+     * @param <T> response type
+     * @return unwrapped response
+     */
+    protected <T> T httpPostIdempotent(String path, Object body, Class<T> dataType, String idempotencyKey) {
+        Request.Builder request = buildRequest("POST", path, body).newBuilder();
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            if (idempotencyKey.chars().anyMatch(c -> c < 32 || c > 126)) {
+                throw new ValidationException("Idempotency key must contain printable ASCII characters");
+            }
+            request.header("Idempotency-Key", idempotencyKey);
+        }
+        return execute(request.build(), MAPPER.constructType(dataType));
+    }
+
+    /**
+     * Reads either an object result or the API's empty success array.
+     * @param data unwrapped response
+     * @param dataType legacy object response type
+     * @param <T> response type
+     * @return object response, or null for an empty result
+     */
+    protected static <T> T optionalObjectResult(JsonNode data, Class<T> dataType) {
+        if (data == null || data.isNull() || (data.isArray() && data.isEmpty())) return null;
+        try {
+            return MAPPER.treeToValue(data, dataType);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new NetworkException("Unexpected response shape", e);
+        }
     }
 }

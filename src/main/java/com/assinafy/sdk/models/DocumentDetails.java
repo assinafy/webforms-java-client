@@ -428,4 +428,72 @@ public final class DocumentDetails {
      * @param createdBy value of {@code created_by}
      */
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("envelope_id")
+    private String envelopeId;
+
+    /**
+     * Returns expanded envelope identifier or null.
+     * @return expanded envelope identifier or null
+     */
+    public String getEnvelopeId() { return envelopeId; }
+
+    /**
+     * Sets expanded envelope identifier or null.
+     * @param value expanded envelope identifier or null
+     */
+    public void setEnvelopeId(String value) {
+        envelopeId = value;
+    }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("envelope")
+    private DocumentEnvelope envelope;
+
+    /**
+     * Returns expanded envelope summary or signer navigation.
+     * @return expanded envelope summary or signer navigation
+     */
+    public DocumentEnvelope getEnvelope() { return envelope; }
+
+    /**
+     * Sets expanded envelope summary or signer navigation.
+     * @param value expanded envelope summary or signer navigation
+     */
+    public void setEnvelope(DocumentEnvelope value) {
+        envelope = value;
+    }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("is_signer_access_closed")
+    private Boolean signerAccessClosed;
+
+    /**
+     * Returns whether the signer access code is closed.
+     * @return whether the signer access code is closed
+     */
+    public Boolean getSignerAccessClosed() { return signerAccessClosed; }
+
+    /**
+     * Sets whether the signer access code is closed.
+     * @param value whether the signer access code is closed
+     */
+    public void setSignerAccessClosed(Boolean value) {
+        signerAccessClosed = value;
+    }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("certified_copy")
+    private CertifiedCopy certifiedCopy;
+
+    /**
+     * Returns certified-copy availability.
+     * @return certified-copy availability
+     */
+    public CertifiedCopy getCertifiedCopy() { return certifiedCopy; }
+
+    /**
+     * Sets certified-copy availability.
+     * @param value certified-copy availability
+     */
+    public void setCertifiedCopy(CertifiedCopy value) {
+        certifiedCopy = value;
+    }
 }

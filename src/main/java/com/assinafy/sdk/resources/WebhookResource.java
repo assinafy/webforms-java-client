@@ -1,5 +1,6 @@
 package com.assinafy.sdk.resources;
 
+import com.assinafy.sdk.models.WebhookSecretRotation;
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.ListDispatchesParams;
 import com.assinafy.sdk.models.PaginatedResult;
@@ -92,7 +93,7 @@ public final class WebhookResource extends BaseResource {
      * Requires {@code url}, {@code email}, and {@code events}. Creating an endpoint past the plan's limit
      * (1, or 3 on paid plans) fails with HTTP 403; reusing another endpoint's URL fails with HTTP 400. When
      * {@code signing_enabled} is {@code true} a signing secret is returned once in {@link WebhookEndpoint#secret()}.
-     * Store it immediately: OAuth applications cannot retrieve or rotate it later and must recreate a lost endpoint.
+     * Store it immediately. OAuth applications can rotate it with webhooks:write, but cannot retrieve it.
      *
      * @param payload endpoint values
      * @param accountId account override, or {@code null} for the client default
@@ -242,8 +243,8 @@ public final class WebhookResource extends BaseResource {
     /**
      * {@code POST /accounts/{account_id}/webhooks/endpoints/{endpoint_id}/secret/rotate} — replace the
      * signing secret. The old secret stops working immediately: deliveries sent afterwards are signed only
-     * with the returned one. Fails with HTTP 400 when signing is disabled. Requires an API key or user
-     * session; OAuth applications cannot rotate it.
+     * with the returned one. Fails with HTTP 400 when signing is disabled. OAuth requires webhooks:write.
+     * Use the boolean overload to retain the previous key for 24 hours.
      *
      * @param endpointId required endpoint identifier
      * @param accountId account override, or {@code null} for the client default
@@ -495,4 +496,49 @@ public final class WebhookResource extends BaseResource {
         if (params.getTo() != null) result.put("to", String.valueOf(params.getTo()));
         return result;
     }
+
+    /**
+     * {@code POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate}.
+     * OAuth applications need webhooks:write. With overlap, deliveries carry both signatures for 24 hours.
+     * @param endpointId endpoint identifier
+     * @param keepPrevious retain the replaced key for 24 hours
+     * @param accountId workspace override, or null
+     * @return new secret and optional previous-secret expiration
+     */
+    public WebhookSecretRotation rotateEndpointSecret(String endpointId, boolean keepPrevious, String accountId) {
+        WebhookSecretRotation result = httpPost(endpointPath(endpointId, accountId) + "/secret/rotate",
+                Map.of("keep_previous", keepPrevious), WebhookSecretRotation.class);
+        if (result == null || result.secret() == null || result.secret().isBlank()) {
+            throw new ValidationException("The API returned no webhook signing secret");
+        }
+        return result;
+    }
+
+    /**
+     * {@code POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate} in the default workspace.
+     * @param endpointId endpoint identifier
+     * @param keepPrevious retain the old key for 24 hours
+     * @return new secret and optional previous-secret expiration
+     */
+    public WebhookSecretRotation rotateEndpointSecret(String endpointId, boolean keepPrevious) {
+        return rotateEndpointSecret(endpointId, keepPrevious, null);
+    }
+
+    /**
+     * {@code POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/test}. Sends a webhook_test now.
+     * Works for paused or inactive endpoints; it does not change their state. Requires webhooks:write for OAuth.
+     * @param endpointId endpoint identifier
+     * @param accountId workspace override, or null
+     * @return delivery history entry with duration and outcome
+     */
+    public WebhookDispatch testEndpoint(String endpointId, String accountId) {
+        return httpPost(endpointPath(endpointId, accountId) + "/test", null, WebhookDispatch.class);
+    }
+
+    /**
+     * {@code POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/test} in the default workspace.
+     * @param endpointId endpoint identifier
+     * @return test delivery entry
+     */
+    public WebhookDispatch testEndpoint(String endpointId) { return testEndpoint(endpointId, null); }
 }

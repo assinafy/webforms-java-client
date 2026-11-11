@@ -1,5 +1,6 @@
 package com.assinafy.sdk.resources;
 
+import com.assinafy.sdk.models.PushPreferences;
 import com.assinafy.sdk.exceptions.ValidationException;
 import com.assinafy.sdk.models.DocumentStatsRow;
 import com.assinafy.sdk.models.NotificationPreferences;
@@ -80,4 +81,24 @@ public final class UserResource extends BaseResource {
      * @return user-wide monthly document KPI rows
      */
     public List<DocumentStatsRow> stats() { return stats(null); }
+
+    /**
+     * {@code GET /users/self/push-preferences}. Unavailable to third-party OAuth applications.
+     * @return all personal push switches
+     */
+    public PushPreferences getPushPreferences() {
+        return httpGet("/users/self/push-preferences", PushPreferences.class);
+    }
+
+    /**
+     * {@code PUT /users/self/push-preferences}. Merges non-null switches; email preferences are separate.
+     * @param preferences non-empty partial update
+     * @return complete preference set
+     */
+    public PushPreferences updatePushPreferences(PushPreferences preferences) {
+        if (preferences == null || MAPPER.valueToTree(preferences).isEmpty()) {
+            throw new ValidationException("At least one push preference is required");
+        }
+        return httpPut("/users/self/push-preferences", preferences, PushPreferences.class);
+    }
 }

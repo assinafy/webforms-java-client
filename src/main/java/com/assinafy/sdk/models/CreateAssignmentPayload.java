@@ -178,4 +178,21 @@ public final class CreateAssignmentPayload {
         }
         return List.of();
     }
+
+    private java.math.BigDecimal maxTotalCredits;
+
+    /**
+     * Returns optional non-negative credit ceiling.
+     * @return optional non-negative credit ceiling
+     */
+    public java.math.BigDecimal getMaxTotalCredits() { return maxTotalCredits; }
+
+    /**
+     * Sets optional non-negative credit ceiling.
+     * @param value optional non-negative credit ceiling
+     * @return this payload
+     */
+    public CreateAssignmentPayload setMaxTotalCredits(java.math.BigDecimal value) {
+        maxTotalCredits = value; return this;
+    }
 }

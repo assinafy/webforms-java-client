@@ -113,4 +113,38 @@ public final class CreateDocumentFromTemplateOptions {
         this.tags = tags;
         return this;
     }
+
+    private java.math.BigDecimal maxTotalCredits;
+
+    /**
+     * Returns optional non-negative credit ceiling.
+     * @return optional non-negative credit ceiling
+     */
+    public java.math.BigDecimal getMaxTotalCredits() { return maxTotalCredits; }
+
+    /**
+     * Sets optional non-negative credit ceiling.
+     * @param value optional non-negative credit ceiling
+     * @return this payload
+     */
+    public CreateDocumentFromTemplateOptions setMaxTotalCredits(java.math.BigDecimal value) {
+        maxTotalCredits = value; return this;
+    }
+
+    private String idempotencyKey;
+
+    /**
+     * Returns optional template-scoped creation key, reused only for the same request.
+     * @return optional template-scoped creation key, reused only for the same request
+     */
+    public String getIdempotencyKey() { return idempotencyKey; }
+
+    /**
+     * Sets optional template-scoped creation key, reused only for the same request.
+     * @param value optional template-scoped creation key, reused only for the same request
+     * @return this payload
+     */
+    public CreateDocumentFromTemplateOptions setIdempotencyKey(String value) {
+        idempotencyKey = value; return this;
+    }
 }

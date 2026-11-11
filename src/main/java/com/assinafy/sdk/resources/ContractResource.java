@@ -155,7 +155,7 @@ public final class ContractResource extends BaseResource {
 
     /**
      * {@code POST /accounts/{accountId}/documents/{documentId}/contract/renew} in the default account with an
-     * empty body. This is valid only when the server can advance from the stored renewal term.
+     * empty body. The API requires a current term or later end date; use the payload overload to supply it.
      *
      * @param documentId required contract document identifier
      * @return renewed contract
@@ -213,5 +213,16 @@ public final class ContractResource extends BaseResource {
                 data.path("resource").asText()) || data.has("parent_document_id")
                 ? DocumentContractAmendment.class : DocumentContract.class;
         return MAPPER.convertValue(data, type);
+    }
+
+    /**
+     * {@code GET /accounts/{accountId}/documents/{documentId}/contract/related} with expansion.
+     * @param documentId document identifier
+     * @param params optional expand=document
+     * @param accountId workspace override, or null
+     * @return root contract and instruments
+     */
+    public DocumentContract related(String documentId, Map<String, String> params, String accountId) {
+        return httpGet(contractPath(documentId, accountId) + "/related", params, DocumentContract.class);
     }
 }

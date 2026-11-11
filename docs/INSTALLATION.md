@@ -19,7 +19,7 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.9.1</version>
+    <version>2.10.0</version>
 </dependency>
 ```
 
@@ -37,7 +37,7 @@ the repository-pinned Maven release: `./mvnw verify`.
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:2.9.1'
+    implementation 'com.assinafy:webforms-java-client-sdk:2.10.0'
 }
 ```
 
@@ -45,7 +45,7 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:2.9.1")
+    implementation("com.assinafy:webforms-java-client-sdk:2.10.0")
 }
 ```
 
@@ -122,8 +122,28 @@ The SDK pulls in:
 
 | Dependency | Version | Purpose |
 |---|---:|---|
-| `com.squareup.okhttp3:okhttp-jvm` | 5.5.0 | HTTP client |
-| `com.fasterxml.jackson.core:jackson-databind` | 2.22.2 | JSON data binding |
-| `com.fasterxml.jackson.core:jackson-core` | 2.22.2 | JSON streaming |
+| `com.squareup.okhttp3:okhttp-jvm` | 5.5.1 | HTTP client |
+| `com.fasterxml.jackson.core:jackson-databind` | 2.22.4 | JSON data binding |
+| `com.fasterxml.jackson.core:jackson-core` | 2.22.4 | JSON streaming |
 | `com.fasterxml.jackson.core:jackson-annotations` | 2.22 | JSON model annotations |
 | `com.squareup.okio:okio-jvm` | 3.18.2 | OkHttp I/O runtime |
+
+
+## Building and sandbox tests
+
+Use Java 25 and Maven 3.9.16–3.x. `./mvnw verify` runs the unit suite; `./mvnw -DskipTests -Prelease package`
+builds sources and Javadoc with all doclint checks and warnings treated as errors.
+
+`LiveSmokeTest` runs only when `ASSINAFY_API_KEY` and `ASSINAFY_ACCOUNT_ID` are set to a sandbox workspace.
+`ASSINAFY_BASE_URL` defaults to `https://sandbox.assinafy.com.br/v1`; any other host is rejected.
+`ASSINAFY_TEST_EMAIL` and `ASSINAFY_SECOND_TEST_EMAIL` supply separately authorized test recipients.
+Sending real notifications additionally requires `ASSINAFY_LIVE_EMAILS=true`. The suite creates and deletes
+sandbox resources, runs one case every ten seconds, and must run only once per workspace at a time.
+Missing plan resources or undeployed router routes skip the affected case; authorization and rate-limit errors fail.
+
+```bash
+./mvnw test -Dtest=LiveSmokeTest -DfailIfNoSpecifiedTests=false
+```
+
+Certificate ownership, OTP completion and biometric consent/capture require a human. Keep production keys out
+of test environments. Local `AGENTS.md` and `CLAUDE.md` are intentionally excluded from version control.

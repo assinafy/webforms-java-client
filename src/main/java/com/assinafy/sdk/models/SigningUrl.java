@@ -42,4 +42,21 @@ public final class SigningUrl {
      * @param url signer-facing URL
      */
     public void setUrl(String url) { this.url = url; }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("embedded")
+    private Boolean embedded;
+
+    /**
+     * Returns whether an embed session replaces the signing URL.
+     * @return whether an embed session replaces the signing URL
+     */
+    public Boolean getEmbedded() { return embedded; }
+
+    /**
+     * Sets whether an embed session replaces the signing URL.
+     * @param value whether an embed session replaces the signing URL
+     */
+    public void setEmbedded(Boolean value) {
+        embedded = value;
+    }
 }

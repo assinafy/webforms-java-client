@@ -80,4 +80,40 @@ public final class ConfirmSignerDataPayload {
         this.governmentId = governmentId;
         return this;
     }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("whatsapp_phone_number")
+    private String whatsappPhoneNumber;
+
+    /**
+     * Returns signer WhatsApp contact.
+     * @return signer WhatsApp contact
+     */
+    public String getWhatsappPhoneNumber() { return whatsappPhoneNumber; }
+
+    /**
+     * Sets signer WhatsApp contact.
+     * @param value signer WhatsApp contact
+     * @return this payload
+     */
+    public ConfirmSignerDataPayload setWhatsappPhoneNumber(String value) {
+        whatsappPhoneNumber = value; return this;
+    }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("has_accepted_terms")
+    private Boolean hasAcceptedTerms;
+
+    /**
+     * Returns explicit signer terms acceptance.
+     * @return explicit signer terms acceptance
+     */
+    public Boolean getHasAcceptedTerms() { return hasAcceptedTerms; }
+
+    /**
+     * Sets explicit signer terms acceptance.
+     * @param value explicit signer terms acceptance
+     * @return this payload
+     */
+    public ConfirmSignerDataPayload setHasAcceptedTerms(Boolean value) {
+        hasAcceptedTerms = value; return this;
+    }
 }

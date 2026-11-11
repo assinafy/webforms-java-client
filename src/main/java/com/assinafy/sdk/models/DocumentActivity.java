@@ -111,4 +111,38 @@ public final class DocumentActivity {
      * @param createdAt value of {@code created_at}
      */
     public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("document_id")
+    private String documentId;
+
+    /**
+     * Returns envelope activity document id.
+     * @return envelope activity document id
+     */
+    public String getDocumentId() { return documentId; }
+
+    /**
+     * Sets envelope activity document id.
+     * @param value envelope activity document id
+     */
+    public void setDocumentId(String value) {
+        documentId = value;
+    }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("document_name")
+    private String documentName;
+
+    /**
+     * Returns envelope activity document name.
+     * @return envelope activity document name
+     */
+    public String getDocumentName() { return documentName; }
+
+    /**
+     * Sets envelope activity document name.
+     * @param value envelope activity document name
+     */
+    public void setDocumentName(String value) {
+        documentName = value;
+    }
 }

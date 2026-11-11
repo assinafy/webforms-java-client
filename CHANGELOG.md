@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-11
+
+### Added
+- `client.envelopes` supports multi-document signing, cost estimates, progress, updates, downloads,
+  cancellation, reminders, and document membership with typed payloads and responses.
+- `client.embed` supports allowed origins and single-use hosted signing sessions; assignment and template
+  signers accept `embedded`.
+- Assignment, template, and envelope creation support credit ceilings. Template and envelope creation
+  accept idempotency keys without enabling automatic retries.
+- Account usage, signing capabilities, workspace notification policies, and personal push preferences.
+- Signer branding, closed-access state, certified-copy requests and bearer-token downloads.
+- Webhook test deliveries and secret rotation with optional 24-hour overlap, including OAuth rotation.
+- Envelope expansions, signed page renders, paginated document activities, delivery duration, and
+  certification timestamps are exposed by the client.
+
+### Fixed
+- Successful OTP verification and signer confirmation accept empty response arrays while preserving legacy
+  object responses. Signer confirmation supports WhatsApp contacts and explicit terms acceptance.
+- Certificate cost estimates no longer apply signing-step rules to channel-only payloads. Template role
+  validation lets the API distinguish signing roles from copy receivers.
+- Bearer-authenticated requests keep workspace credentials withheld across redirects and root API URLs.
+- Binary downloads reject expired-link HTML instead of returning it as artifact bytes.
+
+### Changed
+- Portuguese and English quickstarts cover the signing, envelope, embedded, webhook, and OAuth flows;
+  complete request and response catalogs remain in the reference and examples.
+
 ## [2.9.1] - 2026-11-02
 
 ### Fixed

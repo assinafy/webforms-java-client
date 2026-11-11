@@ -6,7 +6,7 @@
 
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.9.1</version>
+    <version>2.10.0</version>
     <packaging>jar</packaging>
 
     <name>Assinafy Webforms Java Client SDK</name>
@@ -46,7 +46,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- Reproducible builds: a fixed timestamp makes jar contents byte-for-byte stable. -->
-        <project.build.outputTimestamp>2026-10-28T00:00:00Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2026-11-11T00:00:00Z</project.build.outputTimestamp>
 
         <okhttp.version>5.5.1</okhttp.version>
         <okio.version>3.18.2</okio.version>
@@ -269,7 +269,7 @@
         </profile>
 
         <!--
-          Maven Central signing, used together with `release`. The GitLab publish-release job deploys with
+          Maven Central signing, used together with `release`. The GitHub release workflow deploys with
           `-Prelease,central` into a local directory, bundles it and uploads the bundle to the Central Portal.
           The key comes from MAVEN_SIGNING_KEY (or -Dgpg.keyFilePath) and its passphrase from
           MAVEN_SIGNING_PASSWORD.

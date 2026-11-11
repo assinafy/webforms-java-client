@@ -198,4 +198,21 @@ public final class DocumentVerification {
      * @param message verification explanation
      */
     public void setMessage(String message) { this.message = message; }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("certificated_at")
+    private String certificatedAt;
+
+    /**
+     * Returns certification timestamp.
+     * @return certification timestamp
+     */
+    public String getCertificatedAt() { return certificatedAt; }
+
+    /**
+     * Sets certification timestamp.
+     * @param value certification timestamp
+     */
+    public void setCertificatedAt(String value) {
+        certificatedAt = value;
+    }
 }

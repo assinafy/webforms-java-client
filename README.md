@@ -2,7 +2,7 @@
 
 *Português · [Read in English](README.en.md)*
 
-Cliente Java 25 para as 118 operações da [API Assinafy](https://api.assinafy.com.br/v1/docs). O nome
+Cliente Java 25 para as 147 operações da [API Assinafy](https://api.assinafy.com.br/v1/docs). O nome
 `webforms` é histórico; novas integrações também devem considerar `com.assinafy:assinafy-sdk`.
 
 A documentação detalhada de operações, requests e responses está em
@@ -17,12 +17,12 @@ O SDK exige Java 25+, Maven 3.9.16+ quando usado com Maven e TLS 1.2+.
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.9.1</version>
+    <version>2.10.0</version>
 </dependency>
 ```
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.9.1'
+implementation 'com.assinafy:webforms-java-client-sdk:2.10.0'
 ```
 
 O Maven Central não exige credenciais de repositório. O guia de instalação cobre GitHub Packages e Gradle
@@ -98,19 +98,20 @@ DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
 client.signerSelf.acceptTerms(signerAccessCode);
 client.signerSelf.verifyEmail("123456", signerAccessCode); // Whatsapp usa verifyWhatsapp
 client.signerSelf.confirmSignerData(document.getId(), signerAccessCode,
-    new ConfirmSignerDataPayload().setFullName("Signatário Exemplo").setGovernmentId("39053344705"));
+    new ConfirmSignerDataPayload().setEmail("signer@example.com").setHasAcceptedTerms(true));
 
-IdentityVerificationStatus identity = client.signerSelf.getIdentityVerification(signerAccessCode);
-if (identity.canStart()) {
-    IdentityVerificationSession session =
-        client.signerSelf.startIdentityVerification(signerAccessCode, true);
-    redirecionarSignatario(session.url()); // preserve a URL bearer e o fragmento; nunca registre em log
+// Somente para IdDocumentFaceMatchBasic, após consentimento explícito do signatário:
+if (biometriaObrigatoria && signatarioConsentiu) {
+    IdentityVerificationStatus identity = client.signerSelf.getIdentityVerification(signerAccessCode);
+    if (identity.canStart()) redirecionarSignatario(
+        client.signerSelf.startIdentityVerification(signerAccessCode, true).url());
 }
 
 client.signerSelf.uploadSignature(signerAccessCode, assinaturaPng, "signature", true);
 // Envie os AssignmentSignEntry não vazios representados por signingView.getAssignment().getItems().
 ```
 
+Para certificados, confirme os dados e aceite os termos antes de chamar `getSign`.
 Conclua assignments comuns com `assignments.signEntries`; cada item leva os IDs de item, campo e página
 devolvidos, além do valor em string. A assinatura com certificado termina no navegador; o SDK não fabrica
 material de certificado. Consulte o status ou processe webhooks idempotentemente e baixe o artefato final.
@@ -120,6 +121,15 @@ DocumentDetails current = client.documents.details(document.getId());
 byte[] signedPdf = client.documents.download(document.getId(), "certificated");
 byte[] qualifiedPdf = client.documents.download(document.getId(), "pades"); // só DigitalCertificate
 ```
+
+## Envelopes e assinatura integrada
+
+`client.envelopes` envia até 20 documentos a até 20 signatários com um convite por signatário. Estime primeiro,
+defina `max_total_credits` e use uma chave de idempotência estável para recuperação. Cada documento tem seu certificado.
+Para assinar no seu app, cadastre origens HTTPS exatas em `client.embed`, defina `embedded=true` no signatário
+e crie uma sessão de iframe de uso único, válida por cinco minutos. Não registre a URL nem troque o token no backend.
+Após o encerramento do acesso, `requestCertifiedCopy` envia um novo link ao contato original da assinatura.
+Veja [payloads e fluxos completos](docs/EXAMPLES.md#envelopes-and-embedded-signing).
 
 ## Webhooks assinados
 
@@ -135,8 +145,8 @@ WebhookEvent event = verifier.verify(webhookId, webhookTimestamp, webhookSignatu
 ```
 
 Verifique o corpo cru antes de confirmar, deduplique por `webhook-id`, responda 2xx rapidamente e processe
-depois. Só chaves de API/sessões de usuário consultam ou rotacionam o segredo; uma aplicação OAuth precisa
-recriar o endpoint se perder o segredo da criação.
+depois. Chaves de API/sessões de usuário podem consultar o segredo. Apps OAuth podem rotacioná-lo com
+`webhooks:write`; `rotateEndpointSecret(id, true)` mantém a chave anterior por 24 horas, com ambas as assinaturas.
 
 ## Conexões OAuth 2.1 de marketplace
 
@@ -175,7 +185,8 @@ docker compose run --rm test
 ```
 
 O build exige Java 25, trata warnings do compilador como erros, roda testes unitários e valida o Javadoc no
-perfil de release. Testes live do sandbox exigem as variáveis descritas em `AGENTS.md` e nunca miram produção.
+perfil de release. Testes live usam as variáveis de [Instalação](docs/INSTALLATION.md#building-and-sandbox-tests)
+e nunca miram produção.
 
 - [Referência da API](docs/API_REFERENCE.md) — todas as operações e o catálogo completo de payloads
 - [Exemplos](docs/EXAMPLES.md) — Java e JSON por endpoint

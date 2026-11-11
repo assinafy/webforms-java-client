@@ -1,7 +1,7 @@
 # Examples
 
 Worked end-to-end examples for the SDK. The [API reference](API_REFERENCE.md) contains the complete
-118-operation matrix and centralized request/response payload definitions.
+147-operation matrix and centralized request/response payload definitions.
 
 ## Response envelope
 
@@ -139,6 +139,8 @@ if (session.getMfaToken() != null) {
 }
 
 // The remaining calls run as the authenticated user.
+AssinafyClient tokenClient = new AssinafyClient(
+    new AssinafyClientOptions().setToken(session.getAccessToken()));
 TotpEnrollment enrollment = tokenClient.auth.startTotpEnrollment("My phone"); // POST /users/self/mfa/totp
 // data: { "id": "a1b2...", "secret": "GEZDGNBV...", "provisioning_uri": "otpauth://totp/...?issuer=Assinafy&secret=..." }
 
@@ -169,8 +171,6 @@ client.auth.linkSocialLogin("google", googleToken);
 // Request: { "provider": "google", "token": "<google-token>" }   (no has_accepted_terms, unlike social-login)
 
 // Use the bearer session for key rotation so the client does not retain a key it just revoked.
-AssinafyClient tokenClient = new AssinafyClient(
-    new AssinafyClientOptions().setToken(session.getAccessToken()));
 ApiKeyResponse masked  = tokenClient.auth.getApiKey();      // GET /users/api-keys
 ApiKeyResponse created = tokenClient.auth.createApiKey("password"); // POST /users/api-keys
 tokenClient.auth.deleteApiKey();                            // DELETE /users/api-keys
@@ -298,7 +298,6 @@ grant_type=refresh_token
 &refresh_token=<most recently stored refresh token>
 &client_id=your-client-id
 &client_secret=your-client-secret
-&resource=https://api.assinafy.com.br
 ```
 
 Public apps omit `client_secret`. The response has the same token fields as the authorization-code
@@ -1063,8 +1062,8 @@ client.webhooks.deleteEndpoint(endpoint.id());                        // DELETE 
 // Alternative: client.webhooks.deleteEndpointByUrl(endpoint.url());     // DELETE .../webhooks/endpoints?url=...
 ```
 
-OAuth apps receive the secret only on signed endpoint creation. They cannot retrieve or rotate it later;
-if it is lost, delete and recreate the endpoint. Store each endpoint's secret separately.
+OAuth apps receive the secret on signed endpoint creation and can rotate it with `webhooks:write`.
+Retrieval still requires an API key or user session. Store each endpoint’s secret separately.
 
 ### Verifying a signed delivery
 
@@ -1253,11 +1252,11 @@ AcceptTermsResponse terms = client.signerSelf.acceptTerms(signerAccessCode); // 
 VerifyEmailResponse verified = client.signerSelf.verifyEmail(                // may be null when data is absent
     "123456", signerAccessCode);
 
-// PUT /documents/{id}/signers/confirm-data — returns the updated Signer
+// PUT /documents/{id}/signers/confirm-data — current success data: [], represented by null
 Signer confirmed = client.signerSelf.confirmSignerData(documentId, signerAccessCode,
     new ConfirmSignerDataPayload()
-        .setFullName("John Doe").setEmail("signer@example.com").setGovernmentId("15774136604"));
-// Request: { "full_name": "John Doe", "email": "signer@example.com", "government_id": "15774136604" }
+        .setEmail("signer@example.com").setHasAcceptedTerms(true));
+// Request: { "email": "signer@example.com", "has_accepted_terms": true }
 
 // POST /signature — documented PNG upload; the SDK also detects JPEG bytes.
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
@@ -1357,3 +1356,262 @@ try {
     System.err.println("SDK error: " + e.getMessage());
 }
 ```
+
+## Envelopes and embedded signing
+
+Upload and wait for metadata on each PDF before creating an envelope. The signers must already belong to the
+workspace. This example uses existing `doc-a`, `doc-b`, and `signer-a` identifiers; replace them with returned IDs.
+
+```java
+CreateEnvelopePayload payload = new CreateEnvelopePayload()
+    .setName("Service agreement").setMessage("Please sign the agreement and annex.")
+    .setMaxTotalCredits(new BigDecimal("2.50"))
+    .setSigners(List.of(SignerRef.of("signer-a").setVerificationMethod("Email")
+        .setNotificationMethods(List.of("Email"))))
+    .setDocuments(List.of(
+        new EnvelopeDocumentPayload().setId("doc-a").setSignerIds(List.of("signer-a"))
+            .setMethod("virtual").setExpiresAt("2026-12-31T23:59:59Z"),
+        new EnvelopeDocumentPayload().setId("doc-b").setSignerIds(List.of("signer-a"))));
+CostEstimate price = client.envelopes.estimateCost(payload);
+if (!Boolean.TRUE.equals(price.getHasSufficientResources())) {
+    throw new IllegalStateException(price.getBlockingReason());
+}
+DocumentEnvelope envelope = client.envelopes.create(payload, "agreement-creation-key");
+```
+
+Both pricing and creation take this JSON. Creation additionally sends `Idempotency-Key: agreement-creation-key`.
+The key is scoped to the workspace and survives lost responses; never reuse it for a different envelope.
+The SDK does not automatically retry a mutation, even when a key is supplied.
+
+```json
+{
+  "name": "Service agreement",
+  "message": "Please sign the agreement and annex.",
+  "max_total_credits": 2.50,
+  "signers": [{
+    "id": "signer-a", "verification_method": "Email", "notification_methods": ["Email"]
+  }],
+  "documents": [
+    {"id": "doc-a", "method": "virtual", "signer_ids": ["signer-a"], "expires_at": "2026-12-31T23:59:59Z"},
+    {"id": "doc-b", "signer_ids": ["signer-a"]}
+  ]
+}
+```
+
+The estimate returns the `CostEstimate` fields shown in the assignment examples. Envelope reads/creation/updates
+return the following complete shape (the example shows one document; others use the same shape):
+
+```json
+{
+  "status": 200,
+  "message": "",
+  "data": {
+    "resource": "envelope",
+    "id": "envelope-a",
+    "name": "Service agreement",
+    "message": "Please sign the agreement and annex.",
+    "documents": [{
+      "id": "doc-a", "position": 1, "name": "agreement.pdf", "status": "pending_signature",
+      "artifacts": {"original": "https://api.assinafy.com.br/v1/documents/doc-a/download/original"},
+      "signers": [{
+        "id": "signer-a", "full_name": "Example Signer", "email": "signer@example.com",
+        "whatsapp_phone_number": null, "completed": false, "signed_at": null
+      }]
+    }],
+    "counts": {"pending_signature": 1},
+    "signing_urls": [{"signer_id": "signer-a", "url": "https://app.example.com/sign/example", "embedded": false}],
+    "created_at": "2026-11-11T12:00:00Z"
+  }
+}
+```
+
+A list returns an array of these objects plus pagination headers. List document artifacts contain only the
+thumbnail URL, which may still return 404 while processing. `counts` becomes null if no documents remain.
+
+```java
+PaginatedResult<DocumentEnvelope> envelopes = client.envelopes.list(Map.of("status", "open", "page", "1"));
+DocumentEnvelope currentEnvelope = client.envelopes.get(envelope.id());
+PaginatedResult<DocumentActivity> trail = client.envelopes.activities(envelope.id(), Map.of("page", "1"));
+byte[] zip = client.envelopes.download(envelope.id(), "certificated");
+client.envelopes.update(envelope.id(), new UpdateEnvelopePayload()
+    .setName("Agreement and annex").setMessage(null).setDocumentIds(List.of("doc-b", "doc-a")));
+// PATCH body: {"name":"Agreement and annex","message":null,"document_ids":["doc-b","doc-a"]}
+```
+
+Activities have the document activity fields plus `document_id` and `document_name`. ZIP downloads support
+`original`, `certificated`, `certificate-page`, `pades` and `bundle`; unavailable artifacts return 404.
+The following operations send notices or change membership; invoke them only when your workflow requires it.
+
+```java
+EnvelopeResend reminder = client.envelopes.resend(envelope.id(), "signer-a");
+// No body. data: {"is_sent":true,"envelope_id":"envelope-a","signer_id":"signer-a"}
+client.envelopes.addDocument(envelope.id(), new EnvelopeDocumentPayload().setId("doc-c")
+    .setSignerIds(List.of("signer-a")).setMaxTotalCredits(new BigDecimal("1.00")));
+// Body: {"id":"doc-c","signer_ids":["signer-a"],"max_total_credits":1.00}; returns DocumentEnvelope.
+client.envelopes.removeDocument(envelope.id(), "doc-c"); // cancels it; returns DocumentEnvelope
+List<EnvelopeCancellation> cancelled = client.envelopes.cancel(envelope.id());
+// No body. data: [{"id":"doc-a","status":"rejected_by_user","cancelled":true}]
+client.envelopes.delete(envelope.id()); // only once all documents close; data: [], documents remain
+```
+
+For collect documents, set `method=collect` and supply the same `CollectAssignmentEntry`/`CollectFieldPlacement`
+objects used by assignments. Every placed signer must match `signer_ids`. Envelopes take no steps; certificate
+signers sign virtual documents alone on each. Biometric approval and invitation charges are shared across the
+envelope; certificates are charged per document signature.
+
+### Embed origins and sessions
+
+Origin administration uses an API key/user session and requires the Embed plan feature. Configure exact origins
+once, then set `embedded=true` on `SignerRef` or `TemplateSigner` during creation. `signing_urls[].url` is null
+for these signers. Their normal verification and notification methods still apply.
+
+```java
+EmbedOrigin origin = client.embed.addOrigin("https://portal.example.com");
+// POST body: {"origin":"https://portal.example.com"}
+// data: {"id":"origin-a","origin":"https://portal.example.com","created_at":"2026-11-11T12:00:00Z"}
+List<EmbedOrigin> origins = client.embed.listOrigins(); // data: [EmbedOrigin]
+client.embed.updateOrigin(origin.id(), "https://new-portal.example.com"); // same body/response shape
+SignerRef embeddedSigner = SignerRef.of("signer-a").setEmbedded(true)
+    .setVerificationMethod("Email").setNotificationMethods(List.of("Email"));
+Assignment embeddedAssignment = client.assignments.create("doc-d",
+    new CreateAssignmentPayload().setSigners(List.of(embeddedSigner)));
+EmbedSession iframe = client.embed.createSession("doc-d", embeddedAssignment.getId(), "signer-a");
+// No body. data: {"url":"https://app.assinafy.com.br/embed/<single-use-token>",
+//                 "expires_at":"2026-11-11T12:05:00Z"}
+```
+
+Load `iframe.url()` once in the registered parent origin within five minutes. Mint a fresh session on reopening.
+Keep the URL out of logs and browser storage. Configure the parent page's iframe permissions and handle the
+hosted page's messages according to the API's Embedded Signing Guide; the SDK does not execute browser code.
+Removing an origin uses `client.embed.deleteOrigin(origin.id())`, returns `data: []`, and removing the last one
+disables new sessions.
+
+`embed.exchange(token, parentOrigin)` exists for the hosted embed-page protocol; integrations should load the
+URL instead. It sends `POST /embed/sessions/{token}/exchange`, optionally with
+`{"parent_origin":"https://portal.example.com"}`, without workspace credentials. Its response is:
+
+```json
+{
+  "status": 200, "message": "", "data": {
+    "signer_access_code": "<signer-credential>", "signer_id": "signer-a", "document_id": "doc-d",
+    "verification_method": "Email", "embed_origins": ["https://portal.example.com"]
+  }
+}
+```
+
+The token is spent even on a 409 refusal. Expired/used/unknown tokens return `410 embed_session_invalid`.
+Do not retry the exchange; mint a new session through the workspace flow.
+
+## Workspace usage and notification controls
+
+```java
+AccountUsage usage = client.accounts.usage();
+WorkspaceAccount capabilities = client.accounts.get(Map.of("expand", "signing_features"), null);
+NotificationPolicy policy = client.accounts.getNotificationPolicy();
+client.accounts.updateNotificationPolicy(new NotificationPolicy()
+    .setOwnersReceiveAll(true).setEvents(Map.of("SignerViewed", false)));
+PushPreferences push = client.users.getPushPreferences();
+client.users.updatePushPreferences(new PushPreferences().setSignerViewed(false));
+```
+
+Usage returns:
+
+```json
+{
+  "plan": "Pro", "documents_renewal_date": "2026-12-01",
+  "balances": {
+    "documents": {"balance": 100, "limit": 100, "spent": 0},
+    "credits": {"balance": 25.50, "limit": null, "spent": 1.25}
+  }
+}
+```
+
+The account expansion returns `signing_features` with boolean `DigitalCertificate`,
+`VerificationIdDocumentFaceMatchBasic`, `WhatsappNotification`, `VerificationBypass`, and `Embed`.
+The policy update body is `{"owners_receive_all":true,"events":{"SignerViewed":false}}`; the response adds
+`editable` and returns every event key. `editable` is never sent back by the SDK. The full response is:
+
+```json
+{
+  "editable": true, "owners_receive_all": true,
+  "events": {
+    "DocumentCompleted": true, "SignerDeclined": true, "DocumentCancelled": true,
+    "DocumentAboutToExpire": true, "DocumentExpired": true, "DocumentExpirationReset": true,
+    "DocumentProcessingFailed": true, "TemplateProcessingFailed": true, "SignerWhatsappFailed": true,
+    "ContractRenewalNotice": true, "ContractExpiring": true, "ContractExpired": true, "ContractRenewed": true,
+    "SignerViewed": false, "SignerSigned": true, "SignerIdentityReviewRequired": true
+  }
+}
+```
+
+Only workspace owners update policies. An event disabled by policy is suppressed on all channels, except the
+identity-review email, which always sends. Personal push/email preferences still apply. These settings and
+usage are unavailable to third-party OAuth apps. A partial push update sends `{"SignerViewed":false}`; the
+full push response contains:
+
+```json
+{
+  "SignerViewed": false, "SignerSigned": true, "DocumentCompleted": true, "SignerDeclined": true,
+  "DocumentAboutToExpire": true, "DocumentExpired": true, "SignerIdentityReviewRequired": true,
+  "SignerWhatsappFailed": true
+}
+```
+
+## Signer confirmation, closed access, and certified copies
+
+For certificate signers, confirmation and explicit terms acceptance must precede `getSign`. Email/WhatsApp
+verification uses the real code entered by the signer; never manufacture codes for live tests.
+
+```java
+client.signerSelf.confirmSignerData(documentId, signerAccessCode, new ConfirmSignerDataPayload()
+    .setEmail("signer@example.com").setWhatsappPhoneNumber("+5548999990000").setHasAcceptedTerms(true));
+// PUT body: {"email":"signer@example.com","whatsapp_phone_number":"+5548999990000","has_accepted_terms":true}
+// Success: {"status":200,"message":"","data":[]}; Java returns null.
+client.signerSelf.verifyWhatsapp(codeEnteredBySigner, signerAccessCode);
+// POST /verify body: {"verification-code":"<entered-code>"}; success data: [], Java null.
+AccountTheme signerTheme = client.signerSelf.getTheme(signerAccessCode);
+byte[] signerLogo = client.signerSelf.downloadLogo(signerAccessCode);
+DocumentDetails signerView = client.signerSelf.getSign(signerAccessCode, null, "envelope", documentId);
+DocumentDetails beforeConfirmation = client.signerSelf.getCurrentDocument(signerId, signerAccessCode, "envelope");
+```
+
+The theme uses the existing `AccountTheme` fields, including `account_name`; logo returns image bytes.
+A closed signer view contains only `id`, `name`, `status`, limited `current_signer`, and these fields:
+
+```json
+{
+  "is_signer_access_closed": true,
+  "certified_copy": {"available": true, "notification_method": "Email", "resends_left": null},
+  "envelope": {"id": "envelope-a", "name": "Service agreement"}
+}
+```
+
+```java
+CertifiedCopy copy = client.signerSelf.requestCertifiedCopy(signerAccessCode, documentId);
+// Optional body: {"document_id":"doc-a"}; goes to the contact used during signing.
+// data: {"available":true,"notification_method":"Email","resends_left":null,"sent_to":"s***@example.com"}
+byte[] certified = client.signerSelf.downloadCertifiedCopy(downloadToken, false);
+byte[] pades = client.signerSelf.downloadCertifiedCopy(downloadToken, true); // qualified certificates only
+CertifiedCopy resent = client.signerSelf.resendCertifiedCopy(expiredDownloadToken); // same response shape
+```
+
+Email resends are limited to once per two minutes and ten per day; WhatsApp allows one resend per signature
+request. Completion links last seven days; resent links last thirty minutes. Expired download HTML raises
+`ApiException`, rather than returning invalid PDF bytes. Signer access codes download only `original`; use the
+separate download token for completed PDFs. Workspace credentials are never attached to token requests.
+
+## Webhook overlap and test delivery
+
+```java
+WebhookSecretRotation rotation = client.webhooks.rotateEndpointSecret(endpointId, true);
+// POST body: {"keep_previous":true}
+// data: {"secret":"whsec_<new-key>","previous_secret_expires_at":"2026-11-12T12:00:00Z"}
+WebhookVerifier nextVerifier = new WebhookVerifier(rotation.secret());
+WebhookDispatch attempt = client.webhooks.testEndpoint(endpointId);
+// POST with no body; data is WebhookDispatch with kind="manual", event="webhook_test", duration_ms.
+```
+
+During the 24-hour overlap, deliveries contain signatures for both keys, so switch consumers to the new key
+before `previousSecretExpiresAt()`. OAuth apps may rotate and test with `webhooks:write`, but cannot retrieve
+an existing secret. Test delivery works for paused/inactive endpoints without lifting the pause; it carries
+null payload/origin and no secret. Inspect the attempt's delivery result before treating the receiver as ready.

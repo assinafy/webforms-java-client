@@ -548,9 +548,9 @@ class LiveSmokeTest {
             doc = client.documents.upload(samplePdf(), "sdk-smoke-tags-" + shortId() + ".pdf");
             client.documents.waitUntilReady(doc.getId(), 60_000, 2_000);
 
-            assertThat(client.documents.replaceTags(doc.getId(), List.of(first.getName())))
+            assertThat(client.documents.replaceTags(doc.getId(), List.of(first.getId())))
                     .extracting(Tag::getId).containsExactly(first.getId());
-            assertThat(client.documents.appendTags(doc.getId(), List.of(second.getName())))
+            assertThat(client.documents.appendTags(doc.getId(), List.of(second.getId())))
                     .extracting(Tag::getId).contains(first.getId(), second.getId());
             assertThat(client.documents.listTags(doc.getId()))
                     .extracting(Tag::getId).contains(first.getId(), second.getId());
@@ -834,14 +834,10 @@ class LiveSmokeTest {
         return client.signers.findOrCreate(new CreateSignerPayload("SDK Smoke Signer", testEmail()));
     }
 
-    /**
-     * OAuth reaches production ahead of the sandbox. There the router answers 404 for {@code /oauth/*} and the
-     * edge answers 403 for the host-root metadata document; both are environment facts rather than SDK
-     * failures, so both skip.
-     */
+    /** Skips only an undeployed OAuth router route; permission and resource failures remain failures. */
     private static void skipUnlessOAuthDeployed(ApiException e) {
-        if (e.getStatusCode() == 404 || e.getStatusCode() == 403) {
-            Assumptions.assumeTrue(false, "OAuth is not deployed to the current sandbox version");
+        if (isRouterMiss(e)) {
+            Assumptions.assumeTrue(false, "OAuth route is not deployed to the current sandbox version");
         }
     }
 
@@ -887,7 +883,7 @@ class LiveSmokeTest {
             client.webhooks.listEndpoints(accountId);
             return true;
         } catch (ApiException e) {
-            if (e.getStatusCode() == 404 && "Página não encontrada.".equals(e.getMessage())) return false;
+            if (isRouterMiss(e)) return false;
             throw e;
         }
     }
@@ -906,11 +902,21 @@ class LiveSmokeTest {
         try {
             return call.get();
         } catch (ApiException e) {
-            if (e.getStatusCode() == 404 && "Página não encontrada.".equals(e.getMessage())) {
+            if (isRouterMiss(e)) {
                 Assumptions.assumeTrue(false,
                         "Published production route is not deployed to the current sandbox version");
             }
             throw e;
+        }
+    }
+
+    private static boolean isRouterMiss(ApiException e) {
+        if (e.getStatusCode() != 404 || e.getResponseBody() == null) return false;
+        try {
+            return "Not Found".equals(new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readTree(e.getResponseBody()).path("name").asText());
+        } catch (java.io.IOException ignored) {
+            return false;
         }
     }
 

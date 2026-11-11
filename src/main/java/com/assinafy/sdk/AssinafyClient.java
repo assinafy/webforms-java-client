@@ -53,6 +53,13 @@ public final class AssinafyClient {
     /** Query parameter that authenticates signer-facing requests in place of workspace credentials. */
     private static final String SIGNER_ACCESS_CODE = "signer-access-code";
 
+    private enum CredentialMode { BEARER_ONLY }
+
+    /** Multi-document signing envelopes. */
+    public final com.assinafy.sdk.resources.EnvelopeResource envelopes;
+    /** Embedded-signing origins and single-use sessions. */
+    public final com.assinafy.sdk.resources.EmbedResource embed;
+
     private final OkHttpClient httpClient;
     private final String baseUrl;
 
@@ -106,6 +113,7 @@ public final class AssinafyClient {
                 ? options.getBaseUrl()
                 : AssinafyClientOptions.DEFAULT_BASE_URL);
         final HttpUrl apiOrigin = HttpUrl.get(baseUrl);
+        final String apiPath = "/".equals(apiOrigin.encodedPath()) ? "" : apiOrigin.encodedPath();
         // Cleartext stays available only to the loopback mock servers local tests use; anywhere else a
         // redirect to plain HTTP must fail instead of downgrading.
         final List<ConnectionSpec> connectionSpecs = isLoopbackHost(apiOrigin.host())
@@ -127,7 +135,8 @@ public final class AssinafyClient {
                     // A signer-facing request authenticates with its access code alone; workspace
                     // credentials must never travel with it.
                     if (sameOrigin(chain.request().url(), apiOrigin)
-                            && chain.request().url().queryParameter(SIGNER_ACCESS_CODE) == null) {
+                            && chain.request().tag(CredentialMode.class) == null
+                            && !usesBearerCredential(chain.request().url(), apiPath)) {
                         if (apiKey != null && !apiKey.isBlank()) {
                             requestBuilder.header("X-Api-Key", apiKey);
                         } else if (token != null && !token.isBlank()) {
@@ -138,6 +147,10 @@ public final class AssinafyClient {
                 })
                 .addInterceptor(chain -> {
                     Request request = chain.request();
+                    if (usesBearerCredential(request.url(), apiPath)) {
+                        // Request tags survive redirects, so an expired bearer link cannot acquire workspace authority.
+                        request = request.newBuilder().tag(CredentialMode.class, CredentialMode.BEARER_ONLY).build();
+                    }
                     Response response = chain.proceed(request);
 
                     int attempts = 0;
@@ -159,6 +172,8 @@ public final class AssinafyClient {
                 .build();
 
         String accountId = options.getAccountId();
+        this.envelopes = new com.assinafy.sdk.resources.EnvelopeResource(httpClient, baseUrl, accountId);
+        this.embed = new com.assinafy.sdk.resources.EmbedResource(httpClient, baseUrl, accountId);
         this.documents = new DocumentResource(httpClient, baseUrl, accountId);
         this.signers = new SignerResource(httpClient, baseUrl, accountId);
         this.assignments = new AssignmentResource(httpClient, baseUrl, accountId);
@@ -404,5 +419,10 @@ public final class AssinafyClient {
      */
     public String getBaseUrl() {
         return baseUrl;
+    }
+    private static boolean usesBearerCredential(HttpUrl url, String apiPath) {
+        return url.queryParameter(SIGNER_ACCESS_CODE) != null
+                || url.encodedPath().startsWith(apiPath + "/embed/sessions/")
+                || url.encodedPath().startsWith(apiPath + "/signers/downloads/");
     }
 }

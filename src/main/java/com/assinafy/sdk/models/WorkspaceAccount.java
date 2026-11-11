@@ -169,4 +169,21 @@ public final class WorkspaceAccount {
      * @param limits workspace plan limits
      */
     public void setLimits(Map<String, Object> limits) { this.limits = limits; }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("signing_features")
+    private java.util.Map<String, Boolean> signingFeatures;
+
+    /**
+     * Returns plan signing capabilities requested with expand=signing_features.
+     * @return plan signing capabilities requested with expand=signing_features
+     */
+    public java.util.Map<String, Boolean> getSigningFeatures() { return signingFeatures; }
+
+    /**
+     * Sets plan signing capabilities requested with expand=signing_features.
+     * @param value plan signing capabilities requested with expand=signing_features
+     */
+    public void setSigningFeatures(java.util.Map<String, Boolean> value) {
+        signingFeatures = value;
+    }
 }
