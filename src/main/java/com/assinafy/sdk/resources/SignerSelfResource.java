@@ -212,8 +212,21 @@ public final class SignerSelfResource extends BaseResource {
      * @return current document
      */
     public DocumentDetails getCurrentDocument(String signerId, String signerAccessCode) {
+        return getCurrentDocument(signerId, signerAccessCode, null);
+    }
+
+    /**
+     * {@code GET /signers/{signerId}/document} with optional envelope expansion.
+     * @param signerId signer identifier
+     * @param signerAccessCode required signer credential
+     * @param expand optional envelope expansion
+     * @return signer document view
+     */
+    public DocumentDetails getCurrentDocument(String signerId, String signerAccessCode, String expand) {
         String sid = requireId(signerId, "Signer ID");
-        return httpGet("/signers/" + sid + "/document", signerAccessCodeQuery(signerAccessCode), DocumentDetails.class);
+        Map<String, String> query = new LinkedHashMap<>(signerAccessCodeQuery(signerAccessCode));
+        if (expand != null) query.put("expand", expand);
+        return httpGet("/signers/" + sid + "/document", query, DocumentDetails.class);
     }
 
     /**
@@ -498,18 +511,5 @@ public final class SignerSelfResource extends BaseResource {
     public CertifiedCopy resendCertifiedCopy(String token) {
         return httpPost("/signers/downloads/" + requireId(token, "Download token") + "/resend", null,
                 CertifiedCopy.class);
-    }
-
-    /**
-     * {@code GET /signers/{signerId}/document} with optional envelope expansion.
-     * @param signerId signer identifier
-     * @param signerAccessCode required signer credential
-     * @param expand optional envelope expansion
-     * @return signer document view
-     */
-    public DocumentDetails getCurrentDocument(String signerId, String signerAccessCode, String expand) {
-        Map<String, String> query = new LinkedHashMap<>(signerAccessCodeQuery(signerAccessCode));
-        if (expand != null) query.put("expand", expand);
-        return httpGet("/signers/" + requireId(signerId, "Signer ID") + "/document", query, DocumentDetails.class);
     }
 }

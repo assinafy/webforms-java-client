@@ -117,7 +117,18 @@ public final class ContractResource extends BaseResource {
      * @return root contract and its amendment family
      */
     public DocumentContract related(String documentId, String accountId) {
-        return httpGet(contractPath(documentId, accountId) + "/related", DocumentContract.class);
+        return related(documentId, null, accountId);
+    }
+
+    /**
+     * {@code GET /accounts/{accountId}/documents/{documentId}/contract/related} with expansion.
+     * @param documentId document identifier
+     * @param params optional expand=document
+     * @param accountId workspace override, or null
+     * @return root contract and instruments
+     */
+    public DocumentContract related(String documentId, Map<String, String> params, String accountId) {
+        return httpGet(contractPath(documentId, accountId) + "/related", params, DocumentContract.class);
     }
 
     /**
@@ -213,16 +224,5 @@ public final class ContractResource extends BaseResource {
                 data.path("resource").asText()) || data.has("parent_document_id")
                 ? DocumentContractAmendment.class : DocumentContract.class;
         return MAPPER.convertValue(data, type);
-    }
-
-    /**
-     * {@code GET /accounts/{accountId}/documents/{documentId}/contract/related} with expansion.
-     * @param documentId document identifier
-     * @param params optional expand=document
-     * @param accountId workspace override, or null
-     * @return root contract and instruments
-     */
-    public DocumentContract related(String documentId, Map<String, String> params, String accountId) {
-        return httpGet(contractPath(documentId, accountId) + "/related", params, DocumentContract.class);
     }
 }

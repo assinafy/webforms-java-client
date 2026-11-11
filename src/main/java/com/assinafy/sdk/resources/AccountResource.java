@@ -58,8 +58,17 @@ public final class AccountResource extends BaseResource {
      * @return selected workspace
      */
     public WorkspaceAccount get(String accountId) {
-        String id = accountId(accountId);
-        return httpGet("/accounts/" + id, WorkspaceAccount.class);
+        return get(null, accountId);
+    }
+
+    /**
+     * {@code GET /accounts/{accountId}} with expansions.
+     * @param params optional expand=signing_features
+     * @param accountId workspace override, or null
+     * @return workspace and requested capabilities
+     */
+    public WorkspaceAccount get(Map<String, String> params, String accountId) {
+        return httpGet("/accounts/" + accountId(accountId), params, WorkspaceAccount.class);
     }
 
     /**
@@ -239,16 +248,6 @@ public final class AccountResource extends BaseResource {
         if (!requireName && payload.getName() == null && sender == null) {
             throw new ValidationException("At least one account attribute is required");
         }
-    }
-
-    /**
-     * {@code GET /accounts/{accountId}} with expansions.
-     * @param params optional expand=signing_features
-     * @param accountId workspace override, or null
-     * @return workspace and requested capabilities
-     */
-    public WorkspaceAccount get(Map<String, String> params, String accountId) {
-        return httpGet("/accounts/" + accountId(accountId), params, WorkspaceAccount.class);
     }
 
     /**

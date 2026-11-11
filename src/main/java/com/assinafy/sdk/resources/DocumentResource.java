@@ -235,8 +235,17 @@ public final class DocumentResource extends BaseResource {
      * @return full document details, including pages and assignment
      */
     public DocumentDetails details(String documentId) {
-        String id = requireId(documentId, "Document ID");
-        return httpGet("/documents/" + id, DocumentDetails.class);
+        return details(documentId, null);
+    }
+
+    /**
+     * {@code GET /documents/{documentId}} with optional workspace expansions.
+     * @param documentId document identifier
+     * @param params optional expand=envelope_id,envelope
+     * @return document details
+     */
+    public DocumentDetails details(String documentId, Map<String, String> params) {
+        return httpGet("/documents/" + requireId(documentId, "Document ID"), params, DocumentDetails.class);
     }
 
     /**
@@ -343,8 +352,18 @@ public final class DocumentResource extends BaseResource {
      * @return thumbnail image bytes
      */
     public byte[] thumbnail(String documentId) {
-        String id = requireId(documentId, "Document ID");
-        return httpGetBinary("/documents/" + id + "/thumbnail");
+        return thumbnail(documentId, null);
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/thumbnail} with the selected render.
+     * @param documentId document identifier
+     * @param artifact original or certificated
+     * @return thumbnail bytes
+     */
+    public byte[] thumbnail(String documentId, String artifact) {
+        return httpGetBinary("/documents/" + requireId(documentId, "Document ID") + "/thumbnail",
+                queryParams("artifact", artifact));
     }
 
     /**
@@ -355,9 +374,19 @@ public final class DocumentResource extends BaseResource {
      * @return rendered page image bytes
      */
     public byte[] downloadPage(String documentId, String pageId) {
-        String docId = requireId(documentId, "Document ID");
-        String pid = requireId(pageId, "Page ID");
-        return httpGetBinary("/documents/" + docId + "/pages/" + pid + "/download");
+        return downloadPage(documentId, pageId, null);
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/pages/{pageId}/download} with the selected render.
+     * @param documentId document identifier
+     * @param pageId page identifier
+     * @param artifact original or certificated
+     * @return page image bytes
+     */
+    public byte[] downloadPage(String documentId, String pageId, String artifact) {
+        return httpGetBinary("/documents/" + requireId(documentId, "Document ID") + "/pages/"
+                + requireId(pageId, "Page ID") + "/download", queryParams("artifact", artifact));
     }
 
     /**
@@ -785,16 +814,6 @@ public final class DocumentResource extends BaseResource {
     }
 
     /**
-     * {@code GET /documents/{documentId}} with optional workspace expansions.
-     * @param documentId document identifier
-     * @param params optional expand=envelope_id,envelope
-     * @return document details
-     */
-    public DocumentDetails details(String documentId, Map<String, String> params) {
-        return httpGet("/documents/" + requireId(documentId, "Document ID"), params, DocumentDetails.class);
-    }
-
-    /**
      * {@code GET /documents/{documentId}/activities} with pagination metadata.
      * @param documentId document identifier
      * @param params optional sort, page and per-page
@@ -803,28 +822,5 @@ public final class DocumentResource extends BaseResource {
     public PaginatedResult<DocumentActivity> activitiesPage(String documentId, Map<String, String> params) {
         return httpGetList("/documents/" + requireId(documentId, "Document ID") + "/activities", params,
                 DocumentActivity.class);
-    }
-
-    /**
-     * {@code GET /documents/{documentId}/thumbnail} with the selected render.
-     * @param documentId document identifier
-     * @param artifact original or certificated
-     * @return thumbnail bytes
-     */
-    public byte[] thumbnail(String documentId, String artifact) {
-        return httpGetBinary("/documents/" + requireId(documentId, "Document ID") + "/thumbnail",
-                queryParams("artifact", artifact));
-    }
-
-    /**
-     * {@code GET /documents/{documentId}/pages/{pageId}/download} with the selected render.
-     * @param documentId document identifier
-     * @param pageId page identifier
-     * @param artifact original or certificated
-     * @return page image bytes
-     */
-    public byte[] downloadPage(String documentId, String pageId, String artifact) {
-        return httpGetBinary("/documents/" + requireId(documentId, "Document ID") + "/pages/"
-                + requireId(pageId, "Page ID") + "/download", queryParams("artifact", artifact));
     }
 }

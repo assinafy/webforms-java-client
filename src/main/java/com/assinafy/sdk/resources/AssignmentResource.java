@@ -19,7 +19,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 
 /** Client for account-wide assignment lists and document-scoped assignment operations. */
 public final class AssignmentResource extends BaseResource {
@@ -355,7 +354,7 @@ public final class AssignmentResource extends BaseResource {
             normalisedSigners.add(normaliseSignerRef(ref, estimate));
         }
         if (!estimate) {
-            validateDigitalCertificateSteps(signerRefs, SignerRef::getVerificationMethod, SignerRef::getStep);
+            validateDigitalCertificateSteps(signerRefs);
         }
         if (!"virtual".equals(method) && normalisedSigners.stream()
                 .anyMatch(signer -> "DigitalCertificate".equals(signer.get("verification_method")))) {
@@ -421,16 +420,15 @@ public final class AssignmentResource extends BaseResource {
         return new ValidationException("DigitalCertificate signers require method: virtual", errors);
     }
 
-    static <T> void validateDigitalCertificateSteps(List<T> signers, Function<T, String> method,
-            Function<T, Integer> step) {
+    private static void validateDigitalCertificateSteps(List<SignerRef> signers) {
         Map<Integer, Integer> stepSizes = new HashMap<>();
-        for (T signer : signers) {
-            int signerStep = step.apply(signer) != null ? step.apply(signer) : 1;
+        for (SignerRef signer : signers) {
+            int signerStep = signer.getStep() != null ? signer.getStep() : 1;
             stepSizes.merge(signerStep, 1, Integer::sum);
         }
-        for (T signer : signers) {
-            int signerStep = step.apply(signer) != null ? step.apply(signer) : 1;
-            if ("DigitalCertificate".equals(method.apply(signer)) && stepSizes.get(signerStep) > 1) {
+        for (SignerRef signer : signers) {
+            int signerStep = signer.getStep() != null ? signer.getStep() : 1;
+            if ("DigitalCertificate".equals(signer.getVerificationMethod()) && stepSizes.get(signerStep) > 1) {
                 Map<String, Object> errors = new LinkedHashMap<>();
                 errors.put("code", DIGITAL_CERTIFICATE_REQUIRES_EXCLUSIVE_STEP);
                 errors.put("step", signerStep);
