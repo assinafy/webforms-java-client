@@ -18,6 +18,7 @@ import com.assinafy.sdk.resources.DocumentResource;
 import com.assinafy.sdk.resources.FieldResource;
 import com.assinafy.sdk.resources.OAuthResource;
 import com.assinafy.sdk.resources.SignerResource;
+import com.assinafy.sdk.resources.ScheduledSendResource;
 import com.assinafy.sdk.resources.SignerSelfResource;
 import com.assinafy.sdk.resources.TagResource;
 import com.assinafy.sdk.resources.TemplateResource;
@@ -89,6 +90,8 @@ public final class AssinafyClient {
     public final UserResource users;
     /** Contract-term listing, updates, amendments, renewal, and termination operations. */
     public final ContractResource contracts;
+    /** Listing, cancellation and immediate execution of scheduled assignments and envelopes. */
+    public final ScheduledSendResource scheduledSends;
 
     /**
      * Builds a client from validated connection, authentication, retry, and timeout options.
@@ -187,6 +190,7 @@ public final class AssinafyClient {
         this.accounts = new AccountResource(httpClient, baseUrl, accountId);
         this.users = new UserResource(httpClient, baseUrl);
         this.contracts = new ContractResource(httpClient, baseUrl, accountId);
+        this.scheduledSends = new ScheduledSendResource(httpClient, baseUrl, accountId);
     }
 
     /**

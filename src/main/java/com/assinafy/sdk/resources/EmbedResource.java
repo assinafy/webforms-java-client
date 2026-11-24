@@ -94,7 +94,8 @@ public final class EmbedResource extends BaseResource {
 
     /**
      * {@code POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/embed-sessions}.
-     * The signer must have embedded=true. Load the URL once, in an iframe, within five minutes.
+     * API key or user session only. The signer must have embedded=true.
+     * Load the URL once, in an iframe, within five minutes.
      * @param documentId document identifier
      * @param assignmentId assignment identifier
      * @param signerId signer identifier

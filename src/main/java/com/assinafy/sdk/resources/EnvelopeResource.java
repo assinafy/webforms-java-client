@@ -10,6 +10,8 @@ import com.assinafy.sdk.models.EnvelopeDocumentPayload;
 import com.assinafy.sdk.models.EnvelopeResend;
 import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.SignerRef;
+import com.assinafy.sdk.models.ScheduledSend;
+import com.assinafy.sdk.models.ResendCostEstimate;
 import com.assinafy.sdk.models.UpdateEnvelopePayload;
 import com.fasterxml.jackson.core.type.TypeReference;
 import okhttp3.OkHttpClient;
@@ -82,6 +84,55 @@ public final class EnvelopeResource extends BaseResource {
      * @return created envelope
      */
     public DocumentEnvelope create(CreateEnvelopePayload payload) { return create(payload, null, null); }
+
+    /**
+     * {@code POST /accounts/{accountId}/scheduled-sends}. Stores an envelope for later creation.
+     * Nothing is created, sent or charged now. This endpoint does not accept an idempotency key.
+     * @param payload envelope values; document expirations must be at least two hours after sendAt
+     * @param sendAt whole-second ISO 8601 timestamp with offset, one hour to 90 days ahead
+     * @param accountId workspace override, or null
+     * @return pending scheduled send
+     */
+    public ScheduledSend schedule(CreateEnvelopePayload payload, String sendAt, String accountId) {
+        validate(payload);
+        requireValue(sendAt, "Send time");
+        com.fasterxml.jackson.databind.node.ObjectNode body = MAPPER.valueToTree(payload);
+        body.put("send_at", sendAt);
+        return httpPost("/accounts/" + accountId(accountId) + "/scheduled-sends", body, ScheduledSend.class);
+    }
+
+    /**
+     * {@code POST /accounts/{accountId}/scheduled-sends} in the default workspace.
+     * @param payload envelope values
+     * @param sendAt whole-second ISO 8601 timestamp with offset, one hour to 90 days ahead
+     * @return pending scheduled send
+     */
+    public ScheduledSend schedule(CreateEnvelopePayload payload, String sendAt) {
+        return schedule(payload, sendAt, null);
+    }
+
+    /**
+     * {@code POST /accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/estimate-resend-cost}.
+     * Prices one reminder for the entire envelope; does not check whether it can be sent now.
+     * @param envelopeId envelope identifier
+     * @param signerId signer identifier
+     * @param accountId workspace override, or null
+     * @return reminder price and balances
+     */
+    public ResendCostEstimate estimateResendCost(String envelopeId, String signerId, String accountId) {
+        return httpPost(path(envelopeId, accountId) + "/signers/" + requireId(signerId, "Signer ID")
+                + "/estimate-resend-cost", null, ResendCostEstimate.class);
+    }
+
+    /**
+     * {@code POST /accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/estimate-resend-cost}.
+     * @param envelopeId envelope identifier in the default workspace
+     * @param signerId signer identifier
+     * @return reminder price and balances
+     */
+    public ResendCostEstimate estimateResendCost(String envelopeId, String signerId) {
+        return estimateResendCost(envelopeId, signerId, null);
+    }
 
     /**
      * {@code POST /accounts/{accountId}/envelopes/estimate-cost}. Creates and charges nothing.

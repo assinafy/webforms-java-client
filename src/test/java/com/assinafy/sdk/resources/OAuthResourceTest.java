@@ -137,12 +137,22 @@ class OAuthResourceTest {
     }
 
     @Test
-    void authorizationUrl_rejectsAResourceTheCodeExchangeWouldNotRepeat() {
-        // The exchange always sends the API origin; any other authorize-time value ends in invalid_target.
-        assertThatThrownBy(() -> resource.authorizationUrl(new OAuthAuthorizationRequest("client-1", REDIRECT_URI)
+    void authorizationAndExchangeCanUseTheCanonicalResourceBehindAnAlias() throws Exception {
+        String canonical = "https://canonical.example";
+        String url = resource.authorizationUrl(new OAuthAuthorizationRequest("client-1", REDIRECT_URI)
                 .setScopes(List.of("documents:read")).setState("state-1").setCodeVerifier(VERIFIER)
-                .setResource("https://mcp.example")))
-                .isInstanceOf(ValidationException.class).hasMessageContaining(origin());
+                .setResource(canonical));
+        assertThat(HttpUrl.get(url).queryParameter("resource")).isEqualTo(canonical);
+        server.enqueue(json(200, Map.of("access_token", "issued", "token_type", "Bearer")));
+        resource.exchangeAuthorizationCode("client-1", null, "code", REDIRECT_URI, VERIFIER, canonical);
+        assertThat(form(server.takeRequest())).containsEntry("resource", canonical);
+        for (String invalid : List.of("http://canonical.example", "https://canonical.example/#fragment",
+                "https://user:secret@canonical.example", "https://canonical.example/?token=secret")) {
+            assertThatThrownBy(() -> resource.exchangeAuthorizationCode(
+                    "client-1", null, "code", REDIRECT_URI, VERIFIER, invalid))
+                    .isInstanceOf(ValidationException.class);
+        }
+        assertThat(server.getRequestCount()).isEqualTo(1);
     }
 
     @Test

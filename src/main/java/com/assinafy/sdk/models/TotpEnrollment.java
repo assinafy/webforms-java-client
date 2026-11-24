@@ -14,4 +14,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public record TotpEnrollment(
         String id,
         String secret,
-        @JsonProperty("provisioning_uri") String provisioningUri) {}
+        @JsonProperty("provisioning_uri") String provisioningUri) {
+    /**
+     * Returns a description without enrollment credentials.
+     * @return redacted description
+     */
+    @Override
+    public String toString() { return "TotpEnrollment[redacted]"; }
+}

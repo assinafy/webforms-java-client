@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-11-24
+
+### Added
+- Scheduled assignment and envelope creation, with workspace listing, cancellation and immediate sending.
+- Document watchers, signer capacities, notification history and envelope reminder cost estimates.
+- Assignment signer `sign_as` and notification delivery/open timestamps.
+- `ApiException.getCode()` exposes machine-readable API refusal codes.
+- OAuth code exchange accepts the canonical resource identifier published by environment metadata.
+
+### Fixed
+- OAuth authorization endpoint overrides reject insecure URLs, credentials, queries and fragments.
+- TOTP enrollment descriptions redact the secret and provisioning URL.
+
+### Changed
+- Jackson uses the supported 2.21 LTS line, with patch updates restricted to that line.
+- Maven Help Plugin and the pinned Java setup action are updated.
+
 ## [2.10.0] - 2026-11-11
 
 ### Added

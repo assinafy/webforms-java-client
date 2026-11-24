@@ -787,10 +787,10 @@ public abstract class BaseResource {
                 int envelopeStatus = root.get("status").asInt();
                 String message = errorMessage(root);
                 if (envelopeStatus >= 400) {
-                    throw new ApiException(envelopeStatus, message, json);
+                    throw responseFailure(new ApiException(envelopeStatus, message, json), root);
                 }
                 if (httpStatus < 200 || httpStatus >= 300) {
-                    throw new ApiException(httpStatus, message, json);
+                    throw responseFailure(new ApiException(httpStatus, message, json), root);
                 }
                 if (root.has("data")) {
                     JsonNode dataNode = root.get("data");
@@ -802,7 +802,7 @@ public abstract class BaseResource {
                 return null;
             }
             if (httpStatus < 200 || httpStatus >= 300) {
-                throw oauthAware(new ApiException(httpStatus, errorMessage(root), json), root);
+                throw responseFailure(new ApiException(httpStatus, errorMessage(root), json), root);
             }
             return MAPPER.convertValue(root, dataType);
         } catch (ApiException e) {
@@ -835,10 +835,10 @@ public abstract class BaseResource {
             // Not JSON (e.g. a plain-text error) — fall through to the HTTP-status check below.
         }
         if (envelopeStatus != null && envelopeStatus >= 400) {
-            throw new ApiException(envelopeStatus, message, json);
+            throw responseFailure(new ApiException(envelopeStatus, message, json), root);
         }
         if (httpStatus < 200 || httpStatus >= 300) {
-            throw oauthAware(new ApiException(httpStatus, message, json), root);
+            throw responseFailure(new ApiException(httpStatus, message, json), root);
         }
     }
 
@@ -857,8 +857,9 @@ public abstract class BaseResource {
         return null;
     }
 
-    /** Attaches the RFC 6749 {@code error} code of a flat OAuth error body, when the body carries one. */
-    private static ApiException oauthAware(ApiException failure, JsonNode root) {
+    /** Preserves textual API codes and the RFC 6749 error code on every response path. */
+    private static ApiException responseFailure(ApiException failure, JsonNode root) {
+        failure.withCode(textOrNull(root, "code"));
         String error = root != null ? textOrNull(root, "error") : null;
         return error != null ? failure.withOAuthChallenge(error, null) : failure;
     }

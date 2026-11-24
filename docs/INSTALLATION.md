@@ -19,7 +19,7 @@ Add the dependency to your `pom.xml`:
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.10.0</version>
+    <version>2.11.0</version>
 </dependency>
 ```
 
@@ -37,7 +37,7 @@ the repository-pinned Maven release: `./mvnw verify`.
 
 ```groovy
 dependencies {
-    implementation 'com.assinafy:webforms-java-client-sdk:2.10.0'
+    implementation 'com.assinafy:webforms-java-client-sdk:2.11.0'
 }
 ```
 
@@ -45,7 +45,7 @@ Or with Kotlin DSL:
 
 ```kotlin
 dependencies {
-    implementation("com.assinafy:webforms-java-client-sdk:2.10.0")
+    implementation("com.assinafy:webforms-java-client-sdk:2.11.0")
 }
 ```
 
@@ -123,11 +123,13 @@ The SDK pulls in:
 | Dependency | Version | Purpose |
 |---|---:|---|
 | `com.squareup.okhttp3:okhttp-jvm` | 5.5.1 | HTTP client |
-| `com.fasterxml.jackson.core:jackson-databind` | 2.22.4 | JSON data binding |
-| `com.fasterxml.jackson.core:jackson-core` | 2.22.4 | JSON streaming |
-| `com.fasterxml.jackson.core:jackson-annotations` | 2.22 | JSON model annotations |
+| `com.fasterxml.jackson.core:jackson-databind` | 2.21.8 | JSON data binding |
+| `com.fasterxml.jackson.core:jackson-core` | 2.21.8 | JSON streaming |
+| `com.fasterxml.jackson.core:jackson-annotations` | 2.21 | JSON model annotations |
 | `com.squareup.okio:okio-jvm` | 3.18.2 | OkHttp I/O runtime |
 
+Jackson follows the [2.21 LTS line](https://github.com/FasterXML/jackson/wiki/Jackson-Releases).
+Patch updates stay within that line; libraries without an LTS channel use supported stable releases.
 
 ## Building and sandbox tests
 

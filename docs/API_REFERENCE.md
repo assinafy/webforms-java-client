@@ -1,14 +1,15 @@
 # Assinafy Java SDK API Reference
 
-This reference maps the Java SDK to the 147 operations documented at the
-[Assinafy API documentation](https://api.assinafy.com.br/v1/docs). Paths below omit the `/v1` prefix, except
+The SDK covers 147 production operations and the 157-operation staging superset published in the
+[production](https://api.assinafy.com.br/v1/docs) and [staging](https://api.angry-pisco.stage.assinafy.com.br/v1/docs) API documentation.
+Staging-only operations are marked below. Paths omit the `/v1` prefix, except
 for the OAuth protected-resource metadata, which the API serves at its host root.
 
 ## Client surface
 
 Construct with `new AssinafyClient(options)`, `AssinafyClient.create(apiKey, accountId[, configurator])`, or
 `AssinafyClient.fromConfig(map)`. The client exposes `accounts`, `users`, `auth`, `oauth`, `documents`,
-`contracts`, `envelopes`, `embed`, `signers`, `assignments`, `fields`, `templates`, `tags`, `webhooks`, and `signerSelf`.
+`contracts`, `envelopes`, `scheduledSends`, `embed`, `signers`, `assignments`, `fields`, `templates`, `tags`, `webhooks`, and `signerSelf`.
 `getBaseUrl()` returns
 the normalized base URL; `getHttpClient()` exposes the configured OkHttp client for advanced integration and
 diagnostics.
@@ -32,6 +33,7 @@ as `id()`, `documents()`, and `secret()`; their nullable components preserve omi
 | Environment | Base URL |
 |---|---|
 | Production | `https://api.assinafy.com.br/v1` |
+| Staging | `https://api.angry-pisco.stage.assinafy.com.br/v1` |
 | Sandbox | `https://sandbox.assinafy.com.br/v1` |
 
 Set an API key with `AssinafyClientOptions.setApiKey`; it is sent as `X-Api-Key`. If no API key is set,
@@ -87,7 +89,8 @@ The standard error body is `{ "status": integer, "message": string, "data": obje
 "errors"?: [{ "field": string, "code": string, "message": string }] }`. Field codes include `Required`,
 `UnknownField` and `Invalid`; actionable refusal codes include `PlanRestricted`, `InsufficientScope`,
 `DocumentNotReady`, `TagInUse`, `ContractChanged`, `EnvelopeOpen`, `CreditCeilingExceeded` and
-`IdempotencyKeyInUse`. Read these from the preserved response body; do not branch on translated messages. Callers should
+`IdempotencyKeyInUse`. Signer refusals include `SignerDataUnconfirmed`, `DigitalCertificateRequired`,
+`EmailVerificationRequired`, `WhatsappVerificationRequired` and `IdentityVerificationRequired`. Read the top-level string code with `ApiException.getCode()` (null when absent); do not branch on translated messages. Callers should
 handle both 400 and 422 as validation failures. A blocked account deletion may also include
 `restrictions: [{ "code": "ActivePaidSubscription"|"PendingDocuments", "message": string,
 "account_ids": [string, ...] }]`. The SDK preserves the complete error JSON in
@@ -180,7 +183,7 @@ properties of the documented field-create and field-update schemas.
 `CreateAssignmentPayload` produces this body. The SDK defaults an omitted `method` to `virtual`; at least one
 signer is required for create, and `entries` is required for a `collect` assignment.
 
-Use `setSigners(List<SignerRef>)` when setting verification, notification, or step. `setSignerStrings(...)` and
+Use `setSigners(List<SignerRef>)` when setting verification, notification, capacity, embedding, or step. `setSignerStrings(...)` and
 `setSignerIds(...)` convert IDs to plain signer references; the most recently used signer setter wins.
 
 ```json
@@ -191,7 +194,9 @@ Use `setSigners(List<SignerRef>)` when setting verification, notification, or st
       "id": "signer-id",
       "verification_method": "Email | Whatsapp | DigitalCertificate | IdDocumentFaceMatchBasic",
       "notification_methods": ["Email | Whatsapp"],
-      "step": 1
+      "step": 1,
+      "sign_as": "Witness",
+      "embedded": false
     }
   ],
   "entries": [
@@ -216,7 +221,8 @@ Use `setSigners(List<SignerRef>)` when setting verification, notification, or st
   ],
   "message": "Please sign",
   "expires_at": "2026-12-31T23:59:59Z",
-  "copy_receivers": ["signer-id"]
+  "copy_receivers": ["signer-id"],
+  "max_total_credits": 1.25
 }
 ```
 
@@ -234,7 +240,7 @@ CreateAssignmentPayload collect = new CreateAssignmentPayload()
 
 The estimate endpoint accepts `method`, `signers`, and `entries` pricing inputs. A virtual estimate requires
 non-empty `signers`; a collect estimate requires non-empty `signers` and `entries`. Each estimate signer is sent
-as `{ "verification_method", "notification_methods" }`; signer `id`, `step`, `message`, `expires_at`, and
+as `{ "verification_method", "notification_methods", "sign_as"? }`; signer `id`, `step`, `message`, `expires_at`, and
 `copy_receivers` belong to creation and are not sent.
 
 Verification and notification are coupled. If neither is supplied both default to `Email`; supplying only one
@@ -308,10 +314,15 @@ String url = client.oauth.authorizationUrl(
 ```
 
 `authorizationUrl` fixes `response_type=code` and `code_challenge_method=S256`, derives `code_challenge` as the
-base64url SHA-256 of the verifier, and sends the origin of the client's base URL as `resource`
-(`https://api.assinafy.com.br` in production) — the same value the code exchange sends, so the two cannot
-disagree (`invalid_target`). `setResource(...)` accepts only that value. Override the endpoint with
-`setAuthorizationEndpoint(...)`; add `setNonce(...)` when requesting `openid`.
+base64url SHA-256 of the verifier, and defaults `resource` to the client's API origin.
+When protected-resource metadata publishes a different canonical identifier, pass it to `setResource(...)`
+and the six-argument `exchangeAuthorizationCode(..., resource)` overload. Both values must match exactly
+or the API returns `invalid_target`. Use `setAuthorizationEndpoint(...)` for the authorization endpoint
+published by that environment's authorization server; it must use HTTPS without credentials, query or fragment.
+Add `setNonce(...)` when requesting `openid`. The default production resource is `https://api.assinafy.com.br`.
+Staging publishes `https://api.elated-rosettes.stage.assinafy.com.br` as its resource and
+`https://auth.frosty-treacle.stage.assinafy.com.br` as its authorization server; validate callback `iss` against
+that environment's issuer. Metadata and discovery must come from trusted configured origins.
 
 | Scope | Grants |
 |---|---|
@@ -565,7 +576,7 @@ Properties marked nullable or contextual may be null or absent. Date/time string
 | `SignerIdentityReview.Matches` | `cpf?` (`boolean`), `name?` (similarity 0–1), `birth_date?` (`boolean`) |
 | `SignerIdentityReview.Check` | `name`, `result` (`pass`, `review`, `skipped`, or a provider failure), `score?`, `reasons[]` |
 | `SignerIdentityReview.Reviewer` | `id`, `name` |
-| `AssignmentSignerNotification` | `event`, `status` (`sent\|failed`), `error_code?`, `error_message?`, `sent_at?`, `failed_at?` |
+| `AssignmentSignerNotification` | `event`, `status` (`sent\|delivered\|opened\|failed`), `error_code?`, `error_message?`, `sent_at?`, `failed_at?`, `delivered_at?`, `opened_at?` |
 | `Assignment` | `resource`, `id`, `document_id?` (null only after document deletion), `sender_email`, `method` (`virtual\|collect`), `expires_at?`, `message?`, `signers[]`, `copy_receivers[]` (`Signer` objects), `items[]`, `summary`, `signing_urls[]`, `created_at` |
 | `AssignmentItem` | `id`, `page?`, `signer`, `field?`, `display_settings`, `value?`, `completed` |
 | `AssignmentSummary` | `signer_count`, `completed_count`, `signers[]` |
@@ -1071,7 +1082,8 @@ other `DocumentEnvelope` components are null. `contracts.related(id, params, acc
 
 Register at most ten exact origins (`https://host[:port]`, without credentials, query, fragment, wildcard or
 path other than `/`). HTTP is allowed only for `localhost` and `127.0.0.1`. The API normalizes hostname case,
-default ports and trailing slash. Origin management requires an API key or user session and the Embed feature.
+default ports and trailing slash. Origin management and session minting require an API key or user session and the Embed feature;
+third-party OAuth cannot perform either operation. Embedded verification supports Email or Whatsapp.
 
 Create the assignment/template/envelope signer with `embedded=true`, then mint a session each time the signer
 opens the page. Load its URL in an iframe on a registered origin within five minutes. Do not log the URL,
@@ -1083,7 +1095,7 @@ workspace credentials, including across redirects. Embedded signers still need t
 
 ### Signer access and certified copies
 
-Before reading `/sign` for a digital-certificate signer, confirm their data and terms with
+Before reading `/sign` or signing, confirm signer data and terms with
 `confirmSignerData(..., new ConfirmSignerDataPayload().setHasAcceptedTerms(true))`. The current confirmation
 fields are `email`, `whatsapp_phone_number`, and `has_accepted_terms`. Successful confirmation and OTP
 verification return `data: []`, represented by Java null; legacy object responses remain readable.
@@ -1103,7 +1115,7 @@ use the delivered token for a certified/PAdES copy. Copy-receiver download token
 
 ### Notification policies and webhook tests
 
-Usage, personal email/push preferences, workspace notification policies and embed-origin administration are
+Usage, personal email/push preferences, workspace notification policies, watchers, embed origins and embed-session creation are
 unavailable to third-party OAuth applications regardless of scopes. Only workspace owners update the policy.
 The policy's event map contains the thirteen email preference keys above plus `SignerViewed`, `SignerSigned`
 and `SignerIdentityReviewRequired`. False suppresses an event on all channels for the workspace, except
@@ -1117,3 +1129,115 @@ attempt outcome; the endpoint has ten seconds to answer. Tests are limited to te
 The event has null `payload`/`origin`, names the endpoint in `subject`/`object`, carries no secret, and cannot be
 subscribed to. OAuth requires `webhooks:write`. Secret rotation with `keep_previous=true` returns the new
 secret and a 24-hour previous-secret expiration. Store the new secret immediately; rotation is never retried.
+
+## Scheduled sends, watchers and delivery history
+
+These ten operations are published on staging. Production availability depends on deployment; an HTTP 404
+router response means that operation is not installed there. Existing immediate-send methods remain available.
+Account-scoped overloads accept an optional account ID and otherwise use the configured workspace.
+
+| Operation | SDK method | Request | Return | Statuses |
+|---|---|---|---|---|
+| **POST** `/documents/{documentId}/scheduled-sends` | `assignments.schedule(documentId, payload, sendAt)` | Assignment create plus `send_at` | `ScheduledSend` | 200, 400, 401, 403, 404, 500 |
+| **POST** `/accounts/{accountId}/scheduled-sends` | `envelopes.schedule(payload, sendAt[, accountId])` | Envelope create plus `send_at`; no idempotency key | `ScheduledSend` | 200, 400, 401, 403, 404, 500 |
+| **GET** `/accounts/{accountId}/scheduled-sends` | `scheduledSends.list([params][, accountId])` | Optional `document_id`, `page`, `per-page` | `PaginatedResult<ScheduledSend>` | 200, 400, 401, 403, 404, 500 |
+| **PUT** `/accounts/{accountId}/scheduled-sends/{scheduledSendId}/cancel` | `scheduledSends.cancel(id[, accountId])` | Empty JSON object | `ScheduledSend` | 200, 401, 403, 404, 409, 500 |
+| **PUT** `/accounts/{accountId}/scheduled-sends/{scheduledSendId}/send` | `scheduledSends.sendNow(id[, accountId])` | Empty JSON object | `ScheduledSend` | 200, 400, 401, 403, 404, 409, 500 |
+| **GET** `/documents/{documentId}/signer-capacities` | `assignments.signerCapacities(documentId)` | — | `List<SignerCapacity>` | 200, 401, 403, 404, 500 |
+| **GET** `/documents/{documentId}/watchers` | `documents.listWatchers(documentId)` | — | `List<Signer>` | 200, 401, 403, 404, 500 |
+| **PUT** `/documents/{documentId}/watchers` | `documents.setWatchers(documentId, ids)` | `{ "watcher_ids": ["contact-id"] }`; empty list clears | `List<Signer>` | 200, 400, 401, 403, 404, 500 |
+| **GET** `/documents/{documentId}/notification-history` | `documents.notificationHistory(documentId)` | — | `List<SignerNotificationHistory>` | 200, 401, 403, 404, 500 |
+| **POST** `/accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/estimate-resend-cost` | `envelopes.estimateResendCost(envelopeId, signerId[, accountId])` | Empty JSON object | `ResendCostEstimate` | 200, 401, 403, 404, 500 |
+
+### Scheduling
+
+`sendAt` is an ISO 8601 string with timezone and whole seconds, for example `2027-01-01T12:00:00Z`.
+Use `OffsetDateTime.now(ZoneOffset.UTC).withNano(0).plusDays(1).toString()` for a date relative to now.
+The API also accepts Unix seconds as text. Send time must be between one hour and ninety days in the future;
+a supplied assignment or envelope-document expiration must be at least two hours after it.
+Scheduling uses the complete assignment/envelope create payload catalog above, including credit ceilings.
+It checks request shape, workspace contacts and features now, but sends nothing and charges nothing.
+The document remains unchanged and may still be sent directly; that makes its queued send fail later.
+Only one pending/processing scheduled send may include a given document.
+
+The server checks due jobs every five minutes and revalidates the original member's permissions, contacts,
+features, balance and credit ceiling when sending. Automatic failure stores `failure_reason` and emails the
+scheduling member, or active owners if that member left. No other member impersonates the departed sender.
+`sendNow` executes immediately; a refusal leaves the send pending, without a failure email. Only pending jobs
+can be cancelled or sent; other states return 409. Scheduling has no idempotency-key support and the SDK
+never retries these mutations. List returns all statuses, newest first, with header pagination (20 per page
+by default). OAuth needs `documents:write` for all five scheduling operations, including listing.
+
+Complete unwrapped `ScheduledSend` response:
+
+```json
+{
+  "resource": "scheduled_send",
+  "id": "scheduled-id",
+  "type": "assignment",
+  "document_ids": ["document-id"],
+  "status": "pending",
+  "send_at": "2027-01-01T12:00:00Z",
+  "assignment_id": null,
+  "envelope_id": null,
+  "failure_reason": null,
+  "created_at": "2026-12-31T12:00:00Z",
+  "processed_at": null
+}
+```
+
+`type` is `assignment` or `envelope`; `status` is `pending`, `processing`, `sent`, `cancelled` or `failed`.
+A successful send fills `assignment_id` or `envelope_id`; processing time and failure reason are nullable.
+The same model is returned by scheduling, cancellation, immediate send and each list item.
+
+### Signing capacity and watchers
+
+`SignerRef.setSignAs(value)` supplies assignment creation/estimation's optional `sign_as` certificate label.
+Omitted/null means `Sign`; it does not alter verification or signing permissions. Accepted labels are
+`Sign`, `Approve`, `Acknowledge`, `Party`, `Witness`, `Intervening`, `Receipt`, `IssuerEndorserGuarantor`,
+`IssuerEndorserGuarantorSurety`, `Surety`, `PartySurety`, `JointDebtor`, `PartyJointDebtor`, `ContractingParty`,
+`ContractedParty`, `Landlord`, `Tenant`, `Buyer`, `Seller`, `AttorneyInFact`, `LegalRepresentative`, `Employer`,
+and `Employee`. This property belongs to assignment requests; envelope and template requests do not define it.
+`signerCapacities` returns `[ { "signer_id": "signer-id", "sign_as": "Witness" } ]` in assignment signer order,
+or an empty list before sending. It requires `documents:read` for OAuth.
+
+Watchers are up to ten workspace contacts with email addresses. Both watcher routes require an API key or
+user session, not third-party OAuth. Setting replaces the entire list; an empty list clears it. Changes are
+allowed before sending and until the document ends. Returned contacts use the complete `Signer` schema above,
+in supplied order, omitting deleted contacts. Watchers receive one queued email on decline, expiry or completion,
+containing the document/sender names and declining signer when relevant, without any document link or file.
+Workspace notification preferences do not suppress watcher email. A signer also listed as a watcher receives both.
+
+### Delivery history and envelope reminders
+
+`notificationHistory` requires `documents:read` for OAuth, preserves assignment signer order, and returns an
+empty list before sending. Its complete unwrapped response is:
+
+```json
+[
+  {
+    "signer_id": "signer-id",
+    "notification_history": [
+      {
+        "event": "signature_request",
+        "status": "opened",
+        "error_code": null,
+        "error_message": null,
+        "sent_at": "2027-01-01T12:00:00Z",
+        "failed_at": null,
+        "delivered_at": "2027-01-01T12:00:05Z",
+        "opened_at": "2027-01-01T12:05:00Z"
+      }
+    ]
+  }
+]
+```
+
+`SignerNotificationHistory` contains `signerId()` and `notificationHistory()`; each entry is an
+`AssignmentSignerNotification`. Status is `sent`, `delivered`, `opened` or `failed`. Delivery/open times are
+nullable; email tracks first delivery/open/click and WhatsApp uses its last delivery/read report.
+An open timestamp is a hint, not proof of human reading: scanners can open messages and privacy settings can
+hide opens. Envelope reminder estimates return the complete `ResendCostEstimate` payload catalog above.
+They send and charge nothing, price one message per channel for the whole envelope, and do not promise that
+an immediate resend will be accepted. Closed envelopes return 409 on resend; completed signers and frequency
+limits can return 400.

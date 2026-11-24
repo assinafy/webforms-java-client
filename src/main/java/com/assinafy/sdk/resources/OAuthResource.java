@@ -133,12 +133,7 @@ public final class OAuthResource extends BaseResource {
         if (scopes.stream().anyMatch(scope -> scope == null || !scope.matches("[\\x21\\x23-\\x5B\\x5D-\\x7E]+"))) {
             throw new ValidationException("Each scope must be a non-empty OAuth scope token");
         }
-        String resource = apiOrigin();
-        if (request.getResource() != null && !request.getResource().isBlank()
-                && !resource.equals(request.getResource())) {
-            throw new ValidationException("Resource must be " + resource
-                    + ", the value the code exchange sends; any other value fails with invalid_target");
-        }
+        String resource = resourceIndicator(request.getResource());
 
         String endpoint = request.getAuthorizationEndpoint() != null
                 && !request.getAuthorizationEndpoint().isBlank()
@@ -149,6 +144,11 @@ public final class OAuthResource extends BaseResource {
             parsed = HttpUrl.get(endpoint);
         } catch (IllegalArgumentException e) {
             throw new ValidationException("Authorization endpoint must be a valid URL", e);
+        }
+        if (!parsed.isHttps() || !parsed.username().isEmpty() || !parsed.password().isEmpty()
+                || parsed.fragment() != null || parsed.query() != null) {
+            throw new ValidationException(
+                    "Authorization endpoint must use HTTPS without user information, a query, or a fragment");
         }
 
         HttpUrl.Builder builder = parsed.newBuilder()
@@ -180,6 +180,22 @@ public final class OAuthResource extends BaseResource {
      */
     public OAuthTokens exchangeAuthorizationCode(String clientId, String clientSecret, String code,
             String redirectUri, String codeVerifier) {
+        return exchangeAuthorizationCode(clientId, clientSecret, code, redirectUri, codeVerifier, null);
+    }
+
+    /**
+     * {@code POST /oauth/token} with an explicit canonical resource identifier from protected-resource metadata.
+     * Use this overload when the API is reached through an alias whose origin differs from that identifier.
+     * @param clientId required application identifier
+     * @param clientSecret confidential application secret, or null for a public application
+     * @param code single-use authorization code
+     * @param redirectUri exact HTTPS callback sent during authorization
+     * @param codeVerifier PKCE verifier matching the authorization challenge
+     * @param resource resource sent during authorization, or null for the client's API origin
+     * @return issued token set
+     */
+    public OAuthTokens exchangeAuthorizationCode(String clientId, String clientSecret, String code,
+            String redirectUri, String codeVerifier, String resource) {
         requireValue(clientId, "Client ID");
         requireValue(code, "Authorization code");
         requireRedirectUri(redirectUri);
@@ -192,7 +208,7 @@ public final class OAuthResource extends BaseResource {
                 .add("code_verifier", codeVerifier)
                 .add("client_id", clientId);
         addIfPresent(body, "client_secret", clientSecret);
-        body.add("resource", apiOrigin());
+        body.add("resource", resourceIndicator(resource));
         return httpPost("/oauth/token", body.build(), OAuthTokens.class);
     }
 
@@ -309,6 +325,13 @@ public final class OAuthResource extends BaseResource {
     private String apiOrigin() {
         String origin = HttpUrl.get(baseUrl).newBuilder().encodedPath("/").build().toString();
         return origin.endsWith("/") ? origin.substring(0, origin.length() - 1) : origin;
+    }
+
+    private String resourceIndicator(String resource) {
+        if (resource == null || resource.isBlank()) return apiOrigin();
+        // Keep loopback origins usable by local mock servers, with the same URL rules as the transport.
+        normalizeBaseUrl(resource);
+        return resource;
     }
 
     private static String randomToken(int byteCount) {

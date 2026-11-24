@@ -1,7 +1,7 @@
 # Examples
 
 Worked end-to-end examples for the SDK. The [API reference](API_REFERENCE.md) contains the complete
-147-operation matrix and centralized request/response payload definitions.
+157-operation production/staging matrix and centralized request/response payload definitions.
 
 ## Response envelope
 
@@ -1241,22 +1241,16 @@ The `createFromTemplate` request body:
 ## Signer Self-Service (authorised via `signer-access-code`)
 
 ```java
-// GET /sign — the signer-facing document + assignment view
-DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
-Signer current = signingView.getCurrentSigner();   // who the access code resolved to
-
 Signer self = client.signerSelf.getSelf(signerAccessCode);            // GET /signers/self
 boolean canReuse = Boolean.TRUE.equals(self.getSignatureReusable());  // is_signature_reusable
-// The access code is sent as the ?signer-access-code query parameter for these two calls:
-AcceptTermsResponse terms = client.signerSelf.acceptTerms(signerAccessCode); // may be null when data is absent
-VerifyEmailResponse verified = client.signerSelf.verifyEmail(                // may be null when data is absent
-    "123456", signerAccessCode);
-
 // PUT /documents/{id}/signers/confirm-data — current success data: [], represented by null
 Signer confirmed = client.signerSelf.confirmSignerData(documentId, signerAccessCode,
     new ConfirmSignerDataPayload()
         .setEmail("signer@example.com").setHasAcceptedTerms(true));
 // Request: { "email": "signer@example.com", "has_accepted_terms": true }
+VerifyEmailResponse verified = client.signerSelf.verifyEmail(codeEnteredBySigner, signerAccessCode);
+DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
+Signer current = signingView.getCurrentSigner();
 
 // POST /signature — documented PNG upload; the SDK also detects JPEG bytes.
 client.signerSelf.uploadSignature(signerAccessCode, signatureBytes, "signature");
@@ -1559,7 +1553,7 @@ full push response contains:
 
 ## Signer confirmation, closed access, and certified copies
 
-For certificate signers, confirmation and explicit terms acceptance must precede `getSign`. Email/WhatsApp
+Confirmation and explicit terms acceptance must precede `getSign` and signing. Email/WhatsApp
 verification uses the real code entered by the signer; never manufacture codes for live tests.
 
 ```java
@@ -1615,3 +1609,121 @@ During the 24-hour overlap, deliveries contain signatures for both keys, so swit
 before `previousSecretExpiresAt()`. OAuth apps may rotate and test with `webhooks:write`, but cannot retrieve
 an existing secret. Test delivery works for paused/inactive endpoints without lifting the pause; it carries
 null payload/origin and no secret. Inspect the attempt's delivery result before treating the receiver as ready.
+
+## Scheduled sends and observers (staging)
+
+Scheduling stores the complete create request without sending now. Use whole-second, timezone-qualified
+`send_at` between one hour and ninety days from now; expiration must be at least two hours after that.
+The server sends due jobs within its five-minute processing interval. These routes require `documents:write`
+for OAuth, including listing. See the [complete schemas](API_REFERENCE.md#scheduled-sends-watchers-and-delivery-history).
+
+```java
+String sendAt = OffsetDateTime.now(ZoneOffset.UTC).withNano(0).plusDays(1).toString();
+CreateAssignmentPayload request = new CreateAssignmentPayload().setMethod("virtual")
+    .setSigners(List.of(SignerRef.of(signerId).setSignAs("Witness")
+        .setVerificationMethod("Email").setNotificationMethods(List.of("Email"))))
+    .setMaxTotalCredits(new BigDecimal("1.25"));
+ScheduledSend queued = client.assignments.schedule(documentId, request, sendAt);
+PaginatedResult<ScheduledSend> page = client.scheduledSends.list(Map.of("document_id", documentId));
+ScheduledSend cancelled = client.scheduledSends.cancel(queued.id());
+// To send another pending job now:
+ScheduledSend replacement = client.assignments.schedule(documentId, request, sendAt);
+ScheduledSend sent = client.scheduledSends.sendNow(replacement.id());
+String assignmentId = sent.assignmentId();
+List<SignerCapacity> capacities = client.assignments.signerCapacities(documentId);
+```
+
+Assignment schedule request and response (`send_at` uses a future date chosen by the caller):
+
+```json
+{
+  "method": "virtual",
+  "signers": [{"id":"signer-id","sign_as":"Witness","verification_method":"Email","notification_methods":["Email"]}],
+  "max_total_credits": 1.25,
+  "send_at": "2027-01-01T12:00:00Z"
+}
+```
+
+```json
+{
+  "status": 200, "message": "", "data": {
+    "resource": "scheduled_send", "id": "job-id", "type": "assignment",
+    "document_ids": ["document-id"], "status": "pending", "send_at": "2027-01-01T12:00:00Z",
+    "assignment_id": null, "envelope_id": null, "failure_reason": null,
+    "created_at": "2026-12-31T12:00:00Z", "processed_at": null
+  }
+}
+```
+
+Cancellation and immediate send each send `{}` and return the same full model: status becomes `cancelled`
+or `sent`, respectively; successful send fills `assignment_id` or `envelope_id` and `processed_at`.
+A refused immediate send preserves `pending`; cancelled, processing, sent and failed jobs return 409.
+List returns the same objects in `data: [...]`, with `X-Pagination-*` headers. Capacities returns
+`data: [{"signer_id":"signer-id","sign_as":"Witness"}]`.
+
+An envelope schedule uses a different ready document and the same contact:
+
+```java
+CreateEnvelopePayload envelope = new CreateEnvelopePayload().setName("Agreement package")
+    .setSigners(List.of(SignerRef.of(signerId).setVerificationMethod("Email")
+        .setNotificationMethods(List.of("Email"))))
+    .setDocuments(List.of(new EnvelopeDocumentPayload().setId(otherDocumentId).setMethod("virtual")
+        .setSignerIds(List.of(signerId))))
+    .setMaxTotalCredits(new BigDecimal("2.50"));
+ScheduledSend envelopeJob = client.envelopes.schedule(envelope, sendAt);
+ScheduledSend envelopeSent = client.scheduledSends.sendNow(envelopeJob.id());
+ResendCostEstimate reminder = client.envelopes.estimateResendCost(envelopeSent.envelopeId(), signerId);
+```
+
+```json
+{
+  "name": "Agreement package",
+  "signers": [{"id":"signer-id","verification_method":"Email","notification_methods":["Email"]}],
+  "documents": [{"id":"other-document-id","method":"virtual","signer_ids":["signer-id"]}],
+  "max_total_credits": 2.50,
+  "send_at": "2027-01-01T12:00:00Z"
+}
+```
+
+The schedule response uses `type: "envelope"` and the envelope's `document_ids`; a successful send fills
+`envelope_id`. Scheduling does not read `Idempotency-Key`. Reminder estimates send `{}` and use the
+[resend estimate payload](API_REFERENCE.md#response-payload-catalog), sending no notification.
+
+Watchers need API-key/user-session authentication and existing email contacts. Configure them before the
+document ends. They receive only its terminal status, without a signing link or file:
+
+```java
+List<Signer> watchers = client.documents.setWatchers(documentId, List.of(watcherId));
+watchers = client.documents.listWatchers(documentId);
+client.documents.setWatchers(documentId, List.of()); // clear
+List<SignerNotificationHistory> histories = client.documents.notificationHistory(documentId);
+```
+
+Watchers request `{"watcher_ids":["watcher-id"]}` and return `data: [Signer]`, using the complete contact
+payload in [Signers](#signers); clearing returns `data: []`. Notification history returns signer IDs and
+complete delivery entries, including nullable `delivered_at` and `opened_at`, as shown in the
+[delivery history schema](API_REFERENCE.md#delivery-history-and-envelope-reminders). Opening is a delivery hint,
+not evidence of the signer reading or signing the document.
+
+## OAuth environment resource identifiers
+
+Use metadata from your configured API environment and the authorization endpoint from its trusted issuer's
+discovery document. Staging's canonical resource may differ from the hostname used for API requests.
+Persist the chosen resource alongside state and verifier so the callback uses the exact same value.
+
+```java
+OAuthProtectedResource metadata = client.oauth.protectedResourceMetadata();
+String resource = metadata.getResource();
+String authorizeUrl = client.oauth.authorizationUrl(new OAuthAuthorizationRequest(clientId, redirectUri)
+    .setAuthorizationEndpoint(trustedAuthorizationEndpoint)
+    .setResource(resource).setScopes(List.of("documents:read", "documents:write", "offline_access"))
+    .setState(state).setCodeVerifier(verifier));
+// After validating callback state and issuer:
+OAuthTokens tokens = client.oauth.exchangeAuthorizationCode(
+    clientId, clientSecret, code, redirectUri, verifier, resource);
+```
+
+The authorization URL and token form both send `resource=<canonical-resource>`. Production defaults remain
+`https://api.assinafy.com.br`. Staging publishes resource `https://api.elated-rosettes.stage.assinafy.com.br`
+and issuer `https://auth.frosty-treacle.stage.assinafy.com.br`; use that issuer for callback validation.
+The token response and refresh/revocation rules remain those in the OAuth section above.

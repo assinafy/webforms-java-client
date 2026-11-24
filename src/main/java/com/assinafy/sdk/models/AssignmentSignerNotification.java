@@ -12,7 +12,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * <p>Documented supported {@link #getEvent() event} values include {@code signature_request},
  * {@code document_about_to_expire}, {@code document_expired}, {@code document_canceled},
  * {@code document_declined}, {@code signed_delivery}, and {@code unknown} for unmapped provider data.
- * {@link #getStatus() status} is {@code sent} on success or {@code failed} on a delivery problem.</p>
+ * {@link #getStatus() status} is {@code sent}, {@code delivered}, {@code opened}, or {@code failed}.</p>
  *
  * @see <a href="https://api.assinafy.com.br/v1/docs">Assignment Signer Notification Object</a>
  */
@@ -37,6 +37,36 @@ public final class AssignmentSignerNotification {
     @JsonProperty("failed_at")
     private String failedAt;
 
+    @JsonProperty("delivered_at")
+    private String deliveredAt;
+
+    @JsonProperty("opened_at")
+    private String openedAt;
+
+    /**
+     * Returns the delivery time exposed by the document notification-history endpoint.
+     * @return ISO 8601 delivery time, or null
+     */
+    public String getDeliveredAt() { return deliveredAt; }
+
+    /**
+     * Sets the delivery time.
+     * @param deliveredAt ISO 8601 delivery time, or null
+     */
+    public void setDeliveredAt(String deliveredAt) { this.deliveredAt = deliveredAt; }
+
+    /**
+     * Returns the first email open/click or last reported WhatsApp read time; not proof of reading.
+     * @return ISO 8601 opening time, or null
+     */
+    public String getOpenedAt() { return openedAt; }
+
+    /**
+     * Sets the opening time.
+     * @param openedAt ISO 8601 opening time, or null
+     */
+    public void setOpenedAt(String openedAt) { this.openedAt = openedAt; }
+
     /**
      * Returns normalized API event value for the tracked notification record.
      *
@@ -52,9 +82,9 @@ public final class AssignmentSignerNotification {
     public void setEvent(String event) { this.event = event; }
 
     /**
-     * Returns {@code failed} on a delivery problem, otherwise {@code sent}.
+     * Returns the delivery status.
      *
-     * @return {@code failed} on a delivery problem, otherwise {@code sent}
+     * @return {@code sent}, {@code delivered}, {@code opened}, or {@code failed}
      */
     public String getStatus() { return status; }
 

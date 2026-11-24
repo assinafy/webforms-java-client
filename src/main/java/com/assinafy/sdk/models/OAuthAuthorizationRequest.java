@@ -179,8 +179,9 @@ public final class OAuthAuthorizationRequest {
     /**
      * Sets the RFC 8707 resource indicator naming the API the token is for. It defaults to the origin of the
      * client's base URL ({@code https://api.assinafy.com.br} in production), which is also the value the code
-     * exchange sends. Any other value is rejected, because the token endpoint answers a {@code resource} that
-     * differs from the authorized one with {@code invalid_target}.
+     * exchange sends by default. If protected-resource metadata publishes a different canonical identifier,
+     * set it here and pass the same value to the six-argument code-exchange overload. A different value at
+     * exchange time can fail with {@code invalid_target}.
      *
      * @param resource resource indicator, or {@code null} for the client's API origin
      * @return this request

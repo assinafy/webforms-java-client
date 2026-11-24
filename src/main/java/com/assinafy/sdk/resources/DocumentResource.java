@@ -12,6 +12,7 @@ import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.SendTokenResult;
 import com.assinafy.sdk.models.SigningProgress;
 import com.assinafy.sdk.models.Signer;
+import com.assinafy.sdk.models.SignerNotificationHistory;
 import com.assinafy.sdk.models.Tag;
 import com.assinafy.sdk.models.TemplateSigner;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -257,6 +258,44 @@ public final class DocumentResource extends BaseResource {
      */
     public DocumentDetails get(String documentId) {
         return details(documentId);
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/watchers}. API key or user session only.
+     * @param documentId document identifier
+     * @return watcher contacts in stored order, never null
+     */
+    public List<Signer> listWatchers(String documentId) {
+        return orEmpty(httpGet("/documents/" + requireId(documentId, "Document ID") + "/watchers",
+                new TypeReference<List<Signer>>() {}));
+    }
+
+    /**
+     * {@code PUT /documents/{documentId}/watchers}. Replaces watchers until the document ends.
+     * Each contact needs an email address. Watchers receive a final status email without a link or file.
+     * API key or user session only; an empty list removes every watcher.
+     * @param documentId document identifier
+     * @param watcherIds up to ten workspace contact identifiers
+     * @return saved watcher contacts, never null
+     */
+    public List<Signer> setWatchers(String documentId, List<String> watcherIds) {
+        String id = requireId(documentId, "Document ID");
+        if (watcherIds == null || watcherIds.size() > 10) {
+            throw new ValidationException("Watcher IDs must be a list of at most ten contacts");
+        }
+        for (String watcherId : watcherIds) requireId(watcherId, "Watcher ID");
+        return orEmpty(httpPut("/documents/" + id + "/watchers", Map.of("watcher_ids", watcherIds),
+                new TypeReference<List<Signer>>() {}, Map.of()));
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/notification-history}. Requires documents:read for OAuth.
+     * @param documentId document identifier
+     * @return each signer's tracked notifications, including delivered_at and opened_at, never null
+     */
+    public List<SignerNotificationHistory> notificationHistory(String documentId) {
+        return orEmpty(httpGet("/documents/" + requireId(documentId, "Document ID") + "/notification-history",
+                new TypeReference<List<SignerNotificationHistory>>() {}));
     }
 
     /**

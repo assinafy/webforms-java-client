@@ -2,7 +2,7 @@
 
 *[Leia em português](README.md) · English*
 
-Java 25 client for all 147 operations in the [Assinafy API](https://api.assinafy.com.br/v1/docs). The
+Java 25 client for all 157 production/staging operations in the [Assinafy API](https://api.assinafy.com.br/v1/docs). The
 `webforms` name is historical; new integrations should also consider `com.assinafy:assinafy-sdk`.
 
 Detailed operation, request, and response documentation lives in [API_REFERENCE.md](docs/API_REFERENCE.md),
@@ -17,12 +17,12 @@ The SDK requires Java 25+, Maven 3.9.16+ when using Maven, and TLS 1.2+.
 <dependency>
     <groupId>com.assinafy</groupId>
     <artifactId>webforms-java-client-sdk</artifactId>
-    <version>2.10.0</version>
+    <version>2.11.0</version>
 </dependency>
 ```
 
 ```groovy
-implementation 'com.assinafy:webforms-java-client-sdk:2.10.0'
+implementation 'com.assinafy:webforms-java-client-sdk:2.11.0'
 ```
 
 Maven Central needs no repository credentials. GitHub Packages and Gradle Kotlin DSL are covered in the
@@ -94,11 +94,10 @@ workspace approves or rejects the private evidence. Estimate first because plan 
 Signer-facing calls use only `signer-access-code`; the client deliberately withholds workspace credentials.
 
 ```java
-DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
-client.signerSelf.acceptTerms(signerAccessCode);
-client.signerSelf.verifyEmail("123456", signerAccessCode); // Whatsapp uses verifyWhatsapp
 client.signerSelf.confirmSignerData(document.getId(), signerAccessCode,
     new ConfirmSignerDataPayload().setEmail("signer@example.com").setHasAcceptedTerms(true));
+client.signerSelf.verifyEmail(codeEnteredBySigner, signerAccessCode);
+DocumentDetails signingView = client.signerSelf.getSign(signerAccessCode);
 
 // Only for IdDocumentFaceMatchBasic, after the signer explicitly consents:
 if (biometricRequired && signerConsented) {
@@ -111,7 +110,7 @@ client.signerSelf.uploadSignature(signerAccessCode, signaturePng, "signature", t
 // Submit the non-empty AssignmentSignEntry values represented by signingView.getAssignment().getItems().
 ```
 
-For certificate signers, confirm data and accept terms before `getSign`.
+Confirm data and terms before `getSign` and signing; collect the verification code from the signer.
 Complete ordinary assignments with `assignments.signEntries`; every entry carries the returned item, field, and
 page IDs plus its string value. Certificate signing is completed in the browser, not by fabricating certificate
 material in the SDK. Poll status or consume signed webhooks idempotently, then download the final artifact.
@@ -128,8 +127,12 @@ byte[] qualifiedPdf = client.documents.download(document.getId(), "pades"); // D
 set `max_total_credits`, and use a stable idempotency key for recovery. Each document keeps its own certificate.
 For signing inside your app, register exact HTTPS origins through `client.embed`, set `embedded=true` on the
 signer, and mint a fresh five-minute, single-use iframe session. Never log its URL or exchange the token yourself.
-After signer access closes, `requestCertifiedCopy` delivers a new link to the original signing contact.
+Origin registration and session creation require an API key or user session. After signer access closes,
+`requestCertifiedCopy` delivers a new link to the original signing contact.
 See [complete payloads and flows](docs/EXAMPLES.md#envelopes-and-embedded-signing).
+
+On staging, schedule assignments/envelopes with `schedule`, then manage them through `client.scheduledSends`.
+Staging also supports watchers, signer capacities and delivery history; see the [payload catalog](docs/API_REFERENCE.md#scheduled-sends-watchers-and-delivery-history).
 
 ## Signed webhooks
 

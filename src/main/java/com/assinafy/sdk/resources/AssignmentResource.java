@@ -9,6 +9,8 @@ import com.assinafy.sdk.models.PaginatedResult;
 import com.assinafy.sdk.models.ResendCostEstimate;
 import com.assinafy.sdk.models.ResendResult;
 import com.assinafy.sdk.models.SignerRef;
+import com.assinafy.sdk.models.ScheduledSend;
+import com.assinafy.sdk.models.SignerCapacity;
 import com.assinafy.sdk.models.SignerIdentityReview;
 import com.assinafy.sdk.models.WhatsappNotification;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -86,9 +88,10 @@ public final class AssignmentResource extends BaseResource {
      * {@code POST /documents/{documentId}/assignments} — request signatures. Request body:
      * {@code {"method": "virtual"|"collect", "signers": [{"id", "verification_method":
      * "Email"|"Whatsapp"|"DigitalCertificate"|"IdDocumentFaceMatchBasic",
-     * "notification_methods": ["Email"|"Whatsapp"], "step"}],
-     * "entries", "message", "expires_at", "copy_receivers"}}; {@code method} and each signer {@code id} are
-     * required, and {@code collect} also requires {@code entries}. Response {@code data}: the {@link Assignment}.
+     * "notification_methods": ["Email"|"Whatsapp"], "step", "sign_as", "embedded"}],
+     * "entries", "message", "expires_at", "copy_receivers", "max_total_credits"}}. Each signer {@code id} is
+     * required; {@code method} defaults to virtual and {@code collect} also requires {@code entries}.
+     * Response {@code data}: the {@link Assignment}.
      *
      * @param documentId required document identifier
      * @param payload required virtual or collect assignment body
@@ -103,9 +106,35 @@ public final class AssignmentResource extends BaseResource {
     }
 
     /**
+     * {@code POST /documents/{documentId}/scheduled-sends}. Stores an assignment for later delivery.
+     * Nothing is sent or charged now. Scheduling requires documents:write for OAuth.
+     * @param documentId document identifier
+     * @param payload assignment values, with expiration at least two hours after sendAt if supplied
+     * @param sendAt whole-second ISO 8601 timestamp with offset, one hour to 90 days ahead
+     * @return pending scheduled send
+     */
+    public ScheduledSend schedule(String documentId, CreateAssignmentPayload payload, String sendAt) {
+        requireValue(sendAt, "Send time");
+        Map<String, Object> body = buildPayload(payload, false);
+        body.put("send_at", sendAt);
+        return httpPost("/documents/" + requireId(documentId, "Document ID") + "/scheduled-sends",
+                body, ScheduledSend.class);
+    }
+
+    /**
+     * {@code GET /documents/{documentId}/signer-capacities}. Requires documents:read for OAuth.
+     * @param documentId document identifier
+     * @return sender-declared capacities in assignment signer order, never null
+     */
+    public List<SignerCapacity> signerCapacities(String documentId) {
+        return orEmpty(httpGet("/documents/" + requireId(documentId, "Document ID") + "/signer-capacities",
+                new TypeReference<List<SignerCapacity>>() {}));
+    }
+
+    /**
      * {@code POST /documents/{documentId}/assignments/estimate-cost} — estimate the credit cost of an
      * assignment without creating it. Request body: {@code {"method", "signers": [{"verification_method",
-     * "notification_methods"}], "entries"}} — signer IDs, steps, message, expiration, and copy receivers are
+     * "notification_methods", "sign_as"}], "entries"}} — signer IDs, steps, message, expiration, and copy receivers are
      * not part of an estimate and are not sent. Inspect {@link CostEstimate#getHasSufficientResources()} and
      * {@link CostEstimate#getBlockingReason()} before creating.
      *
@@ -384,9 +413,8 @@ public final class AssignmentResource extends BaseResource {
     }
 
     /**
-     * Builds one wire signer. Creation sends {@code {id, verification_method, notification_methods, step}} and
-     * requires {@code id}; an estimate prices channels only, so it sends {@code {verification_method,
-     * notification_methods}}.
+     * Builds one wire signer. Creation includes identity, channels, capacity, embedding and step;
+     * estimates include only {@code verification_method}, {@code notification_methods} and {@code sign_as}.
      */
     private static Map<String, Object> normaliseSignerRef(SignerRef ref, boolean estimate) {
         if (ref == null) {
@@ -403,6 +431,7 @@ public final class AssignmentResource extends BaseResource {
         if (ref.getVerificationMethod() != null) {
             result.put("verification_method", ref.getVerificationMethod());
         }
+        if (ref.getSignAs() != null) result.put("sign_as", ref.getSignAs());
         if (ref.getNotificationMethods() != null && !ref.getNotificationMethods().isEmpty()) {
             result.put("notification_methods", ref.getNotificationMethods());
         }

@@ -19,6 +19,22 @@ public final class SignerRef {
 
     private Integer step;
 
+    @JsonProperty("sign_as")
+    private String signAs;
+
+    /**
+     * Returns the sender-declared signing capacity, such as Witness.
+     * @return capacity, or null for Sign
+     */
+    public String getSignAs() { return signAs; }
+
+    /**
+     * Sets the capacity printed on the certificate; supported by assignment creation and estimates.
+     * @param signAs exact API capacity, or null for Sign
+     * @return this reference
+     */
+    public SignerRef setSignAs(String signAs) { this.signAs = signAs; return this; }
+
     /** Creates an empty signer reference. */
     public SignerRef() {}
 

@@ -41,6 +41,21 @@ public class ApiException extends AssinafyException {
     private String oauthError;
     /** Scope named by an {@code insufficient_scope} challenge, or {@code null}. */
     private String requiredScope;
+    /** Machine-readable API rejection code, or null. */
+    private String code;
+
+    /**
+     * Returns the API's machine-readable rejection code, such as SignerDataUnconfirmed or PlanRestricted.
+     * @return textual response code, or null when absent
+     */
+    public String getCode() { return code; }
+
+    /**
+     * Attaches the API's machine-readable rejection code.
+     * @param code textual response code, or null
+     * @return this exception
+     */
+    public ApiException withCode(String code) { this.code = code; return this; }
 
     /**
      * Creates an API failure with its parsed message and raw response body.
